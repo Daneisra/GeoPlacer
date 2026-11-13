@@ -5,6 +5,7 @@
 import { Router, Request, Response } from 'express';
 import { HTTP_STATUS } from '../config/constants.js';
 import type { Settings } from '../types/index.js';
+import { applySettingsUpdate } from '../config/settings-update.js';
 
 let currentSettings: Settings;
 let saveSettings: () => void;
@@ -29,10 +30,15 @@ router.get('/settings', (_req: Request, res: Response) => {
 });
 
 router.put('/settings', (req: Request, res: Response): void => {
-  const prev = { ...currentSettings };
-  currentSettings = { ...prev, ...req.body };
+  // Validate, then mutate the shared settings object in place so that the
+  // persistence function and the engine context see the same values.
+  const result = applySettingsUpdate(currentSettings, req.body);
+  if (!result.ok) {
+    res.status(HTTP_STATUS.BAD_REQ).json({ error: 'Validation failed', issues: result.issues });
+    return;
+  }
   saveSettings();
-  res.sendStatus(HTTP_STATUS.OK);
+  res.status(HTTP_STATUS.OK).json({ ok: true, changed: result.changed });
 });
 
 export default router;
