@@ -13,21 +13,37 @@ import type { Response, NextFunction } from 'express';
 describe('Validation Schemas', () => {
   describe('userLoginSchema', () => {
     it('should validate valid user login data', () => {
+      // expirationDate comes from chrome.cookies.Cookie.expirationDate:
+      // a number of seconds since the UNIX epoch (may be fractional).
       const validData = {
         cookies: {
           j: 'test-token',
           additional: 'data',
         },
-        expirationDate: '2025-01-01',
+        expirationDate: 1767225600.5,
       };
 
       const result = userLoginSchema.parse(validData);
       expect(result).toEqual(validData);
     });
 
+    it('should accept a session cookie without expirationDate', () => {
+      const validData = { cookies: { j: 'test-token' } };
+      expect(userLoginSchema.parse(validData)).toEqual(validData);
+    });
+
+    it('should reject a string expirationDate', () => {
+      const invalidData = {
+        cookies: { j: 'test-token' },
+        expirationDate: '2025-01-01',
+      };
+
+      expect(() => userLoginSchema.parse(invalidData)).toThrow();
+    });
+
     it('should reject data without cookies', () => {
       const invalidData = {
-        expirationDate: '2025-01-01',
+        expirationDate: 1767225600,
       };
 
       expect(() => userLoginSchema.parse(invalidData)).toThrow();
