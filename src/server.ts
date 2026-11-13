@@ -33,8 +33,17 @@ import overlayRouter from './routes/overlay.js';
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 
 // Import services and utilities
+import { networkInterfaces } from 'node:os';
 import { isWildcardHost } from './config/network.js';
-import { APP_HOST, APP_HOST_RESOLUTION, APP_PRIMARY_PORT, APP_FALLBACK_PORTS, DATA_DIR, USERS_FILE, SETTINGS_FILE, TEMPLATES_PATH, ALLOWED_ORIGINS, RATE_LIMIT_WINDOW_MS, RATE_LIMIT_MAX, MAX_WS_CONNECTIONS, WS_PING_INTERVAL_MS, GRACEFUL_SHUTDOWN_TIMEOUT_MS, KEEP_ALIVE_INTERVAL_MS, MS } from './config/constants.js';
+import {
+  buildAllowedHostnames,
+  compileOriginPatterns,
+  isAllowedOrigin,
+  createLocalAccessMiddleware,
+  createWebSocketVerifier,
+  type LocalAccessPolicy,
+} from './middleware/local-access.js';
+import { APP_HOST, APP_HOST_RESOLUTION, APP_PRIMARY_PORT, APP_FALLBACK_PORTS, DATA_DIR, USERS_FILE, SETTINGS_FILE, TEMPLATES_PATH, ALLOWED_ORIGINS, ALLOWED_HOSTS, RATE_LIMIT_WINDOW_MS, RATE_LIMIT_MAX, MAX_WS_CONNECTIONS, WS_PING_INTERVAL_MS, GRACEFUL_SHUTDOWN_TIMEOUT_MS, KEEP_ALIVE_INTERVAL_MS, MS } from './config/constants.js';
 import { loadSettings } from './config/settings.js';
 import { log, logger, wsLogClients, wsErrorClients } from './utils/logger.js';
 import { loadJSON, saveJSON } from './utils/helpers.js';
@@ -141,25 +150,27 @@ const limiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Local access policy: Host (anti DNS rebinding) and Origin (anti cross-site) checks
+const interfaceAddresses = Object.values(networkInterfaces())
+  .flat()
+  .filter((iface): iface is NonNullable<typeof iface> => Boolean(iface))
+  .map((iface) => iface.address);
+const accessPolicy: LocalAccessPolicy = {
+  allowedHostnames: buildAllowedHostnames(APP_HOST, ALLOWED_HOSTS, interfaceAddresses),
+  originPatterns: compileOriginPatterns(ALLOWED_ORIGINS),
+};
+
+app.use(
+  createLocalAccessMiddleware(accessPolicy, (reason, req) => {
+    logger.warn(`Blocked request (${reason}): ${req.method} ${req.path}`);
+  })
+);
+
 app.use(cors({
+  // Requests with a disallowed Origin are already rejected above; this only
+  // decides which CORS headers allowed origins receive.
   origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps or curl)
-    if (!origin) return callback(null, true);
-
-    // Check against allowed origins
-    const allowed = ALLOWED_ORIGINS.some((allowedOrigin) => {
-      if (allowedOrigin.includes('*')) {
-        const regex = new RegExp(allowedOrigin.replace(/\*/g, '.*'));
-        return regex.test(origin);
-      }
-      return allowedOrigin === origin;
-    });
-
-    if (allowed) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
+    callback(null, !origin || isAllowedOrigin(origin, accessPolicy));
   },
   credentials: true,
 }));
@@ -424,7 +435,12 @@ async function startServer(): Promise<void> {
     }
 
     // WebSocket server
-    const wss = new WebSocketServer({ server });
+    const wss = new WebSocketServer({
+      server,
+      verifyClient: createWebSocketVerifier(accessPolicy, (reason) => {
+        logger.warn(`Blocked WebSocket handshake (${reason})`);
+      }),
+    });
     serverState.wss = wss;
 
     // Set up broadcast function for extension messages

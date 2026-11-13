@@ -23,9 +23,23 @@ export const APP_FALLBACK_PORTS = [
   ...Array.from({ length: 50 }, (_, i) => 3001 + i),
 ];
 
+/**
+ * Extra browser origins allowed to call the API (comma-separated, "*" matches
+ * one label of letters/digits/hyphens). Origins whose host is an allowed host
+ * name (see ALLOWED_HOSTS) are always accepted.
+ */
 export const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map((origin) => origin.trim())
   : ['http://localhost:*', 'http://127.0.0.1:*', 'chrome-extension://*'];
+
+/**
+ * Extra host names the server answers to, besides localhost/127.0.0.1/::1 and
+ * the bind address (comma-separated). Any other Host header is rejected to
+ * prevent DNS rebinding.
+ */
+export const ALLOWED_HOSTS = process.env.ALLOWED_HOSTS
+  ? process.env.ALLOWED_HOSTS.split(',').map((host) => host.trim()).filter(Boolean)
+  : [];
 
 export const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000; // 15 minutes
 export const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX) || 100;
