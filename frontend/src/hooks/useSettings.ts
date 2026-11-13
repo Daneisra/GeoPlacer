@@ -59,7 +59,7 @@ export function useSettings() {
   const saveSettings = useCallback(async () => {
     setSaveStatus('saving');
     try {
-      await axios.post('/settings', formState);
+      await axios.put('/settings', formState);
       setSettings(formState);
       setSaveStatus('success');
       // Reset to idle after 3 seconds

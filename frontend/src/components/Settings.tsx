@@ -50,7 +50,7 @@ export default function Settings() {
 
   const handleSaveSettings = async () => {
     try {
-      await axios.post('/settings', {
+      await axios.put('/settings', {
         openBrowserOnStart,
         drawingDirection,
         drawingOrder,
@@ -116,7 +116,6 @@ export default function Settings() {
                     className="w-full px-3 py-2 bg-input border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring relative z-50"
                   >
                     <option value="linear">Linear</option>
-                    <option value="randomColor">Random Color</option>
                     <option value="color">Color by Color</option>
                   </select>
                 </div>
