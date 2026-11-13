@@ -51,8 +51,10 @@ L'audit de la Phase 0 a établi les points suivants.
 
 - La Phase 1A ne livre aucune fonctionnalité visible côté dessin : elle
   fiabilise la base.
-- Les bugs F4 à F11 restent présents dans le code hérité. Ils sont annotés
-  dans le code et seront éliminés avec le nouveau moteur.
+- Les bugs F4, F5, F6, F7, F8 et F11 restent présents dans le code hérité
+  (F4 est annoté dans `src/routes/templates.ts`). Ils seront éliminés avec le
+  nouveau moteur. F9 (option « Random Color » sans implémentation) a été
+  corrigé en Phase 1A.
 - Architecture cible :
   - `packages/core` : métier, indépendant du service cible ;
   - `packages/simulator` ;

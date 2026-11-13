@@ -24,11 +24,15 @@ Toutes les écritures JSON passent par `writeJsonAtomic()`
 4. renommage du temporaire sur le fichier cible (réessayé si Windows renvoie
    `EPERM`, `EBUSY` ou `EACCES`, par exemple à cause d'un antivirus).
 
-Un arrêt brutal à n'importe quelle étape laisse l'ancienne ou la nouvelle
-version complète, jamais un fichier tronqué. Vérification : 8 arrêts brutaux
-d'un processus écrivain dans les tests, et une expérience comparative de 20
-arrêts sur 20 Mo (écriture directe : 1 fichier corrompu ; écriture
-atomique : 0).
+Un arrêt brutal du processus à n'importe quelle étape laisse l'ancienne ou
+la nouvelle version complète, jamais un fichier tronqué. Vérification : 8
+arrêts brutaux d'un processus écrivain dans les tests, et une expérience
+comparative de 20 arrêts sur 20 Mo (écriture directe : 1 fichier corrompu ;
+écriture atomique : 0).
+
+Ces vérifications portent sur l'arrêt du **processus**. Une coupure
+d'alimentation ou un plantage du système n'a pas été testé : la garantie
+repose alors sur `fsync` et sur le renommage atomique de NTFS.
 
 ## Lecture avec récupération
 
@@ -57,10 +61,18 @@ avertissement.
 - **Récupérer un fichier mis en quarantaine** : le contenu d'origine est
   intact dans `<fichier>.corrupt-<horodatage>`. Il peut être réparé à la
   main puis remis en place, serveur arrêté.
+- **Réinitialiser un fichier** : supprimer `<fichier>.json` ne suffit pas,
+  car le `.bak` est restauré au démarrage suivant. Supprimer aussi
+  `<fichier>.json.bak`, serveur arrêté.
 
 ## Limites connues
 
 - Un seul niveau de sauvegarde (`.bak`) : pas d'historique horodaté.
+- Les cookies en clair sont aussi copiés dans `users.json.bak` et, le cas
+  échéant, dans `users.json.corrupt-*`, qui ne sont jamais nettoyés
+  automatiquement.
+- Aucun verrou d'instance unique : deux serveurs lancés en même temps (le
+  second sur un port de repli, sans avertissement) partageraient `data/`.
 - Les modèles créés via l'API ne sont ni sauvegardés ni rechargés (bug F4/F5
   hérité de `wplacer-dev`, voir `docs/decisions/0001-fork-et-perimetre.md`).
   Ce point sera traité avec le nouveau moteur, qui aura sa propre file de

@@ -49,6 +49,22 @@ Toutes les fonctions de décision sont pures et couvertes par des tests
   `impit`, injections Turnstile et pawtect, proxys) : toujours présent, hors
   périmètre GeoPlacer. Sa suppression fera l'objet de commits séparés et
   justifiés.
+- **Le code hérité reste un client Wplace fonctionnel** (keep-alive horaire
+  des comptes, vérifications de statut). Ne pas ajouter de compte tant que
+  ce code n'est pas retiré.
+- **`GET /sign-request`** (mécanique de signature anti-bot héritée) renvoie
+  le corps d'une requête de placement en attente, qui peut contenir un jeton
+  Turnstile. Route protégée par les contrôles Host/Origin, à retirer avec
+  l'extension.
+- **Routes sans validation de corps** : `/templates/import`,
+  `PUT /template/:id`, ordre des couleurs, overlay, `/bridge`, `/t`. À
+  vérifier en particulier : le décodeur de codes de partage (RLE), dont la
+  sortie peut dépasser la limite d'entrée de 12 Mo.
+- **`.env` est versionné** bien que listé dans `.gitignore`. Tout secret
+  qui y serait ajouté apparaîtrait dans Git. Ne pas y mettre de secret ; le
+  retirer du suivi demandera une étape de copie depuis `.env.example`.
+- **Croissance des journaux** : les requêtes bloquées sont journalisées
+  avant le limiteur de débit, et les fichiers de log n'ont pas de rotation.
 - **Vulnérabilités npm restantes** : aucune haute. `glob` (modérée, via
   `swagger-jsdoc`) n'est utilisé qu'au démarrage sur un motif fixe. Les
   autres touchent l'outillage de développement (Jest, typescript-eslint).

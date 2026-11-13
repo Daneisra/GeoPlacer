@@ -9,7 +9,7 @@ npm run lint            # ESLint backend
 cd frontend; npx eslint .; npm run build
 ```
 
-## Tests backend (fin de Phase 1A : 8 suites, 85 tests)
+## Tests backend (fin de Phase 1A : 8 suites, 86 tests)
 
 | Suite | Objet |
 |---|---|
@@ -19,7 +19,7 @@ cd frontend; npx eslint .; npm run build
 | `local-access.test.ts` | Host, Origin, Sec-Fetch-Site, WebSocket |
 | `redact.test.ts` | Masquage des secrets, `toPublicUser` |
 | `log-redaction.test.ts` | Masquage dans un vrai pipeline Winston |
-| `settings-update.test.ts` | Validation, mise à jour sur place, nettoyage au chargement |
+| `settings-update.test.ts` | Validation, bornes alignées sur chaque contrôle de la page Paramètres, mise à jour sur place, nettoyage au chargement |
 | `json-store.test.ts` | Écriture atomique, quarantaine, restauration, arrêts brutaux réels |
 
 Les tests n'émettent aucune requête vers un service public. Les tests de

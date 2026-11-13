@@ -18,7 +18,7 @@ licence. L'historique Git complet du projet d'origine est conservé.
 - Cookies retirés de `GET /users` ; masquage des secrets dans les logs
   (`src/utils/redact.ts`, `src/utils/log-redaction.ts`).
 - Limite JSON de 12 Mo ; erreurs client 4xx correctement renvoyées.
-- `/settings` : validation, état partagé, sauvegarde réelle
+- `/settings` : validation (bornes alignées sur l'interface), état partagé, sauvegarde réelle
   (`src/config/settings-update.ts`, `src/config/default-settings.ts`) ;
   frontend en `PUT`, option « Random Color » retirée.
 - Écritures atomiques et récupération des fichiers corrompus
