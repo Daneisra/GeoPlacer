@@ -3,10 +3,13 @@
  */
 
 import type { Palette, ColorNames } from '../types/index.js';
+import { resolveBindHost } from './network.js';
 
 // ============ Server Configuration ============
 
-export const APP_HOST = '0.0.0.0';
+/** Bind address: HOST from the environment, 127.0.0.1 by default or when invalid. */
+export const APP_HOST_RESOLUTION = resolveBindHost(process.env.HOST);
+export const APP_HOST = APP_HOST_RESOLUTION.host;
 export const APP_PRIMARY_PORT = Number(process.env.PORT) || 3000;
 export const APP_FALLBACK_PORTS = [
   80,

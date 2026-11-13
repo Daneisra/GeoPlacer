@@ -33,7 +33,8 @@ import overlayRouter from './routes/overlay.js';
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 
 // Import services and utilities
-import { APP_HOST, APP_PRIMARY_PORT, APP_FALLBACK_PORTS, DATA_DIR, USERS_FILE, SETTINGS_FILE, TEMPLATES_PATH, ALLOWED_ORIGINS, RATE_LIMIT_WINDOW_MS, RATE_LIMIT_MAX, MAX_WS_CONNECTIONS, WS_PING_INTERVAL_MS, GRACEFUL_SHUTDOWN_TIMEOUT_MS, KEEP_ALIVE_INTERVAL_MS, MS } from './config/constants.js';
+import { isWildcardHost } from './config/network.js';
+import { APP_HOST, APP_HOST_RESOLUTION, APP_PRIMARY_PORT, APP_FALLBACK_PORTS, DATA_DIR, USERS_FILE, SETTINGS_FILE, TEMPLATES_PATH, ALLOWED_ORIGINS, RATE_LIMIT_WINDOW_MS, RATE_LIMIT_MAX, MAX_WS_CONNECTIONS, WS_PING_INTERVAL_MS, GRACEFUL_SHUTDOWN_TIMEOUT_MS, KEEP_ALIVE_INTERVAL_MS, MS } from './config/constants.js';
 import { loadSettings } from './config/settings.js';
 import { log, logger, wsLogClients, wsErrorClients } from './utils/logger.js';
 import { loadJSON, saveJSON } from './utils/helpers.js';
@@ -379,6 +380,14 @@ async function startServer(): Promise<void> {
     // Validate templates data
     if (!templates || typeof templates !== 'object') {
       throw new Error('Failed to load templates data');
+    }
+
+    // Report how the bind address was resolved
+    if (APP_HOST_RESOLUTION.warning) {
+      logger.warn(APP_HOST_RESOLUTION.warning);
+    }
+    if (isWildcardHost(APP_HOST)) {
+      logger.warn(`HOST=${APP_HOST}: the server is reachable from the local network. Use 127.0.0.1 unless this is intended.`);
     }
 
     // Attempt to bind to available ports
