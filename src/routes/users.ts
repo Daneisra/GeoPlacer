@@ -8,6 +8,7 @@ import { log } from '../utils/logger.js';
 import { HTTP_STATUS } from '../config/constants.js';
 import type { User, Cookies } from '../types/index.js';
 import { validateBody, userLoginSchema } from '../middleware/validation.js';
+import { toPublicUsers } from '../utils/redact.js';
 
 // Global state
 let users: Record<string, User> = {};
@@ -51,8 +52,9 @@ function releaseUserLock(id: string): void {
  *                     type: string
  *                   name:
  *                     type: string
- *                   cookies:
- *                     type: object
+ *                   hasCookies:
+ *                     type: boolean
+ *                     description: Session cookies are stored but never returned
  *                   suspendedUntil:
  *                     type: number
  *       500:
@@ -154,7 +156,8 @@ async function retryWithBackoff<T>(
 }
 
 router.get('/users', (_req: Request, res: Response) => {
-  res.json(users);
+  // Never expose session cookies through the API.
+  res.json(toPublicUsers(users));
 });
 
 router.post('/user', validateBody(userLoginSchema), async (req: Request, res: Response): Promise<void> => {

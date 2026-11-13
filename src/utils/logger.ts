@@ -6,6 +6,7 @@ import winston from 'winston';
 import Transport from 'winston-transport';
 import { DATA_DIR } from '../config/constants.js';
 import { existsSync, mkdirSync } from 'node:fs';
+import { redactSecretsFormat } from './log-redaction.js';
 
 // WebSocket client sets for log streaming (exported for server.ts)
 export const wsLogClients = new Set<any>();
@@ -37,11 +38,12 @@ const colors = {
 // Tell winston about the colors
 winston.addColors(colors);
 
-// Define the format for logs
+// Define the format for logs (secrets are masked before any transport writes)
 const format = winston.format.combine(
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss:ms' }),
   winston.format.errors({ stack: true }),
   winston.format.splat(),
+  redactSecretsFormat(),
   winston.format.json()
 );
 
