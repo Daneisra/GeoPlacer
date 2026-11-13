@@ -3,8 +3,8 @@
  */
 
 import { exec } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { logger } from './logger.js';
+import { readJsonWithRecovery, writeJsonAtomic, type JsonLoadResult } from './json-store.js';
 
 // Re-export MS time constants from central constants module
 export { MS } from '../config/constants.js';
@@ -45,25 +45,39 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/**
- * Safe JSON load
- */
-export function loadJSON<T>(filename: string): T {
-  if (!existsSync(filename)) return {} as T;
-  try {
-    return JSON.parse(readFileSync(filename, 'utf8')) as T;
-  } catch (error) {
-    logger.error(`Failed to load JSON from ${filename}:`, error);
-    return {} as T;
+/** Log what readJsonWithRecovery() had to do, if anything. */
+export function reportJsonLoad(filename: string, result: JsonLoadResult<unknown>): void {
+  if (result.removedTempFiles.length > 0) {
+    logger.warn(`Removed ${result.removedTempFiles.length} temp file(s) left by an interrupted write of ${filename}.`);
+  }
+  if (result.status === 'recovered-from-backup') {
+    logger.warn(
+      `${filename} was unreadable (${result.error ?? 'missing'}); restored the last valid backup.` +
+        (result.quarantinedTo ? ` Damaged file kept as ${result.quarantinedTo}.` : '')
+    );
+  } else if (result.status === 'corrupt-no-backup') {
+    logger.error(
+      `${filename} was unreadable (${result.error}) and no backup exists; starting empty. Damaged file kept as ${result.quarantinedTo}.`
+    );
   }
 }
 
 /**
- * Safe JSON save
+ * Load JSON with crash recovery. A corrupt file is never silently replaced:
+ * it is kept aside and the last valid backup is used when available.
+ */
+export function loadJSON<T>(filename: string): T {
+  const result = readJsonWithRecovery<T>(filename, () => ({}) as T);
+  reportJsonLoad(filename, result);
+  return result.data;
+}
+
+/**
+ * Atomic JSON save (temp file + fsync + rename, previous version kept as .bak).
  */
 export function saveJSON<T>(filename: string, data: T): void {
   try {
-    writeFileSync(filename, JSON.stringify(data, null, 2));
+    writeJsonAtomic(filename, data);
   } catch (error) {
     logger.error(`Failed to save JSON to ${filename}:`, error);
     throw error;

@@ -3,10 +3,11 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { palette, DATA_DIR, HTTP_STATUS } from '../config/constants.js';
 import { logger } from '../utils/logger.js';
+import { readJsonWithRecovery, writeJsonAtomic } from '../utils/json-store.js';
+import { reportJsonLoad } from '../utils/helpers.js';
 
 const router = Router();
 
@@ -23,16 +24,16 @@ let colorOrdering: { global: number[]; templates: Record<string, number[]> } = {
 function loadColorOrdering(): void {
   const orderingPath = path.join(DATA_DIR, 'color_ordering.json');
 
-  if (existsSync(orderingPath)) {
-    try {
-      const data = JSON.parse(readFileSync(orderingPath, 'utf8'));
-      colorOrdering = {
-        global: data.global || [...defaultColorOrder],
-        templates: data.templates || {},
-      };
-    } catch (e: any) {
-      logger.error('Error loading color ordering:', e.message);
-    }
+  const result = readJsonWithRecovery<{ global?: number[]; templates?: Record<string, number[]> } | null>(
+    orderingPath,
+    () => null
+  );
+  reportJsonLoad(orderingPath, result);
+  if (result.data) {
+    colorOrdering = {
+      global: result.data.global || [...defaultColorOrder],
+      templates: result.data.templates || {},
+    };
   }
 }
 
@@ -41,7 +42,7 @@ function saveColorOrdering(): void {
   const orderingPath = path.join(DATA_DIR, 'color_ordering.json');
 
   try {
-    writeFileSync(orderingPath, JSON.stringify(colorOrdering, null, 2));
+    writeJsonAtomic(orderingPath, colorOrdering);
     logger.info('Color ordering saved successfully');
   } catch (e: any) {
     logger.error('Error saving color ordering:', e.message);
