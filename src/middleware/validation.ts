@@ -4,12 +4,49 @@
 
 import { z } from 'zod';
 import type { Request, Response, NextFunction } from 'express';
+import type { Cookies } from '../types/index.js';
+
+// ============ Collection bounds ============
+//
+// GHSA-mrhx-c7xc-m3w5: Zod creates one issue object per invalid element of
+// an array/record. Since 4.6.6 a .max() constraint stops early, but an
+// unbounded collection still accumulates millions of issues (measured on
+// 4.6.7: +686 MB for 1M invalid elements; nested arrays overflow the stack).
+// Every collection taken from a request is therefore bounded, and large
+// matrices are checked with a fail-fast validator (one issue at most).
+
+export const MAX_TEMPLATE_DIMENSION = 4096;
+export const MAX_USER_IDS = 256;
+export const MAX_COOKIE_ENTRIES = 32;
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** number[][] of at most maxDim x maxDim finite numbers, fail-fast. */
+export function numberMatrix(maxDim: number) {
+  return z.custom<number[][]>((value) => {
+    if (!Array.isArray(value) || value.length > maxDim) return false;
+    for (const row of value) {
+      if (!Array.isArray(row) || row.length > maxDim) return false;
+      for (const cell of row) {
+        if (typeof cell !== 'number' || !Number.isFinite(cell)) return false;
+      }
+    }
+    return true;
+  }, `Expected a number[][] of at most ${maxDim}x${maxDim} finite numbers`);
+}
 
 // ============ Validation Schemas ============
 
-export const cookiesSchema = z.object({
-  j: z.string().min(1),
-}).and(z.record(z.string()));
+/** Session cookies: a non-empty "j" and only string values, fail-fast. */
+export const cookiesSchema = z.custom<Cookies>((value) => {
+  if (!isPlainObject(value)) return false;
+  const keys = Object.keys(value);
+  if (keys.length > MAX_COOKIE_ENTRIES) return false;
+  if (typeof value.j !== 'string' || value.j.length === 0) return false;
+  return keys.every((key) => typeof value[key] === 'string');
+}, `Expected at most ${MAX_COOKIE_ENTRIES} string cookies including a non-empty "j"`);
 
 export const userLoginSchema = z.object({
   cookies: cookiesSchema,
@@ -21,10 +58,10 @@ export const templateCreateSchema = z.object({
   template: z.object({
     width: z.number().int().positive(),
     height: z.number().int().positive(),
-    data: z.array(z.array(z.number())),
+    data: numberMatrix(MAX_TEMPLATE_DIMENSION),
   }),
   coords: z.tuple([z.number(), z.number(), z.number(), z.number()]),
-  userIds: z.array(z.string()),
+  userIds: z.array(z.string()).max(MAX_USER_IDS),
   canBuyCharges: z.boolean().optional(),
   canBuyMaxCharges: z.boolean().optional(),
   antiGriefMode: z.boolean().optional(),
@@ -37,7 +74,7 @@ export const templateCreateSchema = z.object({
 export const templateUpdateSchema = z.object({
   templateName: z.string().min(1).max(100).optional(),
   coords: z.tuple([z.number(), z.number(), z.number(), z.number()]).optional(),
-  userIds: z.array(z.string()).optional(),
+  userIds: z.array(z.string()).max(MAX_USER_IDS).optional(),
   canBuyCharges: z.boolean().optional(),
   canBuyMaxCharges: z.boolean().optional(),
   antiGriefMode: z.boolean().optional(),
@@ -81,7 +118,7 @@ export function validateBody<T>(schema: z.ZodSchema<T>) {
       if (err instanceof z.ZodError) {
         res.status(400).json({
           error: 'Validation failed',
-          details: err.errors,
+          details: err.issues,
         });
         return;
       }
@@ -99,7 +136,7 @@ export function validateParams<T>(schema: z.ZodSchema<T>) {
       if (err instanceof z.ZodError) {
         res.status(400).json({
           error: 'Validation failed',
-          details: err.errors,
+          details: err.issues,
         });
         return;
       }
@@ -117,7 +154,7 @@ export function validateQuery<T>(schema: z.ZodSchema<T>) {
       if (err instanceof z.ZodError) {
         res.status(400).json({
           error: 'Validation failed',
-          details: err.errors,
+          details: err.issues,
         });
         return;
       }
