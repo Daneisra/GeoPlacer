@@ -41,8 +41,10 @@ export const ALLOWED_HOSTS = process.env.ALLOWED_HOSTS
   ? process.env.ALLOWED_HOSTS.split(',').map((host) => host.trim()).filter(Boolean)
   : [];
 
-export const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000; // 15 minutes
-export const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX) || 100;
+// Sized for the local UI: status polling (5 s), template polling (10-30 s) and
+// the extension (30 s) use about 20 requests per minute.
+export const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS) || 60 * 1000; // 1 minute
+export const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX) || 300;
 
 // ============ WebSocket Configuration ============
 

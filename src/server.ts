@@ -144,7 +144,7 @@ setTemplatesProcessQueueFn(() => processQueue(getTemplatesFromRoutes()));
 const app = express();
 const limiter = rateLimit({
   windowMs: RATE_LIMIT_WINDOW_MS,
-  max: RATE_LIMIT_MAX,
+  limit: RATE_LIMIT_MAX,
   message: 'Too many requests from this IP, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
@@ -174,9 +174,11 @@ app.use(cors({
   },
   credentials: true,
 }));
+// Rate limiting applies to every route (no route lives under /api/, where the
+// limiter was previously mounted) and runs before the JSON body is parsed.
+app.use(limiter);
 app.use(express.static('public'));
 app.use(express.json({ limit: '50mb' }));
-app.use('/api/', limiter);
 
 // Mount routes
 app.use(logsRouter);
