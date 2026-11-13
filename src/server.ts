@@ -43,7 +43,7 @@ import {
   createWebSocketVerifier,
   type LocalAccessPolicy,
 } from './middleware/local-access.js';
-import { APP_HOST, APP_HOST_RESOLUTION, APP_PRIMARY_PORT, APP_FALLBACK_PORTS, DATA_DIR, USERS_FILE, SETTINGS_FILE, TEMPLATES_PATH, ALLOWED_ORIGINS, ALLOWED_HOSTS, RATE_LIMIT_WINDOW_MS, RATE_LIMIT_MAX, MAX_WS_CONNECTIONS, WS_PING_INTERVAL_MS, GRACEFUL_SHUTDOWN_TIMEOUT_MS, KEEP_ALIVE_INTERVAL_MS, MS } from './config/constants.js';
+import { APP_HOST, APP_HOST_RESOLUTION, APP_PRIMARY_PORT, APP_FALLBACK_PORTS, DATA_DIR, USERS_FILE, SETTINGS_FILE, TEMPLATES_PATH, ALLOWED_ORIGINS, ALLOWED_HOSTS, RATE_LIMIT_WINDOW_MS, RATE_LIMIT_MAX, MAX_WS_CONNECTIONS, WS_PING_INTERVAL_MS, GRACEFUL_SHUTDOWN_TIMEOUT_MS, KEEP_ALIVE_INTERVAL_MS, MS, JSON_LIMIT } from './config/constants.js';
 import { loadSettings } from './config/settings.js';
 import { log, logger, wsLogClients, wsErrorClients } from './utils/logger.js';
 import { loadJSON, saveJSON } from './utils/helpers.js';
@@ -178,7 +178,7 @@ app.use(cors({
 // limiter was previously mounted) and runs before the JSON body is parsed.
 app.use(limiter);
 app.use(express.static('public'));
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({ limit: JSON_LIMIT }));
 
 // Mount routes
 app.use(logsRouter);

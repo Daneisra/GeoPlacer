@@ -61,6 +61,16 @@ export function errorHandler(err: Error, _req: Request, res: Response, _next: Ne
     return;
   }
 
+  // Client errors raised by Express middleware (body-parser: 413 payload too
+  // large, 400 malformed JSON...) carry their own status and a safe message.
+  const httpError = err as Error & { status?: number; expose?: boolean };
+  if (typeof httpError.status === 'number' && httpError.status >= 400 && httpError.status < 500) {
+    res.status(httpError.status).json({
+      error: httpError.expose ? httpError.message : 'Bad request',
+    });
+    return;
+  }
+
   // Default error response
   res.status(500).json({
     error: 'Internal server error',

@@ -75,7 +75,12 @@ export const SETTINGS_FILE = `${DATA_DIR}/settings.json`;
 export const TEMPLATES_PATH = `${DATA_DIR}/templates.json`;
 export const COLOR_ORDERING_PATH = `${DATA_DIR}/color_ordering.json`;
 
-export const JSON_LIMIT = '50mb';
+/**
+ * Maximum JSON request body. A template is sent as number[][]: about 2.8 MB
+ * for 1000x1000 and 11.4 MB for 2000x2000 in the worst case (random colors).
+ * Override with JSON_BODY_LIMIT (bytes, or "12mb"-style strings).
+ */
+export const JSON_LIMIT = process.env.JSON_BODY_LIMIT?.trim() || '12mb';
 
 // ============ Time Constants (milliseconds) ============
 
