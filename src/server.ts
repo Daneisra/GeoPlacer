@@ -268,7 +268,7 @@ async function runKeepAlive(): Promise<void> {
 }
 
 // Server state for graceful shutdown
-let serverState = {
+const serverState = {
   wss: null as WebSocketServer | null,
   httpServer: null as any,
   shutdownInProgress: false,
@@ -425,7 +425,7 @@ async function startServer(): Promise<void> {
         if (ws.readyState === 1) {
           try {
             ws.send(message);
-          } catch (e) {
+          } catch {
             // Ignore send errors for disconnected clients
           }
         }

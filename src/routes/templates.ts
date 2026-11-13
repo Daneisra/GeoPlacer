@@ -18,8 +18,12 @@ let anyTemplateRunning = false;
 let saveTemplates: () => void;
 let templateQueue: string[] = [];
 let processQueueFn: () => void;
-let globalUsers: Record<string, User> = {};
-let globalSettings: Settings = {} as Settings;
+// KNOWN BUG (Phase 0, F4): these two objects are never populated.
+// setUsersState()/setSettingsState() below update the template-manager
+// global context instead, so route-created TemplateManagers receive an
+// empty context. Left as-is until the engine rebuild (Phase 1B/2).
+const globalUsers: Record<string, User> = {};
+const globalSettings: Settings = {} as Settings;
 
 /**
  * Create template context from global state

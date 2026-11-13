@@ -8,9 +8,8 @@ import type { Cookies, HttpResponse } from '../types/index.js';
 import { NetworkError } from '../types/index.js';
 import { WPLACE_BASE } from '../config/constants.js';
 
-export interface HttpClientOptions {
-  // TLS verification is always enabled for security
-}
+/** No options yet. TLS verification is always enabled for security. */
+export type HttpClientOptions = Record<string, never>;
 
 export class WPlaceHttpClient {
   private browser: Impit | null = null;
