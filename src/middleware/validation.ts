@@ -91,16 +91,30 @@ export const tokenSchema = z.object({
   fp: z.string().optional(),
 });
 
+/** Pixel skip passes are halved down to 1, so only powers of two are meaningful. */
+export const PIXEL_SKIP_VALUES = [1, 2, 4, 8, 16, 32, 64, 128] as const;
+
+const ONE_HOUR_MS = 3_600_000;
+const ONE_DAY_MS = 86_400_000;
+
+// Bounds match what the settings page can send (seconds/minutes converted to
+// ms) and how the engine uses each value. A cooldown of 0 means "no wait".
 export const settingsSchema = z.object({
-  accountCooldown: z.number().int().min(1000).max(300000).optional(),
-  purchaseCooldown: z.number().int().min(1000).max(60000).optional(),
-  keepAliveCooldown: z.number().int().min(300000).max(86400000).optional(),
-  dropletReserve: z.number().int().min(0).max(10000).optional(),
-  antiGriefStandby: z.number().int().min(0).max(3600000).optional(),
+  accountCooldown: z.number().int().min(0).max(ONE_HOUR_MS).optional(),
+  purchaseCooldown: z.number().int().min(0).max(ONE_HOUR_MS).optional(),
+  keepAliveCooldown: z.number().int().min(300000).max(ONE_DAY_MS).optional(),
+  dropletReserve: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+  antiGriefStandby: z.number().int().min(0).max(ONE_DAY_MS).optional(),
   drawingDirection: z.enum(['ttb', 'btt', 'ltr', 'rtl', 'center_out', 'random']).optional(),
   drawingOrder: z.enum(['linear', 'color']).optional(),
   chargeThreshold: z.number().min(0).max(1).optional(),
-  pixelSkip: z.number().int().min(1).max(10).optional(),
+  pixelSkip: z
+    .number()
+    .int()
+    .refine((value) => (PIXEL_SKIP_VALUES as readonly number[]).includes(value), {
+      message: `pixelSkip must be one of ${PIXEL_SKIP_VALUES.join(', ')}`,
+    })
+    .optional(),
   proxyEnabled: z.boolean().optional(),
   proxyRotationMode: z.enum(['sequential', 'random']).optional(),
   logProxyUsage: z.boolean().optional(),
