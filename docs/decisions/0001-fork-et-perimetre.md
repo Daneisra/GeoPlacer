@@ -55,6 +55,13 @@ L'audit de la Phase 0 a établi les points suivants.
   (F4 est annoté dans `src/routes/templates.ts`). Ils seront éliminés avec le
   nouveau moteur. F9 (option « Random Color » sans implémentation) a été
   corrigé en Phase 1A.
+- Constatés pendant la consolidation (par lecture du code) :
+  - **F12** : l'écran Modèles appelle `/templates/start-all`,
+    `/templates/stop-all`, `/template/:id/start` et `/template/:id/stop`,
+    qui n'existent pas côté serveur.
+  - **F13** : en production, les chemins des pages (`/logs`, `/users`,
+    `/templates`, `/settings`) sont aussi des routes de l'API ; un
+    rechargement (F5) sur ces pages renvoie du JSON ou du texte brut.
 - Architecture cible :
   - `packages/core` : métier, indépendant du service cible ;
   - `packages/simulator` ;

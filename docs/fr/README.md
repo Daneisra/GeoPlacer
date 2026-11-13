@@ -29,5 +29,7 @@ Le moteur de dessin hérité n'est **pas** fonctionnel et sera remplacé.
 | [securite.md](securite.md) | Modèle de menace, protections, limites |
 | [persistance.md](persistance.md) | Fichiers de données, écriture atomique, sauvegarde et restauration |
 | [qualite.md](qualite.md) | Tests, lint, évaluation de Vitest |
+| [recette-navigateur.md](recette-navigateur.md) | Procédure de vérification manuelle dans un navigateur |
 | [../decisions/0001-fork-et-perimetre.md](../decisions/0001-fork-et-perimetre.md) | Décision de fork et périmètre |
+| [../decisions/0002-moteur-phase-1b.md](../decisions/0002-moteur-phase-1b.md) | Proposition du nouveau moteur (statut : proposé) |
 | [../../MODIFICATIONS.md](../../MODIFICATIONS.md) | Modifications apportées au code d'origine (AGPL §5a) |
