@@ -7,6 +7,9 @@
 <a href="LISEZMOI.md"><img src="https://img.shields.io/badge/traduction-français-blue"></a>
 <a href="README_zh-cn.md"><img src="https://img.shields.io/badge/翻译-简体中文-red"></a></p>
 
+> **GeoPlacer** : fork en cours de développement de ce projet (AGPL-3.0-only).
+> Documentation en français : [docs/fr/README.md](docs/fr/README.md) ; modifications : [MODIFICATIONS.md](MODIFICATIONS.md).
+
 A massively updated auto-drawing bot for [wplace.live](https://wplace.live/).
 
 ## Features
