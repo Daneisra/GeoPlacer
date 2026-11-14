@@ -279,3 +279,29 @@ describe('resource invariants (properties)', () => {
     }
   });
 });
+
+describe('ResourceManager: fast path equals a full replay', () => {
+  it('gives the same state at any time as an independent replay of the recorded spends', () => {
+    const pick = testRandom(73);
+    const strip = (s: AgentResourceState) => ({ ...s, operations: [], kind: 'computed' });
+    for (let run = 0; run < 40; run++) {
+      const m = createResourceManager(R);
+      const first = m.observe(observation({ energy: pick(11), ...(pick(2) === 0 ? { regenProgressMs: pick(1000) } : {}) })).state;
+      let reference = first;
+      let t = T0;
+      const checkpoints: Array<[number, AgentResourceState]> = [];
+      for (let k = 0; k < 60; k++) {
+        t += 1 + pick(2500);
+        const available = advance(R, reference, t, t).energy;
+        if (available === 0) continue;
+        const energy = 1 + pick(available);
+        m.recordSpend(A, { operationId: `s${k}`, energy, at: t }, t);
+        reference = applyOperation(R, reference, { type: 'spend', id: `s${k}`, at: t, energy }, t, 'recorded');
+        checkpoints.push([t, reference]);
+      }
+      for (const [at, expected] of checkpoints) expect(strip(m.stateAt(A, at, t))).toEqual(strip(expected)); // before the head: replay
+      const later = t + pick(50_000);
+      expect(strip(m.stateAt(A, later, later))).toEqual(strip(advance(R, reference, later, later))); // after: head
+    }
+  });
+});

@@ -4,6 +4,7 @@ export {
   advance,
   applyOperation,
   checkEnergy,
+  consumeEnergy,
   derivedKind,
   operationCost,
   paintingCapacity,

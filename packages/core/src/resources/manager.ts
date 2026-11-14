@@ -31,7 +31,7 @@ import type {
   SpendResult,
   Timestamp,
 } from '../contracts/index.js';
-import { advance, applyOperation, derivedKind, timeUntilEnergy } from './energy.js';
+import { advance, consumeEnergy, derivedKind, timeUntilEnergy } from './energy.js';
 import { ResourceError, validateRules } from './rules.js';
 import { serializeResourceState, stateFromObservation } from './state.js';
 
@@ -41,6 +41,11 @@ interface Entry {
   ledger: SpendRecord[];
   /** Every spend id ever seen for this agent, with its payload. */
   known: Map<string, string>;
+  /**
+   * State right after the last ledger spend (the observation when the
+   * ledger is empty): queries at or after it and new spends cost O(1).
+   */
+  head: AgentResourceState;
 }
 
 const payloadOf = (spend: SpendRecord): string => `${spend.energy}@${spend.at}`;
@@ -56,25 +61,27 @@ export function createResourceManager(rawRules: ResourceRules): ResourceManager 
   }
 
   /**
-   * Observation + ledger spends up to `at`, regenerated to `at`. A spend
-   * larger than the energy then available (only possible when a newer
-   * observation contradicts it) consumes what is available: energy never
-   * goes negative; `clamped` receives its id.
+   * Replays the ledger from the observation up to `at` (O(ledger), no
+   * copy). A spend larger than the energy then available (only possible
+   * when a newer observation contradicts it) consumes what is available:
+   * energy never goes negative; `clamped` receives its id.
    */
-  function compute(entry: Entry, at: Timestamp, now: Timestamp, clamped?: string[]): AgentResourceState {
-    if (at < entry.observed.at) throw new ResourceError('TIME_BEFORE_STATE', `no state before the observation at ${entry.observed.at}`);
-    let state = entry.observed;
-    for (const spend of entry.ledger) {
+  function replay(observed: AgentResourceState, ledger: readonly SpendRecord[], at: Timestamp, now: Timestamp, clamped?: string[]): AgentResourceState {
+    let state = observed;
+    for (const spend of ledger) {
       if (spend.at > at) break;
-      const current = advance(rules, state, spend.at, now);
-      const amount = Math.min(spend.energy, current.energy);
-      if (amount < spend.energy) clamped?.push(spend.operationId);
-      state =
-        amount > 0
-          ? applyOperation(rules, current, { type: 'spend', id: spend.operationId, at: spend.at, energy: amount }, now, 'recorded')
-          : { ...current, operations: [...current.operations, spend.operationId] };
+      const step = consumeEnergy(rules, state, spend.at, spend.energy, now, true);
+      if (step.clamped) clamped?.push(spend.operationId);
+      state = step.state;
     }
-    return advance(rules, state, at, now);
+    return state;
+  }
+
+  /** Observation + ledger spends up to `at`, regenerated to `at`. */
+  function compute(entry: Entry, at: Timestamp, now: Timestamp): AgentResourceState {
+    if (at < entry.observed.at) throw new ResourceError('TIME_BEFORE_STATE', `no state before the observation at ${entry.observed.at}`);
+    const base = at >= entry.head.at ? entry.head : replay(entry.observed, entry.ledger, at, now);
+    return advance(rules, base, at, now);
   }
 
   const manager: ResourceManager = {
@@ -85,7 +92,7 @@ export function createResourceManager(rawRules: ResourceRules): ResourceManager 
       const entry = entries.get(state.agent);
       let regenPhase: ObservationResult['regenPhase'] = observation.regenProgressMs !== undefined ? 'reported' : 'reset-lower-bound';
       if (entry === undefined) {
-        entries.set(state.agent, { observed: state, ledger: [], known: new Map() });
+        entries.set(state.agent, { observed: state, ledger: [], known: new Map(), head: state });
         return { state, absorbedSpends: [], inconsistentSpends: [], regenPhase };
       }
       const previous = entry.observed;
@@ -111,11 +118,11 @@ export function createResourceManager(rawRules: ResourceRules): ResourceManager 
         }
       }
       const absorbed = entry.ledger.filter((s) => s.at <= state.observedAt).map((s) => s.operationId);
-      const updated: Entry = { observed: state, ledger: entry.ledger.filter((s) => s.at > state.observedAt), known: entry.known };
-      entries.set(state.agent, updated);
+      const ledger = entry.ledger.filter((s) => s.at > state.observedAt);
       const inconsistent: string[] = [];
-      const lastSpend = updated.ledger[updated.ledger.length - 1];
-      if (lastSpend !== undefined) compute(updated, lastSpend.at, lastSpend.at, inconsistent);
+      const lastSpend = ledger[ledger.length - 1];
+      const head = lastSpend === undefined ? state : replay(state, ledger, lastSpend.at, lastSpend.at, inconsistent);
+      entries.set(state.agent, { observed: state, ledger, known: entry.known, head });
       return { state, absorbedSpends: absorbed, inconsistentSpends: inconsistent, regenPhase };
     },
 
@@ -143,12 +150,13 @@ export function createResourceManager(rawRules: ResourceRules): ResourceManager 
       }
       const last = entry.ledger[entry.ledger.length - 1];
       if (last !== undefined && spend.at < last.at) throw new ResourceError('OUT_OF_ORDER', `spend at ${spend.at} is older than the last recorded one at ${last.at}`);
-      const before = compute(entry, spend.at, now);
+      // In order (checked above): the spend applies to the head, in O(1).
+      const before = advance(rules, entry.head, spend.at, now);
       if (spend.energy > before.energy) throw new ResourceError('INSUFFICIENT_ENERGY', `needs ${spend.energy}, the agent has ${before.energy} at ${spend.at}`);
+      entry.head = consumeEnergy(rules, entry.head, spend.at, spend.energy, now).state;
       entry.ledger.push({ operationId: spend.operationId, energy: spend.energy, at: spend.at });
       entry.known.set(spend.operationId, payloadOf(spend));
-      const after = compute(entry, spend.at, now);
-      return { status: 'applied', state: { ...after, kind: derivedKind(after.kind, spend.at, now) } };
+      return { status: 'applied', state: { ...entry.head, kind: derivedKind(entry.head.kind, spend.at, now) } };
     },
 
     timeUntil(agent, energy, now) {

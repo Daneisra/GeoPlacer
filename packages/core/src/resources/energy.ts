@@ -92,6 +92,36 @@ export type ResourceOperation =
   | { readonly type: 'buy-energy-pack'; readonly id: string; readonly at: Timestamp }
   | { readonly type: 'unlock-color'; readonly id: string; readonly at: Timestamp; readonly color: Rgb };
 
+/** The timer only runs below capacity: it stops at or above, and starts at 0 when energy drops below. */
+function withTimerRule(rules: ResourceRules, before: AgentResourceState, capacityBefore: number, next: AgentResourceState): AgentResourceState {
+  if (next.energy >= capacityOf(rules, next.upgrades)) return { ...next, regenProgressMs: 0, regenPhase: 'exact' };
+  if (before.energy >= capacityBefore) return { ...next, regenProgressMs: 0, regenPhase: 'exact' };
+  return next;
+}
+
+/**
+ * Recorded energy consumption without an operation id (the ResourceManager
+ * keeps the ids of recorded spends in its ledger): regenerates to `at`, then
+ * removes `energy`. With `clamp`, consumes at most what is available
+ * (energy never negative) and reports whether it had to; otherwise throws
+ * INSUFFICIENT_ENERGY. O(1): no copy of the operation list.
+ */
+export function consumeEnergy(
+  rules: ResourceRules,
+  state: AgentResourceState,
+  at: Timestamp,
+  energy: number,
+  now: Timestamp,
+  clamp = false
+): { readonly state: AgentResourceState; readonly clamped: boolean } {
+  if (!isInt(energy, 1)) throw new ResourceError('INVALID_OPERATION', 'spent energy must be a positive integer');
+  const before = advance(rules, state, at, now);
+  if (energy > before.energy && !clamp) throw new ResourceError('INSUFFICIENT_ENERGY', `needs ${energy}, the agent has ${before.energy}`);
+  const used = Math.min(energy, before.energy);
+  const next = withTimerRule(rules, before, capacityOf(rules, before.upgrades), { ...before, energy: before.energy - used });
+  return { state: next, clamped: used < energy };
+}
+
 /** Price of an operation in currency (0 for a spend of energy); throws when not available. */
 export function operationCost(rules: ResourceRules, state: AgentResourceState, op: ResourceOperation): number {
   switch (op.type) {
@@ -182,12 +212,8 @@ export function applyOperation(
       next = { ...next, unlockedColors: [...before.unlockedColors, op.color].sort((a, b) => a - b) };
       break;
   }
-  // The timer only runs below capacity: it stops at or above, and starts at 0 when energy drops below.
-  const capacityAfter = capacityOf(rules, next.upgrades);
-  if (next.energy >= capacityAfter) next = { ...next, regenProgressMs: 0, regenPhase: 'exact' };
-  else if (before.energy >= capacityBefore) next = { ...next, regenProgressMs: 0, regenPhase: 'exact' };
   const kind: ResourceStateKind = mode === 'simulated' ? 'simulated' : derivedKind(before.kind, op.at, now);
-  return { ...next, kind };
+  return { ...withTimerRule(rules, before, capacityBefore, next), kind };
 }
 
 // ───────────────────────── Painting capacity (shared with the ETA) ─────────────────────────
