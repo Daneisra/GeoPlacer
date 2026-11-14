@@ -27,4 +27,10 @@ export {
   type PlacementStatus,
   type PlacementTransform,
 } from './projection.js';
-export { applyCanvasTransform, canvasSystemTransform, convertPlacement, type CanvasTransform } from './system-transform.js';
+export {
+  applyCanvasTransform,
+  canvasSystemTransform,
+  convertPlacement,
+  type CanvasTransform,
+  type SystemTransformOptions,
+} from './system-transform.js';

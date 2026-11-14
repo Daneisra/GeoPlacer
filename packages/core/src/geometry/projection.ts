@@ -38,35 +38,36 @@ export interface PlacementTransform {
 export function placementTransform(placement: TemplatePlacement, system: CoordinateSystem): PlacementTransform {
   assertCoordinateSystem(system);
   assertCanvasPoint(placement.topLeft, 'placement.topLeft');
-  return { originX: placement.topLeft.x, originY: placement.topLeft.y, yStep: system.yAxis === 'down' ? 1 : -1 };
+  // `+ 0` turns a -0 input (e.g. JSON.parse('-0')) into +0: coordinates stay canonical.
+  return { originX: placement.topLeft.x + 0, originY: placement.topLeft.y + 0, yStep: system.yAxis === 'down' ? 1 : -1 };
 }
 
 /** Canvas x of image column ix (no validation: hot path). */
 export function canvasXOf(transform: PlacementTransform, ix: number): number {
-  return transform.originX + ix;
+  return transform.originX + ix + 0;
 }
 
 /** Canvas y of image row iy (no validation: hot path). */
 export function canvasYOf(transform: PlacementTransform, iy: number): number {
-  return transform.originY + transform.yStep * iy;
+  return transform.originY + transform.yStep * iy + 0;
 }
 
 /** Image column of canvas x (no validation: hot path). */
 export function imageXOf(transform: PlacementTransform, x: number): number {
-  return x - transform.originX;
+  return x - transform.originX + 0;
 }
 
-/** Image row of canvas y (no validation: hot path). Never returns -0. */
+/** Image row of canvas y (no validation: hot path). */
 export function imageYOf(transform: PlacementTransform, y: number): number {
-  return transform.yStep === 1 ? y - transform.originY : transform.originY - y;
+  return (transform.yStep === 1 ? y - transform.originY : transform.originY - y) + 0;
 }
 
 export function imageToCanvas(point: ImagePoint, placement: TemplatePlacement, system: CoordinateSystem): CanvasPoint {
   assertImagePoint(point);
   const t = placementTransform(placement, system);
   return {
-    x: safeAdd(t.originX, point.ix, 'canvas x'),
-    y: safeAdd(t.originY, t.yStep * point.iy, 'canvas y'),
+    x: safeAdd(t.originX, point.ix, 'canvas x') + 0,
+    y: safeAdd(t.originY, t.yStep * point.iy, 'canvas y') + 0,
   };
 }
 

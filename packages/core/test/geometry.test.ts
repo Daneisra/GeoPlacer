@@ -105,11 +105,24 @@ describe('projection: canvas -> image and round trips', () => {
     }
   });
 
-  it('never produces negative zero', () => {
-    const image = canvasToImage({ x: 0, y: 0 }, at(0, 0), UP);
-    expect(Object.is(image.ix, 0)).toBe(true);
-    expect(Object.is(image.iy, 0)).toBe(true);
-    expect(Object.is(imageYOf(placementTransform(at(0, 0), UP), 0), 0)).toBe(true);
+  it('never produces negative zero, even from -0 inputs (e.g. JSON.parse("-0"))', () => {
+    const mz = JSON.parse('-0') as number;
+    expect(Object.is(mz, -0)).toBe(true);
+    const isPositiveZero = (v: number): boolean => Object.is(v, 0);
+    for (const system of [DOWN, UP]) {
+      const image = canvasToImage({ x: mz, y: mz }, at(0, 0), system);
+      expect([isPositiveZero(image.ix), isPositiveZero(image.iy)]).toEqual([true, true]);
+      const fromAnchor = canvasToImage({ x: 0, y: 0 }, at(mz, mz), system);
+      expect([isPositiveZero(fromAnchor.ix), isPositiveZero(fromAnchor.iy)]).toEqual([true, true]);
+      const canvas = imageToCanvas({ ix: 0, iy: 0 }, at(mz, mz), system);
+      expect([isPositiveZero(canvas.x), isPositiveZero(canvas.y)]).toEqual([true, true]);
+      const rect = templateBounds({ width: 1, height: 1 }, at(mz, mz), system);
+      expect([isPositiveZero(rect.minX), isPositiveZero(rect.minY)]).toEqual([true, true]);
+      const t = placementTransform(at(mz, mz), system);
+      expect([canvasXOf(t, 0), canvasYOf(t, 0), imageXOf(t, mz), imageYOf(t, mz)].every(isPositiveZero)).toBe(true);
+    }
+    const moved = applyCanvasTransform({ x: mz, y: mz }, { kind: 'identity' });
+    expect([isPositiveZero(moved.x), isPositiveZero(moved.y)]).toEqual([true, true]);
   });
 
   it('reports canvas points outside the template', () => {
@@ -251,10 +264,42 @@ describe('conversion between coordinate systems of the same canvas', () => {
     }
   });
 
+  it('translates between two systems of the same direction with shifted bounds', () => {
+    for (const yAxis of ['down', 'up'] as const) {
+      const from: CoordinateSystem = { yAxis, bounds };
+      const to: CoordinateSystem = { yAxis, bounds: { ...bounds, minY: 40 } };
+      expect(canvasSystemTransform(from, to)).toEqual({ kind: 'translate-y', dy: 40 });
+      // The converted placement paints the same physical pixels.
+      const size = { width: 3, height: 2 };
+      const original = at(1, yAxis === 'down' ? 2 : 7);
+      const converted = convertPlacement(original, from, to);
+      const t = canvasSystemTransform(from, to);
+      for (let iy = 0; iy < size.height; iy++) {
+        for (let ix = 0; ix < size.width; ix++) {
+          expect(imageToCanvas({ ix, iy }, converted, to)).toEqual(applyCanvasTransform(imageToCanvas({ ix, iy }, original, from), t));
+        }
+      }
+    }
+  });
+
+  it('accepts an unbounded canvas with opposite directions when the reflection axis is explicit', () => {
+    const t = canvasSystemTransform(DOWN, UP, { reflectionYSum: 0 });
+    expect(t).toEqual({ kind: 'flip-y', ySum: 0 });
+    expect(applyCanvasTransform({ x: 5, y: 3 }, t)).toEqual({ x: 5, y: -3 });
+    // When both bounds are known, an explicit axis must agree with them.
+    expect(canvasSystemTransform(downB, upB, { reflectionYSum: 9 })).toEqual({ kind: 'flip-y', ySum: 9 });
+  });
+
   it('refuses ambiguous conversions instead of guessing', () => {
+    // Opposite directions, no bounds and no explicit axis.
     expectGeometryError(() => canvasSystemTransform(DOWN, UP), 'AMBIGUOUS_TRANSFORM');
     expectGeometryError(() => canvasSystemTransform(downB, UP), 'AMBIGUOUS_TRANSFORM');
+    // Bounds that cannot describe the same canvas.
     expectGeometryError(() => canvasSystemTransform(downB, { yAxis: 'up', bounds: { ...bounds, height: 11 } }), 'AMBIGUOUS_TRANSFORM');
     expectGeometryError(() => canvasSystemTransform(downB, { yAxis: 'down', bounds: { ...bounds, minX: 1 } }), 'AMBIGUOUS_TRANSFORM');
+    // An explicit axis that contradicts the bounds, or that makes no sense.
+    expectGeometryError(() => canvasSystemTransform(downB, upB, { reflectionYSum: 5 }), 'AMBIGUOUS_TRANSFORM');
+    expectGeometryError(() => canvasSystemTransform(DOWN, downB, { reflectionYSum: 0 }), 'AMBIGUOUS_TRANSFORM');
+    expectGeometryError(() => canvasSystemTransform(DOWN, UP, { reflectionYSum: 0.5 }), 'NOT_AN_INTEGER');
   });
 });
