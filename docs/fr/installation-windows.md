@@ -131,32 +131,46 @@ Dans l'environnement de test, qui est non interactif, le backend lancé par
 `npm run dev` ne démarre pas. Diagnostic du 14/11/2026 :
 - sorties standard et d'erreur capturées séparément ;
 - arbre de processus relevé ;
-- cmd.exe et PowerShell essayés ;
 - arrêt de tout l'arbre (`taskkill /T /F`) après chaque essai.
 
-| Lancement | Entrée standard | Backend |
-|---|---|---|
-| `npm run dev` (cmd.exe ou PowerShell, avec ou sans `--raw`) | tube fourni par `concurrently` | **ne démarre pas** (aucune sortie en 120 s) |
-| `npm run dev:backend` seul | tube ouvert et muet | **ne démarre pas** |
-| `npm run dev:backend` seul | fermée (`ignore`) | démarre en 6 s |
-| `concurrently` + `tsx` **sans** `watch` | tube | démarre |
-| `concurrently` + `node --watch --import tsx` | tube | démarre en 6 s |
+Les essais H et J ne diffèrent que par l'entrée standard : même dossier
+courant, mêmes variables d'environnement. Ces deux pistes sont donc
+écartées.
 
-**Cause identifiée (déclencheur)** : `tsx watch` lit son entrée standard
-(touche Entrée pour relancer). Quand cette entrée est un **tube** resté
-ouvert, ce qui est toujours le cas sous `concurrently`, le serveur se
-bloque au chargement de `chalk` 5.6.2, importé par `gradient-string`
-3.0.0 (bannière de démarrage).
+| Essai | Lancement | Entrée standard | Attente | Backend |
+|---|---|---|---|---|
+| A | `npm run dev` via cmd.exe | tube ouvert | 45 s | **ne démarre pas** |
+| B | `npm run dev` via PowerShell | tube ouvert | 60 s | **ne démarre pas** |
+| C | `npm run dev` via cmd.exe | fermée (`ignore`) ; `concurrently` donne quand même un tube à ses enfants | 60 s | **ne démarre pas** |
+| G | `concurrently --raw` + `tsx watch` | tube | 60 s | **ne démarre pas** |
+| H | `npm run dev:backend` seul | tube ouvert et muet | 120 s | **ne démarre pas** |
+| J | `npm run dev:backend` seul | fermée (`ignore`) | — | démarre en 6 s |
+| D | `concurrently` + `tsx` **sans** `watch` | tube | — | démarre en 26 s |
+| N | `concurrently` + `node --watch --import tsx` | tube | — | démarre en 6 s |
+
+**Déclencheur identifié, mécanisme inconnu** : le blocage survient quand
+trois conditions sont réunies :
+- `tsx watch` ;
+- une entrée standard en **tube** resté ouvert, ce qui est toujours le cas
+  sous `concurrently` ;
+- le chargement de `chalk` 5.6.2, importé par `gradient-string` 3.0.0
+  pour la bannière de démarrage.
 
 Isolé par bissection :
-- un script trivial, `express`, `ws` et `swagger` ne bloquent pas ;
-- `tty.isatty` seul ne bloque pas.
+- un script trivial, `express`, `ws`, `swagger` et `tinygradient` ne
+  bloquent pas ;
+- `tty.isatty` seul ne bloque pas ;
+- un parent qui lit son entrée standard, avec un enfant qui en hérite, ne
+  reproduit pas le blocage.
 
-La ligne exacte en cause dans `chalk` n'est pas identifiée.
+La raison exacte n'est pas établie. `tsx watch` lit bien son entrée
+standard (touche Entrée pour relancer), mais cela ne suffit pas à
+reproduire le blocage.
 
 Dans un vrai terminal, `npm run dev:backend` reçoit la console et non un
-tube : il doit fonctionner. **`npm run dev` reste à vérifier dans un vrai
-terminal**, car `concurrently` donne toujours un tube à ses enfants.
+tube : il devrait fonctionner. L'essai C laisse prévoir que **`npm run dev`
+bloque aussi dans un vrai terminal**, car `concurrently` donne toujours un
+tube à ses enfants. À vérifier par l'utilisateur.
 
 **Contournement** (deux terminaux, ou `start.bat`) :
 
