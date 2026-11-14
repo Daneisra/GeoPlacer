@@ -1,11 +1,12 @@
 {
-  "//": "Type-checks sources and tests together (no output). Tests import their APIs from 'vitest' explicitly.",
+  "//": "Type-checks sources and tests together (no output). Tests may use Node APIs; the build (tsconfig.json) keeps src free of Node/DOM types.",
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "composite": false,
     "noEmit": true,
     "rootDir": ".",
-    "tsBuildInfoFile": null
+    "tsBuildInfoFile": null,
+    "types": ["node"]
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]
 }
