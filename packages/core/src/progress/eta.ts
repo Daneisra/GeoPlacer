@@ -252,22 +252,28 @@ export function estimateEta(progress: ProgressSnapshot, agents: readonly EtaAgen
     return unavailable(progress, now, [{ code: 'COLORS_UNAVAILABLE', message: `${missingColors.length} color(s) with remaining work are unlocked by no able agent`, colors: missingColors }], workPixels, unknown);
   }
 
-  // 5. Smallest T (ms from now) whose capacities cover the work.
+  // 5. Feasible at all? Given unlimited time, an agent that never regenerates
+  // a pixel's energy still paints only its burst.
   const allowed = needed.map((c) => models.map((m) => m.colors.has(c.color)));
   const work = needed.map((c) => c.pixels);
+  if (maxFlow(work, allowed, models.map((m) => (m.interval === Infinity ? m.burst : workPixels))).total < workPixels) {
+    const starved = needed.filter((_, ci) => !models.some((m, mi) => allowed[ci]![mi] && m.interval !== Infinity)).map((c) => c.color);
+    return unavailable(
+      progress,
+      now,
+      [{ code: 'INSUFFICIENT_ENERGY', message: 'the agents able to paint some colors can never regenerate enough energy for all of their work', colors: starved }],
+      workPixels,
+      unknown
+    );
+  }
+
+  // 6. Smallest T (ms from now) whose capacities cover the work.
   const flowAt = (T: number) => maxFlow(work, allowed, models.map((m) => capacity(m, now + T, cadence, pauses)));
   const limit = Number.MAX_SAFE_INTEGER - now;
   let hi = 1;
   while (flowAt(hi).total < workPixels) {
     if (hi >= limit) {
-      const finite = models.every((m) => m.interval === Infinity);
-      return unavailable(
-        progress,
-        now,
-        [finite ? { code: 'INSUFFICIENT_ENERGY', message: 'the agents cannot regenerate enough energy to finish' } : { code: 'OUT_OF_RANGE', message: 'the estimate exceeds the safe range of milliseconds' }],
-        workPixels,
-        unknown
-      );
+      return unavailable(progress, now, [{ code: 'OUT_OF_RANGE', message: 'the estimate exceeds the safe range of milliseconds' }], workPixels, unknown);
     }
     hi = Math.min(limit, hi * 2);
   }

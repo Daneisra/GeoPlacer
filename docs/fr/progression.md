@@ -179,7 +179,7 @@ valeur arbitraire de remplacement.
 | `STALE_SNAPSHOT` | instantané trop ancien pour la politique de sa source |
 | `INSUFFICIENT_OBSERVATION` | couverture inférieure à `minCoveragePercent` (paramètre obligatoire, sans valeur par défaut) |
 | `NO_AGENT` | du travail reste et aucun agent n'est fourni |
-| `INSUFFICIENT_ENERGY` | aucun agent ne peut accumuler l'énergie d'un pixel, ou l'énergie ne suffit jamais |
+| `INSUFFICIENT_ENERGY` | aucun agent ne peut accumuler l'énergie d'un pixel, ou, même sans limite de temps, les agents capables de peindre certaines couleurs ne régénèrent jamais assez d'énergie (couleurs listées) |
 | `COLORS_UNAVAILABLE` | couleurs avec du travail restant qu'aucun agent capable n'a débloquées (liste des couleurs) |
 | `OUT_OF_RANGE` | durée au-delà de 2^53 ms |
 
@@ -225,6 +225,13 @@ aux palettes différentes, une pause). Il ne travaille que sur les
 compteurs par couleur.
 
 ## 5. Limites connues
+
+- Une source **sans politique de fraîcheur** (`unchecked`) est acceptée
+  par l'ETA quel que soit son âge : c'est à l'appelant de configurer une
+  politique pour les observations importées.
+- La borne « jamais inférieure à la simulation » est vérifiée pour **un
+  seul agent**. Avec plusieurs agents, seule la monotonie est testée ; la
+  répartition reste l'hypothèse optimiste n° 6.
 
 - Pas de lecture en masse des instantanés : un appel `get` par pixel. Une
   lecture par ligne réduirait le coût. Elle ne sera ajoutée au contrat que

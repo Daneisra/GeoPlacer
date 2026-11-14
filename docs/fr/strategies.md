@@ -286,9 +286,19 @@ comparaison par pixel**, pas de la position de chaque pixel dans l'ordre.
     existants ;
   - ou garder la version 1 avec la solution 1 (cache de 4 octets par
     pixel), limitée à l'aléatoire.
-- Le choix entre les deux est à faire avant la Phase 1B.6. Un prototype
-  de mesure du `nextBatch` (comparaison avec la toile puis sélection des
-  k meilleurs) peut confirmer les 200 ms avant de décider.
+- Le choix entre les deux est à faire avant la Phase 1B.6.
+
+**Réserves** :
+- **Marge non démontrée** : la solution 3 suppose une comparaison
+  complète avec la toile à chaque lot. Mesurée par la progression, elle
+  prend 92 à 182 ms en 2000 × 2000 (voir [progression.md](progression.md)),
+  ce qui laisse très peu de marge sous l'objectif de 200 ms. Une
+  comparaison incrémentale (zones modifiées seulement) sera probablement
+  nécessaire, et un prototype de `nextBatch` doit le mesurer avant de
+  décider.
+- **Ordre aléatoire déjà validé** : un aléatoire « version 2 » remplacerait
+  l'ordre Fisher-Yates validé en Phase 1B.3 ; les modèles existants
+  changeraient d'ordre.
 
 ## 5. Limites connues
 

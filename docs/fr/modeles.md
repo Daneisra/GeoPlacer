@@ -232,6 +232,11 @@ Points à trancher avant de remplacer le verrou :
   étant local ;
 - le serveur de canal doit rester ouvert toute la vie de l'instance
   (`unref()` pour ne pas empêcher l'arrêt) ;
+- les noms de canal sont globaux à la machine : un autre processus local
+  pourrait occuper le nom et bloquer GeoPlacer. Cela empêche le démarrage,
+  mais ne permet aucune écriture concurrente ;
+- les sockets abstraites Linux sont propres à un espace de noms réseau :
+  deux conteneurs partageant un même répertoire ne s'excluraient pas ;
 - le remplacement se ferait avec les tests entre processus existants,
   adaptés.
 

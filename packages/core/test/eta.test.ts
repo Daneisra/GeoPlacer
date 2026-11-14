@@ -75,6 +75,17 @@ describe('EtaEstimator: availability', () => {
     expect(codes(capped)).toEqual(['INSUFFICIENT_ENERGY']);
   });
 
+  it('blames energy, not the time range, when the only agent with a color can never regenerate it', () => {
+    // a regenerates but lacks BLUE; b has BLUE but max energy 1 < 2 per pixel, energy 2 now: one blue pixel at most.
+    const a = agent('a', { unlockedColors: new Set([RED]), energy: 0 });
+    const b = agent('b', { unlockedColors: new Set([BLUE]), energy: 2, maxEnergy: 1 });
+    const r = estimateEta(progress([[RED, 0, 3, 0], [BLUE, 0, 2, 0]]), [a, b], { ...params, energyPerPixel: 2 }, NOW);
+    expect(codes(r)).toEqual(['INSUFFICIENT_ENERGY']);
+    expect(r.unavailable[0]?.colors).toEqual([BLUE]);
+    // With a single blue pixel to paint, b's one-off energy is enough.
+    expect(estimateEta(progress([[RED, 0, 3, 0], [BLUE, 0, 1, 0]]), [a, b], { ...params, energyPerPixel: 2 }, NOW).durationMs).not.toBeNull();
+  });
+
   it('is null when the observation is too incomplete or stale, never replaced by a value', () => {
     const half = progress([[RED, 4, 1, 5]]); // coverage 50 %
     expect(codes(estimateEta(half, [agent('a')], { ...params, minCoveragePercent: 60 }, NOW))).toEqual(['INSUFFICIENT_OBSERVATION']);
