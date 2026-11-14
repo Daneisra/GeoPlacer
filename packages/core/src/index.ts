@@ -9,3 +9,4 @@
 export const CORE_CONTRACT_VERSION = 1 as const;
 
 export * from './contracts/index.js';
+export * from './geometry/index.js';
