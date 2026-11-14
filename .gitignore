@@ -27,3 +27,5 @@ dist/
 *.d.ts
 *.d.ts.map
 *.js.map
+# TypeScript incremental build info
+*.tsbuildinfo

@@ -6,18 +6,27 @@
   "author": "JinxTheCatto and luluwaffless",
   "license": "AGPL-3.0-only",
   "funding": "https://ko-fi.com/jinxthecat and https://ko-fi.com/luluwaffless",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "start": "node --env-file-if-exists=.env dist/server.js",
     "dev": "concurrently --prefix-colors=blue,green --names=backend,frontend \"npx tsx watch --env-file-if-exists=.env src/server.ts\" \"npm run dev:frontend\"",
     "dev:backend": "npx tsx watch --env-file-if-exists=.env src/server.ts",
     "dev:frontend": "cd frontend && npm run dev",
-    "build": "tsc && cd frontend && npm run build",
+    "build": "npm run build:packages && tsc && cd frontend && npm run build",
     "build:backend": "tsc",
     "build:frontend": "cd frontend && npm run build",
+    "build:packages": "tsc -b packages/core packages/simulator",
     "build:watch": "tsc --watch",
     "lint": "eslint src --ext .ts",
+    "lint:packages": "eslint packages --ext .ts",
     "format": "prettier --write \"src/**/*.ts\"",
+    "typecheck:packages": "npm run typecheck --workspaces",
     "test": "jest",
+    "test:legacy": "jest",
+    "test:packages": "npm run test --workspaces",
+    "test:all": "npm run test:legacy && npm run test:packages",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage"
   },

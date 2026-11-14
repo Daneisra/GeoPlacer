@@ -1,0 +1,30 @@
+{
+  "name": "@geoplacer/core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "GeoPlacer engine contracts and business logic (no I/O, no DOM or Node types).",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "devDependencies": {
+    "vitest": "^5.1.0"
+  }
+}
