@@ -125,7 +125,26 @@ npm start               # node --env-file-if-exists=.env dist/server.js
 Le serveur affiche `Server listening on http://127.0.0.1:3000`. L'interface
 compilée (`frontend/dist`) est servie à la même adresse.
 
-### Mode développement (non vérifié en Phase 1A)
+### Mode développement (partiellement vérifié en Phase 1B.1)
+
+Résultat du test du 14/11/2026, dans un environnement non interactif :
+- **Vite** démarre, sert l'interface, et son proxy renvoie l'interface lors
+  d'un rafraîchissement direct d'une page ;
+- **sous `npm run dev`**, le backend lancé par `concurrently` (`tsx watch`)
+  n'a pas démarré, **y compris avec la commande d'origine**
+  `--env-file=.env` : ce n'est pas une régression, mais la cause n'est pas
+  établie ;
+- **lancé seul**, le backend démarre normalement.
+
+En attendant, utiliser deux terminaux, ou `start.bat`, qui lance déjà le
+backend sans `concurrently` :
+
+```powershell
+npm run dev:backend     # terminal 1 : tsx watch (vérifié seul)
+npm run dev:frontend    # terminal 2 : Vite, port 5173
+```
+
+Commande d'origine, à revérifier dans un vrai terminal :
 
 ```powershell
 npm run dev             # backend (tsx watch) + frontend (Vite, port 5173)

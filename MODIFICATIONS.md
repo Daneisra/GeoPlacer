@@ -38,6 +38,10 @@ licence. L'historique Git complet du projet d'origine est conservé.
   avec règle d'égalité documentée, quantification déterministe compacte,
   couleurs absentes.
 - Benchmarks (`npm run bench:core`), règles d'architecture étendues.
+- Corrections après relecture : coordonnées sans `-0`, règles de
+  conversion de repère cohérentes (translation, axe de réflexion
+  explicite), refus de la transparence et des valeurs invalides aux points
+  d'entrée des couleurs.
 - Serveur : interface compilée servie sans dépendre de `NODE_ENV` ; message
   explicite (503) si elle n'est pas compilée ; repli de l'application
   monopage limité à GET/HEAD (404 JSON pour les autres méthodes).

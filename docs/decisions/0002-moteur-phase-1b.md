@@ -299,9 +299,14 @@ Réalisé :
 
    Un modèle dont le placement est exprimé dans un repère d'orientation
    différente **n'est pas refusé** : il est converti explicitement
-   (`convertPlacement`). Seuls sont refusés les systèmes inconnus, les
-   conversions ambiguës (`AMBIGUOUS_TRANSFORM`) et les placements contraires
-   aux contraintes (`assertPlacement`). Aucune inversion implicite. Détail :
+   (`convertPlacement`) :
+   - par translation ou réflexion déduite des limites ;
+   - ou, sur une toile sans limites, par un axe de réflexion fourni
+     explicitement (`reflectionYSum`).
+
+   Seuls sont refusés les systèmes inconnus, les conversions ambiguës
+   (`AMBIGUOUS_TRANSFORM`) et les placements contraires aux contraintes
+   (`assertPlacement`). Aucune inversion implicite. Détail :
    [docs/fr/geometrie-couleurs.md](../fr/geometrie-couleurs.md).
 2. **`TaskId`** (implémentation prévue en 1B.6, fonction pure du cœur) :
    - dérivé de `(templateId, révision, ix, iy, couleur)` ;
@@ -336,3 +341,12 @@ Réalisé :
 | `Projection` | Contrat inchangé ; fonctions ajoutées hors contrat : `placementTransform`, `locateInImage`, `checkPlacement`, `assertPlacement`, `canvasSystemTransform`, `convertPlacement` | Parcours sans allocation, limites, conversion de repère |
 | `Template.coordinateSystem` | Sens précisé : repère dans lequel `placement` est exprimé | Décision 1 |
 | `PaletteManager` | Contrat inchangé ; ajouts : `createPaletteMatcher`, `agentColors`, `quantizeRgba` (avec statistiques), `countColors` | Palettes par agent, mémo réutilisable |
+| `CanvasTransform` | Types `identity`, `translate-y`, `flip-y` ; option `reflectionYSum` | Règles cohérentes entre même sens et sens opposés ; toile sans limites convertible sur axe explicite |
+
+### Critères reportés à la 1B.2
+
+- Taille maximale des modèles : l'index `iy * largeur + ix` doit tenir dans
+  un `Uint32` (et dans la limite de taille des requêtes).
+- L'image quantifiée est persistée et jamais recalculée au chargement : la
+  couleur, donc le `TaskId`, ne dépend pas de l'arrondi d'un moteur
+  JavaScript.
