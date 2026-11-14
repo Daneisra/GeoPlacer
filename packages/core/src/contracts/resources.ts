@@ -139,7 +139,12 @@ export interface AgentResourceState {
   readonly regenPhase: 'exact' | 'lower-bound';
   /** Observation this state derives from. */
   readonly observedAt: Timestamp;
-  /** Operations applied since that observation, in order (an id appears once). */
+  /**
+   * Ids of the operations applied to this state with applyOperation
+   * (simulated upgrades and spends), in order; an id appears once. Spends
+   * recorded through the ResourceManager are traced in its ledger instead
+   * (ResourceManager.recordedSpends), not here.
+   */
   readonly operations: readonly string[];
 }
 
@@ -189,5 +194,7 @@ export interface ResourceManager {
   recordSpend(agent: AgentId, spend: SpendRecord, now: Timestamp): SpendResult;
   /** Milliseconds from `now` until `energy` is available (0 if already), or null if never. */
   timeUntil(agent: AgentId, energy: number, now: Timestamp): number | null;
+  /** Spends recorded after the latest observation, in order (traceability of the computed states). */
+  recordedSpends(agent: AgentId): readonly SpendRecord[];
   agents(): readonly AgentId[];
 }

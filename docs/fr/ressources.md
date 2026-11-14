@@ -107,7 +107,10 @@ opérations aléatoires). Les améliorations ne produisent que des états
 | Dépense contredite par une observation plus récente | ne consomme que l'énergie disponible ; listée dans `inconsistentSpends` |
 
 Les dépenses enregistrées sont gardées dans un registre (avec leurs
-identifiants). Un état de tête, après la dernière dépense, rend une
+identifiants), lisible par `recordedSpends(agent)` : c'est leur
+traçabilité. Les états calculés ne les répètent pas dans `operations`,
+qui ne liste que les opérations appliquées par `applyOperation`
+(simulations). Un état de tête, après la dernière dépense, rend une
 requête récente ou une nouvelle dépense constante en temps. Une requête
 antérieure rejoue le registre, sans copie.
 
@@ -159,12 +162,29 @@ d'énergie, et chaque couleur débloquable qu'il n'a pas.
   et niveaux d'amélioration simulés sont pris en compte ; un état simulé
   ajoute l'avertissement `SIMULATED_RESOURCES`.
 - **Porte d'équivalence** : la version 1B.4 est figée dans les tests.
-  Avec une régénération de 1, les résultats sont **identiques** : 2 000
-  cas aléatoires à chaque exécution (40 000 sur 20 graines), et 3 000 sur
-  3 000 identiques aux sorties enregistrées au commit 1B.4.
+  Avec une régénération de 1, les résultats sont **identiques sur les
+  corpus essayés** : 2 000 cas aléatoires à chaque exécution (graine fixe),
+  40 000 sur 20 graines, et 3 000 sur 3 000 identiques aux sorties
+  enregistrées au commit 1B.4. Ils peuvent différer dans un cas rare, où
+  la 1B.4 sous-estimait (voir ci-dessous) : deux exemples sont épinglés
+  par des tests, avec leurs valeurs 1B.4 et simulées.
+- **Accord avec `ResourceManager.timeUntil`** (testé sur 200 cas) : l'ETA
+  n'est jamais plus court que l'attente de l'énergie nécessaire, et lui
+  est égal quand la progression de régénération est 0. Quand une
+  progression exacte est connue, l'ETA l'ignore après l'énergie initiale
+  (phase traitée comme inconnue, pessimiste) : il peut dépasser l'attente
+  réelle d'au plus un intervalle. Utiliser la progression connue serait
+  plus juste, mais romprait l'équivalence stricte avec la 1B.4 : décision
+  à prendre.
+- **Âge des observations de ressources** : l'énergie est projetée depuis
+  la dernière observation, et une dépense faite ailleurs depuis serait
+  inconnue. Avec `maxResourceAgeMs`, une observation plus ancienne lève
+  l'avertissement `STALE_RESOURCES` ; sans politique, un âge non nul lève
+  `RESOURCE_AGE_NOT_EVALUATED`. Ce sont des avertissements, pas des refus.
 - **Régénération de plusieurs unités** (nouveau) : le gain utile par pas
   est min(quantité, capacité − coût + 1), car l'énergie est plafonnée à la
-  capacité ; avec 1, rien ne change.
+  capacité ; avec 1, rien ne change. Vérifié empiriquement (simulation,
+  quantités 1 à 3, un agent), non démontré.
 - **Deux défauts de borne corrigés**, trouvés par la simulation
   indépendante : la régénération plafonnée (cas nouveau, quantité > 1) ;
   un pixel instantané (cadence 0) compté à l'instant où commence une pause
@@ -186,6 +206,7 @@ Windows 10, Node 22.23.2, règles synthétiques, médiane de 7.
 | `stateAt` au milieu de 10 000 dépenses (rejeu) | 1,7 ms |
 | ETA, 3 agents, 32 couleurs | 8 à 9 ms |
 | Planificateur : 11 options, chacune avec un ETA avant / après | 96 à 97 ms |
+| ETA dans `bench:progress` (3 agents, 32 couleurs, une pause) | 13 à 21 ms (7 ms en 1B.4 : validation des états et avertissements en plus) |
 
 Le benchmark a révélé un coût cubique du premier registre (copie de la
 liste des opérations à chaque dépense rejouée) : bloqué au-delà de
@@ -199,5 +220,7 @@ quelques milliers de dépenses. Corrigé (état de tête, `consumeEnergy`).
 - Le registre garde tous les identifiants de dépenses vus (détection des
   doublons) : il grandit avec le temps ; une purge sera nécessaire avec
   la file persistante (1B.6+).
+- L'âge d'une observation de ressources est signalé, jamais jugé
+  bloquant : à décider s'il doit rendre l'ETA indisponible.
 - Les règles d'un fournisseur réel restent à saisir par l'utilisateur ;
   rien n'est lu d'un service.

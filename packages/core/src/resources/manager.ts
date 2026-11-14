@@ -163,6 +163,10 @@ export function createResourceManager(rawRules: ResourceRules): ResourceManager 
       return timeUntilEnergy(rules, compute(entryOf(agent), now, now), energy);
     },
 
+    recordedSpends(agent) {
+      return entryOf(agent).ledger.map((spend) => ({ ...spend }));
+    },
+
     agents() {
       return [...entries.keys()].sort();
     },

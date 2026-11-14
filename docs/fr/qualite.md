@@ -18,7 +18,7 @@ npm run check                 # tsc, lint, lint:packages, puis test:all (contrô
 cd frontend; npx eslint .; npm run build
 ```
 
-## Tests des paquets (Phase 1B.5 : Vitest, 23 fichiers, 302 tests + 1 exhaustif optionnel)
+## Tests des paquets (Phase 1B.5 : Vitest, 23 fichiers, 305 tests + 1 exhaustif optionnel)
 
 | Paquet | Fichier | Objet |
 |---|---|---|

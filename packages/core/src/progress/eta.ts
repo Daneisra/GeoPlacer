@@ -190,6 +190,7 @@ export function estimateEta(progress: ProgressSnapshot, agents: readonly EtaAgen
   if (!isInt(cadence)) invalid('msPerPixel must be a non-negative integer');
   if (typeof minCoveragePercent !== 'number' || !(minCoveragePercent >= 0 && minCoveragePercent <= 100)) invalid('minCoveragePercent must be in [0, 100]');
   for (const p of parameters.pauses ?? []) if (!isInt(p.start) || !isInt(p.end) || p.end <= p.start) invalid('a pause must be [start, end) with integer timestamps and end > start');
+  if (parameters.maxResourceAgeMs !== undefined && !isInt(parameters.maxResourceAgeMs)) invalid('maxResourceAgeMs must be a non-negative integer');
   if (!Number.isSafeInteger(workPixels) || workPixels < 0 || progress.byColor.some((c) => !isInt(c.incorrect) || !isInt(c.unknown))) {
     invalid('progress counters must be non-negative integers');
   }
@@ -214,6 +215,16 @@ export function estimateEta(progress: ProgressSnapshot, agents: readonly EtaAgen
       code: 'FRESHNESS_NOT_EVALUATED',
       message: `no freshness policy for ${progress.basis.source}: the snapshot is ${progress.basis.freshness.ageMs} ms old and its age was not judged`,
     });
+  }
+  const aged = agents
+    .filter((a) => isInt((a.state as AgentResourceState | undefined)?.observedAt) && isInt(now) && now > a.state.observedAt)
+    .map((a) => `${a.id} (${now - a.state.observedAt} ms)`);
+  if (parameters.maxResourceAgeMs === undefined) {
+    if (aged.length > 0) warnings.push({ code: 'RESOURCE_AGE_NOT_EVALUATED', message: `resource observations not judged for age: ${aged.join(', ')}` });
+  } else if (isInt(parameters.maxResourceAgeMs)) {
+    const max = parameters.maxResourceAgeMs;
+    const stale = agents.filter((a) => isInt(a.state?.observedAt) && isInt(now) && now - a.state.observedAt > max).map((a) => `${a.id} (${now - a.state.observedAt} ms)`);
+    if (stale.length > 0) warnings.push({ code: 'STALE_RESOURCES', message: `resource observations older than ${max} ms: ${stale.join(', ')}` });
   }
   const simulated = agents.filter((a) => (a.state as AgentResourceState | undefined)?.kind === 'simulated').map((a) => a.id);
   if (simulated.length > 0) warnings.push({ code: 'SIMULATED_RESOURCES', message: `hypothetical (simulated) resources for ${simulated.join(', ')}` });

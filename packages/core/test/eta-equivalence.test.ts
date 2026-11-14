@@ -63,8 +63,11 @@ function randomCase(pick: (n: number) => number): { progress: ProgressSnapshot; 
 }
 
 describe('ETA on the shared resource model: identical to Phase 1B.4', () => {
+  // Fixed corpus: since Phase 1B.5 an instant pixel can no longer be counted at the
+  // very start of a pause (a rare 1B.4 under-estimate, pinned in eta.test.ts), so
+  // another corpus may legitimately differ from 1B.4 in that case.
   it('gives exactly the 1B.4 results on 2 000 random cases (regeneration amount 1)', () => {
-    const pick = testRandom(Number(process.env.GEOPLACER_ETA_SEED ?? 1234));
+    const pick = testRandom(1234);
     let estimated = 0;
     for (let k = 0; k < 2000; k++) {
       const { progress, agents, parameters } = randomCase(pick);

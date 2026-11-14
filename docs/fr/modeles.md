@@ -347,24 +347,29 @@ qui l'utilise :
 4. **Réparation** : génération et révisions repartent au-dessus de la
    plus grande allocation, non plus de la sauvegarde + 2. Plusieurs
    réparations consécutives donnent des numéros toujours croissants.
-5. **Allocations corrompues ou absentes** : le **nom** du fichier porte les
+5. **Amorçage des modèles existants** : un modèle créé avant ce mécanisme
+   n'a pas de dossier `alloc/`. Sa première écriture crée d'abord une
+   allocation d'amorçage, au-dessus du maximum du manifeste, de sa
+   sauvegarde et des manifestes corrompus conservés, puis marque le
+   manifeste (schéma 2, champ `allocation: 'registered'`). Seul un modèle
+   **marqué** dont le dossier `alloc/` a disparu est en garantie perdue.
+6. **Allocations corrompues ou absentes** : le **nom** du fichier porte les
    numéros, son contenu est facultatif. Un contenu illisible ne gêne
-   donc pas. Si le dossier `alloc/` disparaît entièrement, la garantie
-   est perdue : la réparation le signale et exige une confirmation
-   explicite, avec un plancher calculé sur le manifeste, la sauvegarde et
-   les manifestes corrompus conservés.
-6. **Effet sur le schéma** : les numéros de révision cessent d'être
+   donc pas. Si le dossier `alloc/` d'un modèle marqué disparaît, la
+   garantie est perdue : la réparation le signale et exige une
+   confirmation explicite, avec le même plancher que l'amorçage.
+7. **Effet sur le schéma** : les numéros de révision cessent d'être
    contigus. Schéma 2 du manifeste :
    - révisions strictement croissantes au lieu de contiguës ;
    - recherche d'une révision par son numéro, et non plus par sa position
      (`revisionOf`) ;
    - une migration 1 → 2 sans transformation (un manifeste 1 valide est
      un manifeste 2 valide).
-7. **Port de stockage** : `allocate(projet, modèle, g, r | null)` et
+8. **Port de stockage** : `allocate(projet, modèle, g, r | null)` et
    `maxAllocations(projet, modèle)`, dans les deux stockages (mémoire et
    fichiers), avec la suite de conformité et l'injection de panne étendues
    à l'étape d'allocation.
-8. **Limites** :
+9. **Limites** :
    - un fichier par écriture, donc beaucoup de petits fichiers à la longue.
      Une compaction, qui remplacerait une série par un point de contrôle
      créé de façon exclusive, est possible plus tard ;

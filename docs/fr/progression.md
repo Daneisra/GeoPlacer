@@ -173,6 +173,12 @@ le commit :
 
 ### Résultat nul et raisons
 
+**Avertissements** (n'empêchent pas l'estimation, Phase 1B.5) :
+`FRESHNESS_NOT_EVALUATED` (instantané sans politique de fraîcheur),
+`SIMULATED_RESOURCES` (états simulés), `RESOURCE_AGE_NOT_EVALUATED` (âge des
+observations de ressources non jugé, faute de `maxResourceAgeMs`),
+`STALE_RESOURCES` (observation plus ancienne que `maxResourceAgeMs`).
+
 L'ETA vaut **0** quand il ne reste aucun travail : modèle entièrement
 observé et conforme, ou aucun pixel éligible. C'est vrai même sans
 agent, et la vérification de fraîcheur et de couverture passe d'abord.

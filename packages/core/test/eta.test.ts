@@ -9,6 +9,7 @@ import {
   etaAgentsFrom,
   stateFromObservation,
 } from '../src/index.js';
+import { estimateEta1b4 } from './helpers/eta-1b4-reference.js';
 import { convertLegacy, type LegacyAgent as EtaAgent, type LegacyParameters as EtaParameters } from './helpers/eta-legacy.js';
 import { SIMULATED_RULES, observation } from './helpers/resources.js';
 import { testRandom } from './helpers/strategy.js';
@@ -247,9 +248,10 @@ function simulateShared(pixels: number, state: AgentResourceState, msPerPixel: n
   return finish - now;
 }
 
+const p = (n: number) => progress([[0xff0000 as Rgb, 0, n, 0]], { status: 'fresh', ageMs: 0, maxAgeMs: 1000 });
+const parameters = { rules: SIMULATED_RULES, msPerPixel: 0, minCoveragePercent: 0 };
+
 describe('EtaEstimator: on the ResourceManager and the shared energy model', () => {
-  const p = (n: number) => progress([[0xff0000 as Rgb, 0, n, 0]], { status: 'fresh', ageMs: 0, maxAgeMs: 1000 });
-  const parameters = { rules: SIMULATED_RULES, msPerPixel: 0, minCoveragePercent: 0 };
 
   it('takes its agents from the ResourceManager and is recomputed after resource changes', () => {
     const m = createResourceManager(SIMULATED_RULES);
@@ -286,6 +288,49 @@ describe('EtaEstimator: on the ResourceManager and the shared energy model', () 
       const eta = estimateEtaV5(p(pixels), [{ id: state.agent, state }], { ...parameters, msPerPixel }, NOW).durationMs!;
       expect(simulateShared(pixels, state, msPerPixel, NOW), JSON.stringify({ pixels, msPerPixel, energy: state.energy })).toBeLessThanOrEqual(eta);
     }
+  });
+});
+
+describe('EtaEstimator: pinned cases and agreement with the ResourceManager', () => {
+  it('never counts an instant pixel at the very start of a pause (cases found by the simulation, seeds 2 and 11)', () => {
+    // 1B.4 gave 185 and 24 ms: below what can actually be painted (simulation: 485 and 309 ms).
+    const cases: Array<[number, EtaAgent, EtaParameters, number]> = [
+      [19, agent('a', { energy: 1, maxEnergy: 3, regenIntervalMs: 10, observedAt: NOW - 95, availableFrom: NOW + 25 }), { ...params, pauses: [{ start: NOW + 185, end: NOW + 485 }] }, 185],
+      [5, agent('a', { energy: 1, maxEnergy: 4, regenIntervalMs: 16, observedAt: NOW - 56, availableFrom: NOW + 8 }), { ...params, pauses: [{ start: NOW + 24, end: NOW + 309 }] }, 24],
+    ];
+    for (const [pixels, a, pp, previous] of cases) {
+      expect(estimateEta1b4(progress([[RED, 0, pixels, 0]]), [a], pp, NOW).durationMs).toBe(previous);
+      const eta = estimateEta(progress([[RED, 0, pixels, 0]]), [a], pp, NOW).durationMs!;
+      expect(eta).toBeGreaterThanOrEqual(simulate(pixels, a, pp, NOW));
+      expect(eta).toBeGreaterThan(previous);
+    }
+  });
+
+  it('agrees with ResourceManager.timeUntil: never shorter, equal when the regeneration phase is 0', () => {
+    const pick = testRandom(29);
+    for (let k = 0; k < 200; k++) {
+      const m = createResourceManager(SIMULATED_RULES);
+      const progressMs = pick(3) === 0 ? 0 : pick(1000);
+      m.observe(observation({ agent: 'x' as AgentId, observedAt: NOW, energy: pick(10), regenProgressMs: progressMs }));
+      const state = m.stateAt('x' as AgentId, NOW, NOW);
+      const pixels = 1 + pick(10 - Math.min(9, state.energy)) + state.energy; // within the capacity of 10
+      const eta = estimateEtaV5(p(pixels), etaAgentsFrom(m, NOW), parameters, NOW).durationMs!;
+      const wait = m.timeUntil('x' as AgentId, pixels * SIMULATED_RULES.energy.costPerPixel, NOW)!;
+      expect(eta).toBeGreaterThanOrEqual(wait);
+      // The ETA ignores the known progress after the initial energy (pessimistic): equal only at 0.
+      if (progressMs === 0 || pixels <= state.energy) expect(eta).toBe(wait);
+    }
+  });
+
+  it('warns about the age of resource observations, judged only with a policy', () => {
+    const m = createResourceManager(SIMULATED_RULES);
+    m.observe(observation({ agent: 'x' as AgentId, observedAt: NOW, energy: 9 }));
+    const at = NOW + 60_000;
+    const codesOf = (extra: object) => estimateEtaV5(p(3), etaAgentsFrom(m, at), { ...parameters, ...extra }, at).warnings.map((w) => w.code);
+    expect(codesOf({})).toEqual(['RESOURCE_AGE_NOT_EVALUATED']);
+    expect(codesOf({ maxResourceAgeMs: 120_000 })).toEqual([]);
+    expect(codesOf({ maxResourceAgeMs: 30_000 })).toEqual(['STALE_RESOURCES']);
+    expect(codes(estimateEtaV5(p(3), etaAgentsFrom(m, at), { ...parameters, maxResourceAgeMs: -1 }, at))).toEqual(['INVALID_PARAMETERS']);
   });
 });
 

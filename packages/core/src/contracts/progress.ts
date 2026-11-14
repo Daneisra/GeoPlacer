@@ -143,6 +143,12 @@ export interface EtaParameters {
   /** Below this observation coverage of the eligible pixels, no ETA (no default: the caller decides). */
   readonly minCoveragePercent: number;
   readonly pauses?: readonly EtaPause[];
+  /**
+   * Maximum age of the agents' resource observations; older ones raise
+   * STALE_RESOURCES. Without it, a non-zero age raises
+   * RESOURCE_AGE_NOT_EVALUATED (never a silent assumption).
+   */
+  readonly maxResourceAgeMs?: number;
 }
 
 export type EtaUnavailableCode =
@@ -176,9 +182,13 @@ export interface EtaAssignment {
 export interface EtaWarning {
   /**
    * FRESHNESS_NOT_EVALUATED: no freshness policy for the snapshot's source;
-   * SIMULATED_RESOURCES: computed on simulated resource states (hypothetical).
+   * SIMULATED_RESOURCES: computed on simulated resource states (hypothetical);
+   * RESOURCE_AGE_NOT_EVALUATED: resource observations have an age and no
+   * maxResourceAgeMs was given; STALE_RESOURCES: some are older than it.
+   * The energy is projected from those observations: spending elsewhere
+   * since then is unknown.
    */
-  readonly code: 'FRESHNESS_NOT_EVALUATED' | 'SIMULATED_RESOURCES';
+  readonly code: 'FRESHNESS_NOT_EVALUATED' | 'SIMULATED_RESOURCES' | 'RESOURCE_AGE_NOT_EVALUATED' | 'STALE_RESOURCES';
   readonly message: string;
 }
 

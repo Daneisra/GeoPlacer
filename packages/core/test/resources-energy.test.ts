@@ -191,6 +191,7 @@ describe('ResourceManager', () => {
     expectCode(() => m.recordSpend(A, { operationId: 'paint-0', energy: 1, at: T0 + 400 }, T0 + 600), 'OUT_OF_ORDER');
     expectCode(() => m.recordSpend(A, { operationId: 'paint-2', energy: 3, at: T0 + 600 }, T0 + 600), 'INSUFFICIENT_ENERGY');
     expect(m.stateAt(A, T0 + 1500, T0 + 1500).energy).toBe(2); // 4 - 3 + 1 tick
+    expect(m.recordedSpends(A)).toEqual([{ operationId: 'paint-1', energy: 3, at: T0 + 500 }]); // traceability
     expect(m.timeUntil(A, 4, T0 + 1500)).toBe(1500); // 2 ticks, 500 ms of progress already kept
     expect(m.timeUntil(A, 11, T0 + 1500)).toBeNull();
   });
