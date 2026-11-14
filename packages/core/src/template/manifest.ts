@@ -168,8 +168,12 @@ function statsOf(value: unknown, path: string): QuantizationStats {
 
 const REVISION_KEYS = [
   'revision', 'createdAt', 'reasons', 'basedOn', 'width', 'height', 'placement', 'coordinateSystem', 'palette',
-  'alphaThreshold', 'quantizationMethod', 'sourceImageHash', 'quantizedImageHash', 'quantizedFileHash', 'stats',
+  'alphaThreshold', 'quantizationMethod', 'sourceImageHash', 'quantizedImageHash', 'quantizedFileHash', 'stats', 'extensions',
 ] as const;
+
+function extensionsOf(value: unknown, path: string): Record<string, unknown> {
+  return { ...object(value, path, Object.keys((value as Json | null) ?? {})) };
+}
 
 function revisionOf(value: unknown, path: string): RevisionRecordV1 {
   const r = object(value, path, REVISION_KEYS);
@@ -196,6 +200,7 @@ function revisionOf(value: unknown, path: string): RevisionRecordV1 {
     quantizedImageHash: hash(r.quantizedImageHash, `${path}.quantizedImageHash`),
     quantizedFileHash: hash(r.quantizedFileHash, `${path}.quantizedFileHash`),
     stats,
+    extensions: extensionsOf(r.extensions, `${path}.extensions`),
   };
 }
 
@@ -216,7 +221,7 @@ export function validateManifest(value: unknown): TemplateManifest {
   });
   const currentRevision = int(m.currentRevision, 'manifest.currentRevision', 1);
   if (currentRevision > revisions.length) bad('manifest.currentRevision', 'refers to a missing revision');
-  const extensions = object(m.extensions, 'manifest.extensions', Object.keys((m.extensions as Json | null) ?? {}));
+  const extensions = extensionsOf(m.extensions, 'manifest.extensions');
   let projectId;
   let templateId;
   try {
@@ -239,7 +244,7 @@ export function validateManifest(value: unknown): TemplateManifest {
     deletedAt: m.deletedAt === null ? null : int(m.deletedAt, 'manifest.deletedAt', 0),
     currentRevision,
     revisions,
-    extensions: { ...extensions },
+    extensions,
   };
 }
 

@@ -1,0 +1,12 @@
+{
+  "//": "Type-checks sources and tests together (no output). The tests reuse the storage conformance suite of packages/core/test, so @geoplacer/core maps to the core sources (as in vitest.config.ts).",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "noEmit": true,
+    "rootDir": "..",
+    "tsBuildInfoFile": null,
+    "paths": { "@geoplacer/core": ["../core/src/index.ts"] }
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

@@ -30,6 +30,7 @@ function revision(n: number, extra: Partial<RevisionRecordV1> = {}): RevisionRec
     quantizedImageHash: H('b'),
     quantizedFileHash: H('c'),
     stats: { pixels: 2, transparent: 1, exact: 1, approximated: 0 },
+    extensions: {},
     ...extra,
   };
 }
@@ -90,9 +91,12 @@ describe('template manifest v1', () => {
     expect(serializeManifest(reordered)).toBe(serializeManifest(manifest()));
   });
 
-  it('preserves extensions verbatim (forward-compatible data)', () => {
-    const json = serializeManifest(manifest({ extensions: { 'futur.champ': { a: [1, 2] }, note: 'x' } }));
+  it('preserves extensions verbatim (forward-compatible data, manifest and revisions)', () => {
+    const json = serializeManifest(
+      manifest({ extensions: { 'futur.champ': { a: [1, 2] }, note: 'x' }, revisions: [revision(1, { extensions: { ajout: true } }), revision(2)] })
+    );
     expect(parseManifest(json).extensions).toEqual({ 'futur.champ': { a: [1, 2] }, note: 'x' });
+    expect(parseManifest(json).revisions[0]?.extensions).toEqual({ ajout: true });
   });
 
   it('rejects newer schemas explicitly', () => {
@@ -127,6 +131,7 @@ describe('template manifest v1', () => {
       ['alpha threshold > 256', (m) => (m.revisions[0].alphaThreshold = 300)],
       ['bad reason', (m) => (m.revisions[0].reasons = ['whatever'])],
       ['extensions not an object', (m) => (m.extensions = [])],
+      ['revision extensions missing', (m) => delete m.revisions[0].extensions],
       ['quantization version 2', (m) => (m.revisions[0].quantizationMethod.version = 2)],
     ];
     for (const [label, edit] of cases) {

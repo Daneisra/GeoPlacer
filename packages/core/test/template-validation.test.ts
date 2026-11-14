@@ -93,7 +93,8 @@ describe('identifiers and names', () => {
   it('accepts lower-case bounded ids only (safe as directory names, no case collisions)', () => {
     expect(asProjectId('projet-1')).toBe('projet-1');
     expect(asTemplateId('3f2a9c1e-0b7d-4e2a-9f00-1234567890ab')).toBe('3f2a9c1e-0b7d-4e2a-9f00-1234567890ab');
-    for (const bad of ['Projet', '', '-start', 'a/b', '..', 'a.b', 'a'.repeat(65), 'é', 'con ', 42]) {
+    expect(asProjectId('con-1')).toBe('con-1');
+    for (const bad of ['Projet', '', '-start', 'a/b', '..', 'a.b', 'a'.repeat(65), 'é', 'con ', 42, 'con', 'nul', 'aux', 'prn', 'com1', 'lpt9']) {
       expectTemplateError(() => asProjectId(bad), 'INVALID_ID');
     }
   });

@@ -120,12 +120,16 @@ export interface RevisionRecordV1 {
   /** SHA-256 of the stored quantized PNG bytes; the address of that blob. */
   readonly quantizedFileHash: string;
   readonly stats: QuantizationStats;
+  /** Forward-compatible data of future v1 code, preserved verbatim; empty for new revisions. */
+  readonly extensions: Readonly<Record<string, unknown>>;
 }
 
 /**
  * One JSON file per template. Mutable settings (name, strategy, priority,
  * status) live at the top level; revisions are append-only records.
- * Unknown top-level fields are preserved in `extensions` for forward
+ * Forward compatibility: optional data added by future v1 code goes into
+ * `extensions` (manifest or revision), which readers preserve verbatim; any
+ * other unknown field is rejected (a newer layout needs schemaVersion 2).
  * compatibility.
  */
 export interface TemplateManifestV1 {
@@ -206,6 +210,8 @@ export interface TemplateSummary {
   readonly strategy: StrategyConfig;
   readonly createdAt: Timestamp;
   readonly updatedAt: Timestamp;
+  /** 'backup' when the current manifest was unreadable and the previous generation was listed instead. */
+  readonly manifestSource: 'current' | 'backup';
 }
 
 export interface LoadOptions {

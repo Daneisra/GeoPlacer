@@ -2,7 +2,7 @@
  * Project and template identifiers. They become directory names in file
  * adapters, so they are restricted to a lower-case, bounded charset: no case
  * collisions on case-insensitive file systems (NTFS), no path separators,
- * no dots.
+ * no dots, no Windows device names (con, nul, com1...).
  */
 
 import type { ProjectId, TemplateId } from '../contracts/index.js';
@@ -11,13 +11,16 @@ import { TemplateError } from './errors.js';
 /** 1-64 characters: lower-case letters, digits, hyphens; starts with a letter or digit. */
 export const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
+/** Reserved device names on Windows: unusable as file or directory names. */
+const WINDOWS_DEVICE = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/;
+
 export function isValidId(value: string): boolean {
-  return ID_PATTERN.test(value);
+  return ID_PATTERN.test(value) && !WINDOWS_DEVICE.test(value);
 }
 
 function assertId(value: unknown, kind: string): string {
-  if (typeof value !== 'string' || !ID_PATTERN.test(value)) {
-    throw new TemplateError('INVALID_ID', `${kind} must match ${ID_PATTERN.source}, got ${JSON.stringify(value)}`);
+  if (typeof value !== 'string' || !isValidId(value)) {
+    throw new TemplateError('INVALID_ID', `${kind} must match ${ID_PATTERN.source} and not be a Windows device name, got ${JSON.stringify(value)}`);
   }
   return value;
 }
