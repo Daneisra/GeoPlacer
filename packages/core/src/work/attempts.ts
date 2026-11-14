@@ -40,6 +40,7 @@ import type {
   ProjectId,
   RecoveryReport,
   ResourceManager,
+  ResourceObservation,
   TemplateId,
   Timestamp,
 } from '../contracts/index.js';
@@ -95,7 +96,7 @@ export function transition(attempt: Attempt | undefined, event: JournalEvent): A
       if (from === 'leased') return { ...attempt, state: 'cancelled', closedAt: event.at, reason: event.reason };
       break;
     case 'needs-reconciliation':
-      if (from === 'started' || from === 'leased') return { ...attempt, state: 'needs-reconciliation', reason: event.reason };
+      if (from === 'started' || from === 'leased') return { ...attempt, state: 'needs-reconciliation', needsReconciliationAt: event.at, reason: event.reason };
       break;
     case 'reconciled':
       if (from === 'started' || from === 'needs-reconciliation') return { ...attempt, state: 'finished', closedAt: event.at, results: event.results };
@@ -182,7 +183,7 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
     if (!recovered) throw new AttemptError('NOT_RECOVERED', 'call recover() first (journal not replayed)');
   }
 
-  async function close(id: AttemptId, outcomes: readonly PixelWriteOutcome[], now: Timestamp, failure: string | null): Promise<Attempt> {
+  async function close(id: AttemptId, outcomes: readonly PixelWriteOutcome[], now: Timestamp, failure: string | null, reported: ResourceObservation | undefined): Promise<Attempt> {
     requireRecovered();
     const attempt = attemptOf(id);
     const tasks = new Set(attempt.writes.map((w) => w.taskId));
@@ -195,7 +196,15 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
       failure === null ? { type: 'finished', attemptId: id, at: now, outcomes } : { type: 'failed', attemptId: id, at: now, reason: failure, outcomes },
     );
     const applied = outcomes.filter((o) => o.status === 'applied').length;
-    if (applied > 0) {
+    if (reported !== undefined) {
+      // Reported with the write result: it includes the spending (never recorded on top).
+      try {
+        if (reported.agent !== attempt.agent) throw new Error('observation of another agent');
+        resources.observe(reported);
+      } catch {
+        markUncertain(attempt.agent, now);
+      }
+    } else if (applied > 0) {
       try {
         resources.recordSpend(attempt.agent, { operationId: attempt.attemptId, energy: applied * cost, at: now }, now);
       } catch {
@@ -235,6 +244,11 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
           else store(next);
         }
         recovered = true;
+        // The spends recorded before the restart are gone: every agent that
+        // started an attempt needs an observation newer than its last close.
+        for (const attempt of attempts.values()) {
+          if (attempt.startedAt !== null && attempt.closedAt !== null) markUncertain(attempt.agent, attempt.closedAt);
+        }
         const released: AttemptId[] = [];
         const toReconcile: AttemptId[] = [];
         // A damaged journal may have lost a "started" event: reconcile rather than assume.
@@ -295,6 +309,7 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
             leasedAt: now,
             expiresAt: now + ttlMs,
             startedAt: null,
+            needsReconciliationAt: null,
             closedAt: null,
             results: [],
             reason: null,
@@ -310,8 +325,8 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
         return commit({ type: 'started', attemptId: id, at: now });
       }),
 
-    finish: (id, outcomes, now) => serialized(() => close(id, outcomes, now, null)),
-    fail: (id, reason, outcomes, now) => serialized(() => close(id, outcomes, now, reason)),
+    finish: (id, outcomes, now, reported) => serialized(() => close(id, outcomes, now, null, reported)),
+    fail: (id, reason, outcomes, now, reported) => serialized(() => close(id, outcomes, now, reason, reported)),
 
     cancel: (id, reason, now) =>
       serialized(async () => {
@@ -350,7 +365,7 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
         requireRecovered();
         const attempt = attemptOf(id);
         if (attempt.state !== 'started' && attempt.state !== 'needs-reconciliation') throw new AttemptError('INVALID_TRANSITION', `attempt ${id} is ${attempt.state}`);
-        const after = attempt.startedAt ?? attempt.leasedAt;
+        const after = Math.max(attempt.startedAt ?? attempt.leasedAt, attempt.needsReconciliationAt ?? 0);
         if (snapshot.observedAt <= after) throw new AttemptError('STALE_SNAPSHOT', `reconciliation needs a canvas read taken after ${after}`);
         const results = attempt.writes.map((w) => ({ taskId: w.taskId, result: observedResult(snapshot.get(w.point) as number, w.color) }));
         const closed = await commit({ type: 'reconciled', attemptId: id, at: now, results });

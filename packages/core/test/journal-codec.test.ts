@@ -21,6 +21,7 @@ function events(): JournalEvent[] {
         leasedAt: 10,
         expiresAt: 20,
         startedAt: null,
+        needsReconciliationAt: null,
         closedAt: null,
         results: [],
         reason: null,

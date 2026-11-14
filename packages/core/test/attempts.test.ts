@@ -419,6 +419,74 @@ describe('AttemptManager: recovery', () => {
     expect([...w.sim.appliedAt.entries()].sort()).toEqual([['1,0', 1], ['2,0', 1]]);
   });
 
+  it('a real restart loses the spend ledger: an observation older than the last journaled close is not enough', async () => {
+    const w = new World(4, 1);
+    await w.manager.recover(w.now);
+    w.observe(A1);
+    const oldObservation = w.sim.observe(A1, w.now);
+    const a = await w.lease(t, A1, writesOf([[0, 0], [1, 0]]));
+    await w.manager.start(a.attemptId, w.tick());
+    const result = await w.sim.applyPixels(A1, a.writes, { attemptId: a.attemptId });
+    const closed = await w.manager.finish(a.attemptId, result.outcomes, w.tick());
+    // New process: new ResourceManager, fed the stale observation (taken before the spend).
+    const resources = createResourceManager(R);
+    resources.observe(oldObservation);
+    const manager = createAttemptManager({ journal: w.journal, history: w.history, resources, newAttemptId: () => 'n' as never });
+    await manager.recover(w.tick());
+    expect(manager.resourcesUncertainSince(A1)).toBe(closed.closedAt);
+    const lease = (now: number) => manager.lease({ agent: A1, projectId: PROJECT, templateId: t.id, revision: 1, writes: writesOf([[2, 0]]), now, ttlMs: 1000 });
+    expect(await code(lease(w.tick()))).toBe('RESOURCES_UNCERTAIN');
+    resources.observe(w.sim.observe(A1, w.tick()));
+    expect(await code(lease(w.tick()))).toBe('resolved');
+  });
+
+  it('reconciliation after a restart refuses a read taken before it (it may predate the write)', async () => {
+    const w = new World(4, 1);
+    await w.manager.recover(w.now);
+    w.observe(A1);
+    const a = await w.lease(t, A1, writesOf([[0, 0]]));
+    await w.manager.start(a.attemptId, w.tick());
+    const early = w.sim.snapshot(w.tick()); // after the start, before the write landed
+    await w.sim.applyPixels(A1, a.writes, { attemptId: a.attemptId });
+    w.manager = w.newManager();
+    await w.manager.recover(w.tick());
+    expect(await code(w.manager.reconcile(a.attemptId, early, w.tick()))).toBe('STALE_SNAPSHOT');
+    const done = await w.manager.reconcile(a.attemptId, w.sim.snapshot(w.tick()), w.tick());
+    expect(done.results.map((r) => r.result)).toEqual(['observed-correct']);
+  });
+
+  it('expired then reconciled: the read must follow the expiry', async () => {
+    const w = new World(4, 1);
+    await w.manager.recover(w.now);
+    w.observe(A1);
+    const a = await w.lease(t, A1, writesOf([[0, 0]]), 50);
+    await w.manager.start(a.attemptId, w.tick());
+    const early = w.sim.snapshot(w.tick(10));
+    await w.manager.expire(w.tick(100));
+    expect(await code(w.manager.reconcile(a.attemptId, early, w.tick()))).toBe('STALE_SNAPSHOT');
+    expect(w.manager.get(a.attemptId)?.needsReconciliationAt).toBe(w.now - 1);
+  });
+
+  it('no double consumption: a resource observation returned with the write is observed instead of spending', async () => {
+    for (const order of ['reported-with-finish', 'observed-after-finish'] as const) {
+      const w = new World(4, 1);
+      await w.manager.recover(w.now);
+      w.observe(A1, 10);
+      const a = await w.lease(t, A1, writesOf([[0, 0], [1, 0], [2, 0]]));
+      await w.manager.start(a.attemptId, w.tick());
+      const result = await w.sim.applyPixels(A1, a.writes, { attemptId: a.attemptId });
+      const reported = w.sim.observe(A1, w.tick()); // the provider reports energy 7 after the write
+      if (order === 'reported-with-finish') {
+        await w.manager.finish(a.attemptId, result.outcomes, w.tick(), reported);
+        expect(w.resources.recordedSpends(A1)).toEqual([]);
+      } else {
+        await w.manager.finish(a.attemptId, result.outcomes, w.tick());
+        w.resources.observe(w.sim.observe(A1, w.tick())); // a later observation absorbs the spend
+      }
+      expect({ order, energy: w.resources.stateAt(A1, w.now, w.now).energy }).toEqual({ order, energy: 7 });
+    }
+  });
+
   it('recovery is idempotent: a second restart finds nothing more to release', async () => {
     const w = new World(4, 1);
     await w.manager.recover(w.now);
@@ -532,6 +600,7 @@ describe('state machine', () => {
     leasedAt: 0,
     expiresAt: 10,
     startedAt: null,
+    needsReconciliationAt: null,
     closedAt: null,
     results: [],
     reason: null,

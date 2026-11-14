@@ -14,7 +14,7 @@
 import type { CanvasSnapshot, CanvasSource, PixelWrite, PixelWriteOutcome } from './canvas.js';
 import type { AgentId, AttemptId, ProjectId, Rgb, TemplateId, Timestamp } from './primitives.js';
 import type { FreshnessPolicy, ProgressBasis } from './progress.js';
-import type { AgentResourceState, ResourceRules } from './resources.js';
+import type { AgentResourceState, ResourceObservation, ResourceRules } from './resources.js';
 import type { Template } from './template.js';
 
 // ───────────────────────── Work planner ─────────────────────────
@@ -140,6 +140,11 @@ export interface Attempt {
   readonly leasedAt: Timestamp;
   readonly expiresAt: Timestamp;
   readonly startedAt: Timestamp | null;
+  /**
+   * When the attempt was sent to reconciliation (crash, expiry, revision
+   * change): only a canvas read taken AFTER this time can close it.
+   */
+  readonly needsReconciliationAt: Timestamp | null;
   readonly closedAt: Timestamp | null;
   readonly results: readonly { readonly taskId: PixelWrite['taskId']; readonly result: PixelResult }[];
   readonly reason: string | null;
@@ -230,22 +235,38 @@ export interface AttemptManager {
   lease(request: LeaseRequest): Promise<Attempt>;
   /** Journaled BEFORE the canvas write. */
   start(attemptId: AttemptId, now: Timestamp): Promise<Attempt>;
-  /** Records the outcomes; spends the energy of applied pixels once (operation id = attempt id). */
-  finish(attemptId: AttemptId, outcomes: readonly PixelWriteOutcome[], now: Timestamp): Promise<Attempt>;
-  fail(attemptId: AttemptId, reason: string, outcomes: readonly PixelWriteOutcome[], now: Timestamp): Promise<Attempt>;
+  /**
+   * Records the outcomes. The energy of applied pixels is spent once
+   * (operation id = attempt id), at `now`, UNLESS `reported` is given: a
+   * resource observation returned with the write result already includes
+   * the spending, so it is observed instead (never both). Such an
+   * observation must not be given to the ResourceManager separately.
+   */
+  finish(attemptId: AttemptId, outcomes: readonly PixelWriteOutcome[], now: Timestamp, reported?: ResourceObservation): Promise<Attempt>;
+  fail(attemptId: AttemptId, reason: string, outcomes: readonly PixelWriteOutcome[], now: Timestamp, reported?: ResourceObservation): Promise<Attempt>;
   /** Only an attempt never started can be cancelled. */
   cancel(attemptId: AttemptId, reason: string, now: Timestamp): Promise<Attempt>;
   /** Expired leases: leased ones are cancelled, started ones need reconciliation. */
   expire(now: Timestamp): Promise<readonly Attempt[]>;
   /** A new revision of a template: older open attempts are cancelled (never started) or sent to reconciliation. */
   revisionChanged(projectId: ProjectId, templateId: TemplateId, revision: number, now: Timestamp): Promise<readonly Attempt[]>;
-  /** Closes an uncertain attempt from a fresh canvas read: never retried blindly. */
+  /**
+   * Closes an uncertain attempt from a fresh canvas read: never retried
+   * blindly. The read must be newer than the start and, once the attempt
+   * was sent to reconciliation, newer than that time (a read taken between
+   * the start and a crash may predate the write).
+   */
   reconcile(attemptId: AttemptId, snapshot: CanvasSnapshot, now: Timestamp): Promise<Attempt>;
   get(attemptId: AttemptId): Attempt | undefined;
   open(): readonly Attempt[];
   /** Canvas points of open attempts (leased, started, needs-reconciliation). */
   inFlight(): ReadonlySet<CanvasPointKey>;
   committedEnergy(agent: AgentId): number;
-  /** Last time an attempt of this agent ended with an uncertain energy spending (null: none). */
+  /**
+   * Last time an attempt of this agent ended with an uncertain energy
+   * spending (null: none). After recover(), also the last close of any
+   * started attempt in the journal: the spends recorded before a restart
+   * are not kept, so a newer observation is required.
+   */
   resourcesUncertainSince(agent: AgentId): Timestamp | null;
 }

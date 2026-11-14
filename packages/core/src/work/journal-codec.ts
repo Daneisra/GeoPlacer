@@ -69,6 +69,7 @@ function validAttempt(a: unknown): boolean {
     isTime(a['leasedAt']) &&
     isTime(a['expiresAt']) &&
     a['startedAt'] === null &&
+    a['needsReconciliationAt'] === null &&
     a['closedAt'] === null &&
     Array.isArray(a['results']) &&
     a['results'].length === 0 &&

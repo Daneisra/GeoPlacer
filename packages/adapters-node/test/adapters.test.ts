@@ -5,7 +5,19 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import type { Attempt, AttemptId, JournalEvent, ProjectId, TemplateId, TemplateManager } from '@geoplacer/core';
-import { TemplateError, asProjectId, createTemplateManager, decodeJournal, encodeJournalLine, loadRandomOrder, random, rgb, transition } from '@geoplacer/core';
+import {
+  TemplateError,
+  asProjectId,
+  createTemplateManager,
+  decodeChecksummedLines,
+  decodeJournal,
+  encodeJournalLine,
+  isHistoryEntry,
+  loadRandomOrder,
+  random,
+  rgb,
+  transition,
+} from '@geoplacer/core';
 import {
   DataDirectoryLockedError,
   FileAttemptJournal,
@@ -409,6 +421,7 @@ describe('attempt journal and history on disk', () => {
       leasedAt: at,
       expiresAt: at + 10,
       startedAt: null,
+      needsReconciliationAt: null,
       closedAt: null,
       results: [],
       reason: null,
@@ -531,6 +544,11 @@ describe('attempt journal and history on disk', () => {
         expect(typeof next === 'string' ? next : 'ok').toBe('ok');
         attempts.set(id, next as Attempt);
       }
+      // The history file is torn at most at its end too; every closed attempt in it is in the journal.
+      const historyBytes = await readFile(path.join(root, 'journal', 'history.log'));
+      const historyLoad = decodeChecksummedLines(new Uint8Array(historyBytes.buffer, historyBytes.byteOffset, historyBytes.byteLength), isHistoryEntry);
+      expect(historyLoad.corruptLines).toEqual([]);
+      for (const entry of historyLoad.values) expect(attempts.get(entry.attemptId)?.closedAt).not.toBeNull();
     }
     // The children left leased and started attempts behind at every kill: released and reconciled at restart.
     expect(released).toBeGreaterThan(0);
