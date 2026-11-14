@@ -76,6 +76,7 @@ describe('@geoplacer/core architecture', () => {
       geometry: ['contracts', 'geometry'],
       color: ['contracts', 'color'],
       palette: ['contracts', 'color', 'palette'],
+      template: ['contracts', 'color', 'palette', 'geometry', 'template'],
     };
     for (const file of sourceFiles(srcDir)) {
       const folder = path.relative(srcDir, file).split(path.sep)[0] ?? '';

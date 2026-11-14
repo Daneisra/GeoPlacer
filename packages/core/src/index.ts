@@ -1,8 +1,7 @@
 /**
  * @geoplacer/core — public entry point.
  *
- * Phase 1B.0: contracts only (src/contracts). Business logic (src/<domain>)
- * and implementations arrive in later phases, behind these interfaces.
+ * Contracts (src/contracts), pure business logic (src/<domain>), no I/O.
  */
 
 /** Version of the core contracts; bumped on breaking interface changes. */
@@ -12,3 +11,4 @@ export * from './contracts/index.js';
 export * from './geometry/index.js';
 export * from './color/index.js';
 export * from './palette/index.js';
+export * from './template/index.js';
