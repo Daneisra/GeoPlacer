@@ -280,9 +280,9 @@ Réalisé :
    - `TaskId` = empreinte de `(templateId, révision, x, y, couleur)` ;
    - `AttemptId` = `(agentId, horodatage du bail, compteur)`, unique et
      journalisé.
-3. **Interface sans `.env`** : l'interface n'est servie qu'avec
-   `NODE_ENV=production`. Faut-il la servir par défaut ? Décision à prendre
-   par l'utilisateur.
+3. **Interface sans `.env`** : l'interface n'était servie qu'avec
+   `NODE_ENV=production`. Décidé le 14/11/2026 : la servir dès qu'une
+   version compilée existe (fait, voir § 10).
 4. **Routes de l'API sous `/api/`** (F13) : à étudier, avec une
    compatibilité transitoire pour le frontend existant.
 
@@ -322,7 +322,8 @@ Réalisé :
    il survit aux redémarrages.
 4. **Interface sans `.env`** : l'interface doit être servie dès qu'une
    version compilée existe, indépendamment de `NODE_ENV`, avec un message
-   explicite si elle n'est pas compilée. Commit séparé, après la 1B.1.
+   explicite si elle n'est pas compilée. **Fait** (commit séparé, après
+   la 1B.1), vérifié sur un clone neuf sans `.env`.
 5. **API sous `/api/v1/`** : migration progressive, avec compatibilité
    temporaire des routes actuelles. Plan :
    [ADR 0003](0003-migration-api-v1.md).

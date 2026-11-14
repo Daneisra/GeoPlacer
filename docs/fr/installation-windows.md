@@ -143,12 +143,11 @@ commité. Il ne doit contenir aucun secret.
   valeurs par défaut ci-dessous (vérifié sur un clone neuf). Une valeur
   vide est traitée comme absente ; une valeur invalide est remplacée par son
   défaut, avec un avertissement `Invalid …` au démarrage.
-- **Sans `.env`, seule l'API fonctionne** : `NODE_ENV` n'est alors pas
-  défini, et l'interface compilée n'est servie qu'avec
-  `NODE_ENV=production` (fournie par `.env.example`). Sans `.env`,
-  `http://127.0.0.1:3000/` répond 404 alors que `/settings` répond 200
-  (vérifié). Pour l'interface : créer `.env` depuis l'exemple, ou lancer
-  `$env:NODE_ENV="production"; npm start`.
+- **Interface** : depuis la Phase 1B.1, l'interface compilée
+  (`frontend/dist`) est servie dès qu'elle existe, **avec ou sans `.env`**
+  et quel que soit `NODE_ENV` (vérifié sur un clone neuf sans `.env`). Si
+  elle n'est pas compilée, une page affiche « Interface non compilée » (503)
+  et indique la commande à lancer (`npm run build:frontend`).
 - **Attention aux anciennes branches** : `.env` est encore suivi sur
   `main`, `feat/phase1a-fondation` et `backup/*`. Passer sur l'une d'elles
   **écrase en silence** le `.env` local par la version suivie, et revenir

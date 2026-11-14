@@ -38,6 +38,9 @@ licence. L'historique Git complet du projet d'origine est conservé.
   avec règle d'égalité documentée, quantification déterministe compacte,
   couleurs absentes.
 - Benchmarks (`npm run bench:core`), règles d'architecture étendues.
+- Serveur : interface compilée servie sans dépendre de `NODE_ENV` ; message
+  explicite (503) si elle n'est pas compilée ; repli de l'application
+  monopage limité à GET/HEAD (404 JSON pour les autres méthodes).
 - Documentation : `docs/fr/geometrie-couleurs.md`, ADR 0002 § 10,
   ADR 0003 (plan de migration `/api/v1`, proposé).
 

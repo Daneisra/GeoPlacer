@@ -33,7 +33,7 @@ git status                      # attendu : rien à valider
 git log -1 --format=%h          # noter le commit testé
 # Si un dossier data\ existe, le mettre de côté (hors du dépôt) :
 if (Test-Path data) { Copy-Item -Recurse data "..\GeoPlacer-recette-sauvegarde-data" }
-# L'interface n'est servie qu'avec NODE_ENV=production, fourni par .env :
+# Configuration locale (facultative ; l'interface compilée est servie sans .env) :
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 npx tsc
 cd frontend; npm run build; cd ..
