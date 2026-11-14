@@ -14,7 +14,6 @@
  */
 
 import type {
-  CanvasPixel,
   CanvasSnapshot,
   ColorProgress,
   CompletionState,
@@ -28,10 +27,10 @@ import type {
   SnapshotFreshness,
   Timestamp,
 } from '../contracts/index.js';
-import { TRANSPARENT, TRANSPARENT_U32, UNKNOWN } from '../contracts/index.js';
-import { placementTransform } from '../geometry/projection.js';
+import { TRANSPARENT_U32 } from '../contracts/index.js';
 import { assertRect } from '../geometry/validate.js';
-import { assertImage, eligibleRegion } from '../strategy/common.js';
+import { assertImage } from '../strategy/common.js';
+import { PixelState, scanEligibleRows } from './classify.js';
 
 export type ProgressErrorCode =
   /** now / observedAt not a non-negative safe integer, malformed rect, image or policy. */
@@ -92,14 +91,7 @@ export function computeProgress(template: ProgressTemplate, snapshot: CanvasSnap
   if (!sameSystem(template.coordinateSystem, snapshot.coordinateSystem)) {
     throw new ProgressError('COORDINATE_SYSTEM_MISMATCH', 'the snapshot is not in the template coordinate system: convert it explicitly first');
   }
-  const { image, placement, coordinateSystem } = template;
-  const { width, pixels } = image;
-  const region = eligibleRegion(image, placement, coordinateSystem);
-  const t = placementTransform(placement, coordinateSystem);
-  const { minX: rx0, minY: ry0 } = snapshot.rect;
-  const rx1 = rx0 + snapshot.rect.width;
-  const ry1 = ry0 + snapshot.rect.height;
-
+  const { pixels } = template.image;
   // Color slots: dense ids in order of first appearance, counters per slot.
   const slotOf = new Map<number, number>();
   const colors: number[] = [];
@@ -108,16 +100,13 @@ export function computeProgress(template: ProgressTemplate, snapshot: CanvasSnap
   let invalid = 0;
   let lastColor = TRANSPARENT_U32;
   let slot = -1;
-  const point = { x: 0, y: 0 };
-
-  for (let iy = region.iy; iy < region.iy + region.height; iy++) {
-    const y = t.originY + t.yStep * iy;
-    const rowObserved = y >= ry0 && y < ry1;
-    point.y = y;
-    const base = iy * width;
-    for (let ix = region.ix; ix < region.ix + region.width; ix++) {
-      const expected = pixels[base + ix]!;
-      if (expected === TRANSPARENT_U32) continue;
+  // The shared classification (also used by the work planner).
+  scanEligibleRows(template, snapshot, (row) => {
+    const base = row.iy * template.image.width + row.ix0;
+    for (let k = 0; k < row.count; k++) {
+      const state = row.states[k]!;
+      if (state === PixelState.TRANSPARENT) continue;
+      const expected = pixels[base + k]!;
       if (expected !== lastColor) {
         lastColor = expected;
         let found = slotOf.get(expected);
@@ -135,23 +124,15 @@ export function computeProgress(template: ProgressTemplate, snapshot: CanvasSnap
         slot = found * 5;
       }
       counters[slot]! += 1;
-      const x = t.originX + ix;
-      if (!rowObserved || x < rx0 || x >= rx1) {
-        counters[slot + 4]! += 1;
-        continue;
-      }
-      point.x = x;
-      const seen: CanvasPixel = snapshot.get(point);
-      if (seen === expected) counters[slot + 1]! += 1;
-      else if (seen === UNKNOWN) counters[slot + 4]! += 1;
-      else if (seen === TRANSPARENT) counters[slot + 3]! += 1;
-      else if (Number.isInteger(seen) && seen >= 0 && seen <= 0xffffff) counters[slot + 2]! += 1;
+      if (state === PixelState.CORRECT) counters[slot + 1]! += 1;
+      else if (state === PixelState.WRONG_COLOR) counters[slot + 2]! += 1;
+      else if (state === PixelState.MISSING) counters[slot + 3]! += 1;
       else {
         counters[slot + 4]! += 1;
-        invalid++;
+        if (state === PixelState.INVALID) invalid++;
       }
     }
-  }
+  });
 
   // Excluded pixels, over the whole image.
   let transparent = 0;

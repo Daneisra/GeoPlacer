@@ -5,8 +5,9 @@
  *   0 primitives, config
  *   1 geometry, palette, resources, accounts, ports
  *   2 template, canvas
- *   3 strategy, work, progress
- *   4 scheduler, upgrades
+ *   3 strategy, progress
+ *   4 work, upgrades
+ *   5 scheduler
  */
 
 export * from './primitives.js';

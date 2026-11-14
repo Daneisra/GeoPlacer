@@ -322,14 +322,17 @@ describe('EtaEstimator: pinned cases and agreement with the ResourceManager', ()
     }
   });
 
-  it('warns about the age of resource observations, judged only with a policy', () => {
+  it('warns about the age of resource observations without a policy, and is unavailable beyond it', () => {
     const m = createResourceManager(SIMULATED_RULES);
     m.observe(observation({ agent: 'x' as AgentId, observedAt: NOW, energy: 9 }));
     const at = NOW + 60_000;
     const codesOf = (extra: object) => estimateEtaV5(p(3), etaAgentsFrom(m, at), { ...parameters, ...extra }, at).warnings.map((w) => w.code);
     expect(codesOf({})).toEqual(['RESOURCE_AGE_NOT_EVALUATED']);
     expect(codesOf({ maxResourceAgeMs: 120_000 })).toEqual([]);
-    expect(codesOf({ maxResourceAgeMs: 30_000 })).toEqual(['STALE_RESOURCES']);
+    expect(codesOf({ maxResourceAgeMs: 30_000 })).toEqual([]);
+    const stale = estimateEtaV5(p(3), etaAgentsFrom(m, at), { ...parameters, maxResourceAgeMs: 30_000 }, at);
+    expect(stale.durationMs).toBeNull();
+    expect(codes(stale)).toEqual(['STALE_RESOURCES']);
     expect(codes(estimateEtaV5(p(3), etaAgentsFrom(m, at), { ...parameters, maxResourceAgeMs: -1 }, at))).toEqual(['INVALID_PARAMETERS']);
   });
 });

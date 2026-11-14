@@ -42,6 +42,11 @@ function painted(t: ProgressTemplate): (x: number, y: number) => number {
   return (x, y) => map.get(`${x},${y}`) ?? TRANSPARENT;
 }
 
+/** The same snapshot without its readRow fast path (get() only). */
+function pointOnly(s: CanvasSnapshot): CanvasSnapshot {
+  return { rect: s.rect, coordinateSystem: s.coordinateSystem, source: s.source, observedAt: s.observedAt, get: (p) => s.get(p) };
+}
+
 const counts = (p: ReturnType<typeof computeProgress>) => ({ total: p.total, correct: p.correct, wrongColor: p.wrongColor, missing: p.missing, unknown: p.unknown });
 const big: CanvasRect = { minX: -50, minY: -50, width: 200, height: 200 };
 
@@ -105,10 +110,29 @@ describe('ProgressCalculator: pixel states', () => {
   it('treats invalid observed values as unknown and counts them', () => {
     let k = 0;
     const odd = [Number.NaN, 0x1000000, 1.5, -3, Infinity];
-    const weird: CanvasSnapshot = { ...snapshot(big, down, () => 0), get: () => odd[k++ % odd.length]! as never };
+    const weird: CanvasSnapshot = { ...pointOnly(snapshot(big, down, () => 0)), get: () => odd[k++ % odd.length]! as never };
     const p = computeProgress(t, weird, 2000);
     expect(counts(p)).toEqual({ total: 5, correct: 0, wrongColor: 0, missing: 0, unknown: 5 });
     expect(p.invalidObservations).toBe(5);
+    // Same rule through readRow (integer values only: out of 24-bit range).
+    const rows = snapshot(big, down, (x) => (x % 2 === 0 ? 0x1000000 : -7));
+    const q = computeProgress(t, rows, 2000);
+    expect(counts(q)).toEqual({ total: 5, correct: 0, wrongColor: 0, missing: 0, unknown: 5 });
+    expect(q.invalidObservations).toBe(5);
+  });
+
+  it('gives identical results through readRow and through get() alone', () => {
+    const pick = testRandom(808);
+    for (let k = 0; k < 120; k++) {
+      const yAxis = pick(2) === 0 ? 'down' : 'up';
+      const system: CoordinateSystem = pick(3) === 0 ? { yAxis } : { yAxis, bounds: { minX: -5, minY: -5, width: 20 + pick(10), height: 20 + pick(10) } };
+      const img = image(1 + pick(12), 1 + pick(12), () => (pick(5) === 0 ? null : pick(4)));
+      const t = template(img, pick(30) - 10, pick(30) - 10, system);
+      const rect = { minX: pick(20) - 15, minY: pick(20) - 15, width: 1 + pick(30), height: 1 + pick(30) };
+      const withRows = snapshot(rect, system, () => [TRANSPARENT, UNKNOWN, 0, 1, 2, 3, 9, 0x1000000][pick(8)]!);
+      expect(withRows.readRow).toBeDefined();
+      expect(computeProgress(t, withRows, 5000)).toEqual(computeProgress(t, pointOnly(withRows), 5000));
+    }
   });
 
   it('defines the no-eligible-pixel case without division by zero', () => {

@@ -35,11 +35,11 @@ const LAYERS: Readonly<Record<string, number>> = {
   template: 2,
   canvas: 2,
   strategy: 3,
-  work: 3,
+  work: 4,
   progress: 3,
-  scheduler: 4,
+  scheduler: 5,
   upgrades: 4,
-  index: 5,
+  index: 6,
 };
 
 describe('@geoplacer/core architecture', () => {
@@ -88,6 +88,8 @@ describe('@geoplacer/core architecture', () => {
       resources: ['contracts', 'resources'],
       // Upgrade planning: simulations over resources and the ETA; no purchase, no I/O.
       upgrades: ['contracts', 'resources', 'progress', 'upgrades'],
+      // Work planning, attempts and recovery: pure, over the other domains; I/O through ports.
+      work: ['contracts', 'geometry', 'strategy', 'progress', 'resources', 'work'],
     };
     for (const file of sourceFiles(srcDir)) {
       const folder = path.relative(srcDir, file).split(path.sep)[0] ?? '';

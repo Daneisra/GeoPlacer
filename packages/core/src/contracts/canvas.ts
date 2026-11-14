@@ -32,6 +32,13 @@ export interface CanvasSnapshot {
    * object for every pixel.
    */
   get(point: CanvasPoint): CanvasPixel;
+  /**
+   * Optional fast path (Phase 1B.6): copies the pixels of canvas row `y`,
+   * x in [x0, x1), into out[0 .. x1 - x0), with exactly the values get()
+   * would return (UNKNOWN outside rect). Readers fall back to get() when
+   * absent. Must not keep `out`.
+   */
+  readRow?(y: number, x0: number, x1: number, out: Int32Array): void;
 }
 
 export interface CanvasReader {

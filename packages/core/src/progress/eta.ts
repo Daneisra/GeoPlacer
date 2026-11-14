@@ -224,7 +224,8 @@ export function estimateEta(progress: ProgressSnapshot, agents: readonly EtaAgen
   } else if (isInt(parameters.maxResourceAgeMs)) {
     const max = parameters.maxResourceAgeMs;
     const stale = agents.filter((a) => isInt(a.state?.observedAt) && isInt(now) && now - a.state.observedAt > max).map((a) => `${a.id} (${now - a.state.observedAt} ms)`);
-    if (stale.length > 0) warnings.push({ code: 'STALE_RESOURCES', message: `resource observations older than ${max} ms: ${stale.join(', ')}` });
+    // Phase 1B.6: beyond the policy, the estimate is not presented as reliable.
+    if (stale.length > 0) reasons.push({ code: 'STALE_RESOURCES', message: `resource observations older than ${max} ms: ${stale.join(', ')}` });
   }
   const simulated = agents.filter((a) => (a.state as AgentResourceState | undefined)?.kind === 'simulated').map((a) => a.id);
   if (simulated.length > 0) warnings.push({ code: 'SIMULATED_RESOURCES', message: `hypothetical (simulated) resources for ${simulated.join(', ')}` });

@@ -52,5 +52,23 @@ export function createArraySnapshot(input: ArraySnapshotInput): CanvasSnapshot {
       if (dx < 0 || dy < 0 || dx >= width || dy >= height) return UNKNOWN;
       return pixels[dy * width + dx]! as CanvasPixel;
     },
+    readRow(y: number, x0: number, x1: number, out: Int32Array): void {
+      const count = x1 - x0;
+      const dy = y - minY;
+      if (dy < 0 || dy >= height) {
+        out.fill(UNKNOWN, 0, count);
+        return;
+      }
+      // Columns inside the rect are copied; the others are UNKNOWN, as with get().
+      const from = Math.max(x0, minX);
+      const to = Math.min(x1, minX + width);
+      if (to <= from) {
+        out.fill(UNKNOWN, 0, count);
+        return;
+      }
+      out.fill(UNKNOWN, 0, from - x0);
+      out.set(pixels.subarray(dy * width + (from - minX), dy * width + (to - minX)), from - x0);
+      out.fill(UNKNOWN, to - x0, count);
+    },
   };
 }

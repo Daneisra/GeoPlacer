@@ -145,8 +145,8 @@ export interface EtaParameters {
   readonly pauses?: readonly EtaPause[];
   /**
    * Maximum age of the agents' resource observations; older ones raise
-   * STALE_RESOURCES. Without it, a non-zero age raises
-   * RESOURCE_AGE_NOT_EVALUATED (never a silent assumption).
+   * STALE_RESOURCES (ETA unavailable, Phase 1B.6). Without it, a non-zero
+   * age raises the warning RESOURCE_AGE_NOT_EVALUATED (never a silent assumption).
    */
   readonly maxResourceAgeMs?: number;
 }
@@ -164,6 +164,8 @@ export type EtaUnavailableCode =
   | 'INSUFFICIENT_OBSERVATION'
   /** The snapshot is stale for its source's freshness policy. */
   | 'STALE_SNAPSHOT'
+  /** A resource observation is older than maxResourceAgeMs. */
+  | 'STALE_RESOURCES'
   /** The estimate exceeds the safe integer range of milliseconds. */
   | 'OUT_OF_RANGE';
 
@@ -184,11 +186,11 @@ export interface EtaWarning {
    * FRESHNESS_NOT_EVALUATED: no freshness policy for the snapshot's source;
    * SIMULATED_RESOURCES: computed on simulated resource states (hypothetical);
    * RESOURCE_AGE_NOT_EVALUATED: resource observations have an age and no
-   * maxResourceAgeMs was given; STALE_RESOURCES: some are older than it.
+   * maxResourceAgeMs was given.
    * The energy is projected from those observations: spending elsewhere
    * since then is unknown.
    */
-  readonly code: 'FRESHNESS_NOT_EVALUATED' | 'SIMULATED_RESOURCES' | 'RESOURCE_AGE_NOT_EVALUATED' | 'STALE_RESOURCES';
+  readonly code: 'FRESHNESS_NOT_EVALUATED' | 'SIMULATED_RESOURCES' | 'RESOURCE_AGE_NOT_EVALUATED';
   readonly message: string;
 }
 
