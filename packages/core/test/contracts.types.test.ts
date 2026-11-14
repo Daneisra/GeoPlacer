@@ -17,7 +17,9 @@ import type {
   Rgb,
   SchedulerDependencies,
   TemplateId,
-  TemplateMetadataV1,
+  RevisionRecordV1,
+  TemplateManager,
+  TemplateManifestV1,
 } from '../src/index.js';
 
 // Type-level stand-ins: never called, only used to build typed values.
@@ -83,14 +85,26 @@ describe('nominal identifiers and colors', () => {
   });
 });
 
-describe('template metadata (PNG + JSON)', () => {
-  it('pins the schema version and requires the PNG fingerprint', () => {
-    expectTypeOf<TemplateMetadataV1['schemaVersion']>().toEqualTypeOf<1>();
-    expectTypeOf<TemplateMetadataV1['image']['pngSha256']>().toEqualTypeOf<string>();
-    expectTypeOf<TemplateMetadataV1>().toHaveProperty('coordinateSystem');
-    expectTypeOf<TemplateMetadataV1>().toHaveProperty('palette');
-    expectTypeOf<TemplateMetadataV1>().toHaveProperty('strategy');
-    expectTypeOf<TemplateMetadataV1>().toHaveProperty('projectId');
-    expectTypeOf<TemplateMetadataV1>().toHaveProperty('placement');
+describe('template manifest (PNG blobs + JSON)', () => {
+  it('pins the schema version and carries the required metadata', () => {
+    expectTypeOf<TemplateManifestV1['schemaVersion']>().toEqualTypeOf<1>();
+    for (const key of ['templateId', 'projectId', 'name', 'drawingStrategy', 'createdAt', 'updatedAt', 'currentRevision', 'generation', 'extensions'] as const) {
+      expectTypeOf<TemplateManifestV1>().toHaveProperty(key);
+    }
+  });
+
+  it('keeps the content of each revision in an immutable record', () => {
+    for (const key of [
+      'revision', 'width', 'height', 'placement', 'coordinateSystem', 'palette', 'alphaThreshold',
+      'quantizationMethod', 'sourceImageHash', 'quantizedImageHash', 'quantizedFileHash', 'createdAt',
+    ] as const) {
+      expectTypeOf<RevisionRecordV1>().toHaveProperty(key);
+    }
+    expectTypeOf<RevisionRecordV1['sourceImageHash']>().toEqualTypeOf<string>();
+  });
+
+  it('exposes an asynchronous template manager', () => {
+    expectTypeOf<ReturnType<TemplateManager['create']>>().toExtend<Promise<unknown>>();
+    expectTypeOf<ReturnType<TemplateManager['load']>>().toExtend<Promise<unknown>>();
   });
 });

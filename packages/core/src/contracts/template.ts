@@ -1,6 +1,6 @@
 /**
- * Templates, their persisted metadata (PNG + JSON) and the strategy config.
- * Layer 2.
+ * Templates, their persisted manifest (PNG blobs + JSON) and the template
+ * manager API. Layer 2.
  */
 
 import type { CoordinateSystem, TemplatePlacement } from './geometry.js';
@@ -39,11 +39,20 @@ export interface StrategyConfig {
 
 export type TemplateStatus = 'active' | 'paused' | 'completed' | 'archived';
 
+/** How source pixels were mapped to the palette. Part of a revision's identity. */
+export interface QuantizationMethod {
+  readonly algorithm: 'nearest-color';
+  /** ColorDistance id ('oklab' by default). */
+  readonly distance: string;
+  readonly version: 1;
+}
+
+/** A template revision loaded in memory (image included). */
 export interface Template {
   readonly id: TemplateId;
   readonly projectId: ProjectId;
   readonly name: string;
-  /** Incremented on every image or placement change; attempts of older revisions are void. */
+  /** Immutable revision; attempts of older revisions are void. */
   readonly revision: number;
   readonly image: TemplateImage;
   readonly placement: TemplatePlacement;
@@ -53,75 +62,212 @@ export interface Template {
    * (geometry/convertPlacement), never implicitly.
    */
   readonly coordinateSystem: CoordinateSystem;
+  /** Reference palette used for quantization (its order breaks ties). */
   readonly palette: Palette;
+  readonly alphaThreshold: number;
+  readonly quantization: QuantizationMethod;
   /** Higher first. */
   readonly priority: number;
   readonly status: TemplateStatus;
   readonly strategy: StrategyConfig;
+  readonly sourceImageHash: string;
+  readonly quantizedImageHash: string;
   readonly createdAt: Timestamp;
   readonly updatedAt: Timestamp;
 }
 
-export type TemplateInput = Pick<Template, 'projectId' | 'name' | 'image' | 'placement' | 'coordinateSystem' | 'palette' | 'priority' | 'strategy'>;
-export type TemplatePatch = Partial<Pick<Template, 'name' | 'image' | 'placement' | 'coordinateSystem' | 'palette' | 'priority' | 'strategy'>>;
+// ───────────────────────── Persisted manifest (schema v1) ─────────────────────────
 
-export interface TemplateManager {
-  list(): readonly Template[];
-  get(id: TemplateId): Template | undefined;
-  create(input: TemplateInput): Template;
-  /** Image, placement or coordinate-system changes bump the revision. */
-  update(id: TemplateId, patch: TemplatePatch): Template;
-  pause(id: TemplateId): Template;
-  resume(id: TemplateId): Template;
-  /** Forget progress history; the canvas stays the source of truth. */
-  reset(id: TemplateId): Template;
+export const TEMPLATE_MANIFEST_SCHEMA_VERSION = 1;
+
+/** Why a revision was created (several reasons can apply at once). */
+export type RevisionReason =
+  | 'created'
+  | 'source-image'
+  | 'palette'
+  | 'alpha-threshold'
+  | 'quantization'
+  | 'placement'
+  | 'coordinate-system'
+  | 'restored'
+  | 'duplicated';
+
+export interface QuantizationStats {
+  readonly pixels: number;
+  readonly transparent: number;
+  readonly exact: number;
+  readonly approximated: number;
 }
 
-// ───────────── Persisted metadata (template.json next to template.png) ─────────────
+/** Immutable once published: never rewritten, never removed automatically. */
+export interface RevisionRecordV1 {
+  readonly revision: number;
+  readonly createdAt: Timestamp;
+  readonly reasons: readonly RevisionReason[];
+  /** Revision this one was derived from (null for the first revision). */
+  readonly basedOn: number | null;
+  readonly width: number;
+  readonly height: number;
+  readonly placement: TemplatePlacement;
+  readonly coordinateSystem: CoordinateSystem;
+  readonly palette: Palette;
+  readonly alphaThreshold: number;
+  readonly quantizationMethod: QuantizationMethod;
+  /** SHA-256 of the source PNG bytes; also the address of the source blob. */
+  readonly sourceImageHash: string;
+  /** SHA-256 of the canonical serialization of the quantized pixels (see template/pixels). */
+  readonly quantizedImageHash: string;
+  /** SHA-256 of the stored quantized PNG bytes; the address of that blob. */
+  readonly quantizedFileHash: string;
+  readonly stats: QuantizationStats;
+}
 
-export const TEMPLATE_METADATA_SCHEMA_VERSION = 1;
-
-/** JSON metadata stored next to the template PNG. */
-export interface TemplateMetadataV1 {
+/**
+ * One JSON file per template. Mutable settings (name, strategy, priority,
+ * status) live at the top level; revisions are append-only records.
+ * Unknown top-level fields are preserved in `extensions` for forward
+ * compatibility.
+ */
+export interface TemplateManifestV1 {
   readonly schemaVersion: 1;
   readonly projectId: ProjectId;
   readonly templateId: TemplateId;
+  /** Incremented on every write; checked by the storage (compare-and-swap). */
+  readonly generation: number;
   readonly name: string;
-  readonly revision: number;
-  readonly image: {
-    readonly width: number;
-    readonly height: number;
-    /** Lower-case hex SHA-256 of the PNG file; checked on load. */
-    readonly pngSha256: string;
-  };
-  readonly placement: TemplatePlacement;
-  /**
-   * Coordinate system in which `placement` is expressed. The canvas reader's
-   * system is the reference; a different one is converted explicitly
-   * (geometry/convertPlacement), never implicitly.
-   */
-  readonly coordinateSystem: CoordinateSystem;
-  readonly palette: Palette;
-  readonly strategy: StrategyConfig;
+  readonly drawingStrategy: StrategyConfig;
   readonly priority: number;
   readonly status: TemplateStatus;
   readonly createdAt: Timestamp;
   readonly updatedAt: Timestamp;
+  /** Controlled deletion: a tombstone, files are kept. */
+  readonly deletedAt: Timestamp | null;
+  readonly currentRevision: number;
+  readonly revisions: readonly RevisionRecordV1[];
+  readonly extensions: Readonly<Record<string, unknown>>;
 }
 
-/** Union of every supported schema version; the latest is the working shape. */
-export type TemplateMetadata = TemplateMetadataV1;
+/** Union of supported schema versions; the latest is the working shape. */
+export type TemplateManifest = TemplateManifestV1;
 
-export type MetadataParseResult =
-  | { readonly ok: true; readonly metadata: TemplateMetadata; readonly migratedFrom?: number }
-  | { readonly ok: false; readonly errors: readonly string[] };
+// ───────────────────────── Template manager API ─────────────────────────
 
-/**
- * Validation and migration of template metadata. Older schema versions are
- * migrated to the latest one; unknown or newer versions are rejected.
- */
-export interface TemplateMetadataCodec {
-  readonly latestVersion: number;
-  parse(json: unknown): MetadataParseResult;
-  serialize(metadata: TemplateMetadata): unknown;
+export interface TemplateRef {
+  readonly projectId: ProjectId;
+  readonly templateId: TemplateId;
+}
+
+export interface CreateTemplateInput {
+  readonly projectId: ProjectId;
+  readonly name: string;
+  readonly sourcePng: Uint8Array;
+  readonly palette: Palette;
+  readonly placement: TemplatePlacement;
+  readonly coordinateSystem: CoordinateSystem;
+  /** Default 128: alpha < threshold is transparent. */
+  readonly alphaThreshold?: number;
+  /** Default: nearest color in OKLab. */
+  readonly quantization?: QuantizationMethod;
+  /** Default: top-to-bottom. */
+  readonly strategy?: StrategyConfig;
+  /** Default 0. */
+  readonly priority?: number;
+}
+
+/** Changes that create a new revision when they differ from the current one. */
+export interface RevisionChange {
+  readonly sourcePng?: Uint8Array;
+  readonly palette?: Palette;
+  readonly alphaThreshold?: number;
+  readonly quantization?: QuantizationMethod;
+  readonly placement?: TemplatePlacement;
+  readonly coordinateSystem?: CoordinateSystem;
+}
+
+/** Changes that never create a revision. */
+export interface SettingsPatch {
+  readonly name?: string;
+  readonly strategy?: StrategyConfig;
+  readonly priority?: number;
+}
+
+export interface TemplateSummary {
+  readonly projectId: ProjectId;
+  readonly templateId: TemplateId;
+  readonly name: string;
+  readonly currentRevision: number;
+  readonly revisionCount: number;
+  readonly width: number;
+  readonly height: number;
+  /** Non-transparent pixels of the current revision (0 for a fully transparent image). */
+  readonly paintablePixels: number;
+  readonly status: TemplateStatus;
+  readonly priority: number;
+  readonly strategy: StrategyConfig;
+  readonly createdAt: Timestamp;
+  readonly updatedAt: Timestamp;
+}
+
+export interface LoadOptions {
+  /** Load this revision exactly; an invalid one is an error, never a fallback. */
+  readonly revision?: number;
+  /**
+   * When loading the current revision: fall back to the latest revision that
+   * verifies (and to the backup manifest). Read-only: nothing is rewritten.
+   */
+  readonly recover?: boolean;
+}
+
+export interface LoadReport {
+  readonly requestedRevision: number | 'current';
+  readonly loadedRevision: number;
+  readonly manifestSource: 'current' | 'backup';
+  /** What failed before the loaded revision was found (empty when nothing failed). */
+  readonly problems: readonly string[];
+}
+
+export interface LoadedTemplate {
+  readonly template: Template;
+  readonly report: LoadReport;
+}
+
+export interface RevisionResult {
+  readonly template: Template;
+  /** False when the change was a no-op (nothing differs): no revision is created. */
+  readonly created: boolean;
+  readonly reasons: readonly RevisionReason[];
+}
+
+export interface RevisionCheck {
+  readonly revision: number;
+  readonly ok: boolean;
+  readonly problems: readonly string[];
+}
+
+export interface VerifyReport {
+  readonly manifestSource: 'current' | 'backup';
+  readonly currentRevision: number;
+  readonly revisions: readonly RevisionCheck[];
+}
+
+export interface TemplateManager {
+  create(input: CreateTemplateInput): Promise<Template>;
+  load(ref: TemplateRef, options?: LoadOptions): Promise<LoadedTemplate>;
+  /** Validated metadata of a template (no image decoding). */
+  manifest(ref: TemplateRef): Promise<TemplateManifest>;
+  /** Templates of one project (deleted ones excluded). */
+  list(projectId: ProjectId): Promise<readonly TemplateSummary[]>;
+  /** New revision for content changes; a no-op change creates nothing. */
+  revise(ref: TemplateRef, change: RevisionChange): Promise<RevisionResult>;
+  /** New revision whose content copies an older one (history is never rewritten). */
+  restoreRevision(ref: TemplateRef, revision: number): Promise<RevisionResult>;
+  /** Name, strategy, priority: no new revision. */
+  updateSettings(ref: TemplateRef, patch: SettingsPatch): Promise<TemplateSummary>;
+  setStatus(ref: TemplateRef, status: TemplateStatus): Promise<TemplateSummary>;
+  /** Copy of the current revision under a new id (optionally in another project). */
+  duplicate(ref: TemplateRef, options: { readonly name: string; readonly projectId?: ProjectId }): Promise<Template>;
+  /** Controlled deletion: requires the template name; files are kept (tombstone). */
+  delete(ref: TemplateRef, options: { readonly confirmName: string }): Promise<void>;
+  /** Re-reads and re-hashes every blob of every revision (read-only). */
+  verify(ref: TemplateRef): Promise<VerifyReport>;
 }

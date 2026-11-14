@@ -31,6 +31,7 @@ const LAYERS: Readonly<Record<string, number>> = {
   palette: 1,
   resources: 1,
   accounts: 1,
+  ports: 1,
   template: 2,
   canvas: 2,
   strategy: 3,

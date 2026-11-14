@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CORE_CONTRACT_VERSION,
   DEFAULT_MAX_ACTIVE_AGENTS,
-  TEMPLATE_METADATA_SCHEMA_VERSION,
+  TEMPLATE_MANIFEST_SCHEMA_VERSION,
   TRANSPARENT,
   TRANSPARENT_U32,
   UNKNOWN,
@@ -23,8 +23,9 @@ describe('core constants', () => {
     expect(new Uint32Array([TRANSPARENT_U32])[0]).toBe(TRANSPARENT_U32);
   });
 
-  it('versions the template metadata schema and the contracts', () => {
-    expect(TEMPLATE_METADATA_SCHEMA_VERSION).toBe(1);
-    expect(CORE_CONTRACT_VERSION).toBe(1);
+  it('versions the template manifest schema and the contracts', () => {
+    expect(TEMPLATE_MANIFEST_SCHEMA_VERSION).toBe(1);
+    // Contract v2 (Phase 1B.2): asynchronous TemplateManager, manifest with revision records.
+    expect(CORE_CONTRACT_VERSION).toBe(2);
   });
 });

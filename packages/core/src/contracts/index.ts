@@ -3,7 +3,7 @@
  *
  * Layering (imports only go downwards, no cycle):
  *   0 primitives, config
- *   1 geometry, palette, resources, accounts
+ *   1 geometry, palette, resources, accounts, ports
  *   2 template, canvas
  *   3 strategy, work, progress
  *   4 scheduler
@@ -15,6 +15,7 @@ export * from './geometry.js';
 export * from './palette.js';
 export * from './resources.js';
 export * from './accounts.js';
+export * from './ports.js';
 export * from './template.js';
 export * from './canvas.js';
 export * from './strategy.js';
