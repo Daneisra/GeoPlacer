@@ -11,8 +11,8 @@ local** (voir l'ADR 0001).
 Réalisé en Phase 1B.2 : gestionnaire de modèles (import PNG, quantification
 enregistrée, révisions immuables, projets), persistance vérifiée par
 SHA-256 et résistante aux interruptions, paquet `@geoplacer/adapters-node`
-(voir [modeles.md](modeles.md)). Anomalie ouverte : `npm run dev` (voir
-[installation-windows.md](installation-windows.md) § 5).
+(voir [modeles.md](modeles.md)). Le blocage de `npm run dev` est corrigé
+en Phase 1B.3 (voir [installation-windows.md](installation-windows.md) § 5).
 
 Réalisé en Phase 1B.1 : projection image ↔ toile, conversions OKLab,
 palettes par agent et quantification (voir

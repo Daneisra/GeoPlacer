@@ -11,8 +11,8 @@
   ],
   "scripts": {
     "start": "node --env-file-if-exists=.env dist/server.js",
-    "dev": "concurrently --prefix-colors=blue,green --names=backend,frontend \"npx tsx watch --env-file-if-exists=.env src/server.ts\" \"npm run dev:frontend\"",
-    "dev:backend": "npx tsx watch --env-file-if-exists=.env src/server.ts",
+    "dev": "concurrently --prefix-colors=blue,green --names=backend,frontend \"node --watch --env-file-if-exists=.env --import tsx src/server.ts\" \"npm run dev:frontend\"",
+    "dev:backend": "node --watch --env-file-if-exists=.env --import tsx src/server.ts",
     "dev:frontend": "cd frontend && npm run dev",
     "build": "npm run build:packages && tsc && cd frontend && npm run build",
     "build:backend": "tsc",

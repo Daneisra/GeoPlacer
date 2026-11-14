@@ -125,64 +125,87 @@ npm start               # node --env-file-if-exists=.env dist/server.js
 Le serveur affiche `Server listening on http://127.0.0.1:3000`. L'interface
 compilée (`frontend/dist`) est servie à la même adresse.
 
-### Mode développement : anomalie ouverte (diagnostic de la Phase 1B.2)
-
-Dans l'environnement de test, qui est non interactif, le backend lancé par
-`npm run dev` ne démarre pas. Diagnostic du 14/11/2026 :
-- sorties standard et d'erreur capturées séparément ;
-- arbre de processus relevé ;
-- arrêt de tout l'arbre (`taskkill /T /F`) après chaque essai.
-
-Les essais H et J ne diffèrent que par l'entrée standard : même dossier
-courant, mêmes variables d'environnement. Ces deux pistes sont donc
-écartées.
-
-| Essai | Lancement | Entrée standard | Attente | Backend |
-|---|---|---|---|---|
-| A | `npm run dev` via cmd.exe | tube ouvert | 45 s | **ne démarre pas** |
-| B | `npm run dev` via PowerShell | tube ouvert | 60 s | **ne démarre pas** |
-| C | `npm run dev` via cmd.exe | fermée (`ignore`) ; `concurrently` donne quand même un tube à ses enfants | 60 s | **ne démarre pas** |
-| G | `concurrently --raw` + `tsx watch` | tube | 60 s | **ne démarre pas** |
-| H | `npm run dev:backend` seul | tube ouvert et muet | 120 s | **ne démarre pas** |
-| J | `npm run dev:backend` seul | fermée (`ignore`) | — | démarre en 6 s |
-| D | `concurrently` + `tsx` **sans** `watch` | tube | — | démarre en 26 s |
-| N | `concurrently` + `node --watch --import tsx` | tube | — | démarre en 6 s |
-
-**Déclencheur identifié, mécanisme inconnu** : le blocage survient quand
-trois conditions sont réunies :
-- `tsx watch` ;
-- une entrée standard en **tube** resté ouvert, ce qui est toujours le cas
-  sous `concurrently` ;
-- le chargement de `chalk` 5.6.2, importé par `gradient-string` 3.0.0
-  pour la bannière de démarrage.
-
-Isolé par bissection :
-- un script trivial, `express`, `ws`, `swagger` et `tinygradient` ne
-  bloquent pas ;
-- `tty.isatty` seul ne bloque pas ;
-- un parent qui lit son entrée standard, avec un enfant qui en hérite, ne
-  reproduit pas le blocage.
-
-La raison exacte n'est pas établie. `tsx watch` lit bien son entrée
-standard (touche Entrée pour relancer), mais cela ne suffit pas à
-reproduire le blocage.
-
-Dans un vrai terminal, `npm run dev:backend` reçoit la console et non un
-tube : il devrait fonctionner. L'essai C laisse prévoir que **`npm run dev`
-bloque aussi dans un vrai terminal**, car `concurrently` donne toujours un
-tube à ses enfants. À vérifier par l'utilisateur.
-
-**Contournement** (deux terminaux, ou `start.bat`) :
+### Mode développement (corrigé en Phase 1B.3)
 
 ```powershell
-npm run dev:backend     # terminal 1 : tsx watch, port 3000
-npm run dev:frontend    # terminal 2 : Vite, port 5173
+npm run dev             # backend (port 3000) + frontend Vite (port 5173)
+npm run dev:backend     # backend seul
+npm run dev:frontend    # frontend seul
 ```
 
-**Correction proposée, non appliquée** (à valider) : remplacer
-`npx tsx watch` par `node --watch --import tsx` dans `dev` et
-`dev:backend`. Vérifiée sous `concurrently` : démarrage en 6 s, et
-relance automatique quand un fichier `.ts` importé change.
+Le backend tourne sous `node --watch --env-file-if-exists=.env --import tsx
+src/server.ts`. Node relance le serveur dès qu'un fichier chargé change, et
+`tsx` compile le TypeScript à la volée. `Ctrl+C` arrête tout ; Windows
+demande ensuite « Terminer le programme de commandes (O/N) ? ». Ce message
+vient de cmd.exe et des raccourcis `.cmd` de npm, les serveurs sont déjà
+arrêtés.
+
+#### Problème corrigé
+
+Jusqu'à la Phase 1B.2, le backend lancé par `npm run dev` ne démarrait
+jamais. C'est un problème connu de `tsx` sous Windows
+([privatenumber/tsx#623](https://github.com/privatenumber/tsx/issues/623),
+toujours ouvert) :
+- `tsx watch` écoute son entrée standard (touche Entrée pour relancer) ;
+- quand cette entrée est un **tube**, le processus du serveur se bloque à
+  l'import du module `process` (analyse publiée dans l'issue, non
+  confirmée par le mainteneur) ;
+- `chalk` 5 fait cet import (ici via `gradient-string`, pour la bannière de
+  démarrage).
+
+`concurrently` donne toujours un tube à ses enfants : `npm run dev`
+bloquait donc aussi dans un vrai terminal. La Phase 1B.2 avait isolé ce
+déclencheur (`tsx watch`, entrée en tube, `chalk`) sans en connaître la
+cause.
+
+#### Comparaison des deux corrections (14/11/2026)
+
+Essais automatisés sous Windows 10 :
+- lancement dans une **vraie console** (nouvelle fenêtre réduite, `Ctrl+C`
+  envoyé à la console) ou avec une entrée en **tube** (tâches d'éditeur,
+  scripts) ;
+- modification d'un fichier du backend (`src/routes/palette.ts`) et du
+  frontend (`frontend/src/index.css`), restaurés ensuite ;
+- arbre de processus relevé avant l'arrêt.
+
+| Commande | Entrée | Démarrage | Modification backend | Modification frontend | Arrêt par `Ctrl+C` |
+|---|---|---|---|---|---|
+| Ancien `npm run dev` | console | **backend bloqué** | — | prise en compte | — |
+| Ancien `npm run dev:backend` | console | backend en 21 s | relancé, de retour en 7 s | — | propre en 4 s |
+| `concurrently -r` + `tsx watch` (issue #623) | console | backend en 31 s, frontend en 26 s | relancé, de retour en 8 s | prise en compte en 0,9 s | propre en 4 s |
+| `concurrently -r` + `tsx watch` | tube | **backend bloqué** | — | prise en compte | non testé |
+| `concurrently` + `node --watch --import tsx` | console | backend en 21 s, frontend en 25 s | relancé, de retour en 7 s | prise en compte en 0,9 s | propre en 5 s |
+| `concurrently` + `node --watch --import tsx` | tube | backend en 20 s, frontend en 25 s | relancé, de retour en 8 s | prise en compte en 0,8 s | non testé |
+
+Les durées de démarrage varient d'un essai à l'autre (cache disque, charge
+de la machine). Dans tous les cas, l'arrêt n'a laissé ni processus Node
+orphelin ni port 3000 ou 5173 occupé.
+
+**Choix : `node --watch --import tsx`.**
+- **Fiabilité** : il fonctionne aussi avec une entrée en tube, car aucun
+  processus n'écoute l'entrée standard. L'option `-r` de `concurrently`
+  donne simplement la console aux enfants : elle ne marche que dans un vrai
+  terminal et bloque encore dans une tâche d'éditeur ou un script.
+- **Simplicité** : `node --watch` est intégré à Node 22, sans nouvelle
+  dépendance ; `tsx` ne sert plus qu'à charger le TypeScript.
+- **Lisibilité** : avec `-r`, `concurrently` perd les préfixes
+  `[backend]` / `[frontend]` et les couleurs.
+
+Ce qui change : la touche Entrée ne relance plus le backend (fonction de
+`tsx watch`). Il suffit d'enregistrer un fichier, ou d'arrêter et de
+relancer.
+
+#### Vérification des scripts corrigés
+
+| Script | Entrée | Démarrage | Modification backend | Modification frontend | Arrêt par `Ctrl+C` |
+|---|---|---|---|---|---|
+| `npm run dev` | console | backend en 11 s, frontend en 14 s | relancé, de retour en 6 s | prise en compte en 0,8 s | propre en 4 s, ports libérés |
+| `npm run dev` | tube | backend en 10 s, frontend en 14 s | relancé, de retour en 7 s | prise en compte en 0,8 s | non testé |
+| `npm run dev:backend` | console | backend en 11 s | relancé, de retour en 6 s | — | propre en 4 s, port libéré |
+| `npm run dev:backend` | tube | backend en 8 s | relancé, de retour en 13 s | — | non testé |
+
+Avec une entrée en tube, il n'y a pas de console à qui envoyer `Ctrl+C` :
+l'arrêt de ces essais a été forcé (`taskkill /T /F`).
 
 ## 6. Configuration (`.env`)
 

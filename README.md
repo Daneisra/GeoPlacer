@@ -65,7 +65,7 @@ For development, you can run the backend and frontend separately with hot-reload
 npm run dev
 
 # Or run them separately
-npm run dev:backend  # Backend with tsx watch
+npm run dev:backend  # Backend with node --watch (TypeScript loaded by tsx)
 npm run dev:frontend # Frontend with Vite
 ```
 
