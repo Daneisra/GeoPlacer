@@ -1,6 +1,6 @@
 # Modèles : gestion, révisions et persistance
 
-État : **Phase 1B.2**. Le gestionnaire de modèles (`TemplateManager`) est
+État : **Phase 1B.3** (corrections A, B, C). Le gestionnaire de modèles (`TemplateManager`) est
 implémenté dans `@geoplacer/core`, sans aucune entrée/sortie. Les accès aux
 fichiers, le décodage PNG et le calcul SHA-256 passent par des ports,
 implémentés pour Node.js dans `@geoplacer/adapters-node`. Le serveur hérité
@@ -9,10 +9,12 @@ n'utilise pas encore ce gestionnaire.
 ## 1. Fonctions
 
 ```ts
-import { createNodeTemplateManager } from '@geoplacer/adapters-node';
+import { openNodeTemplateManager } from '@geoplacer/adapters-node';
 
-const modeles = createNodeTemplateManager('data/engine');
+// Prend le verrou du répertoire de données (§ 5) : une seule instance à la fois.
+const { manager: modeles, close } = await openNodeTemplateManager('data/engine');
 const t = await modeles.create({ projectId, name, sourcePng, palette, placement, coordinateSystem });
+await close();
 ```
 
 | Opération | Effet | Nouvelle révision ? |
@@ -22,7 +24,7 @@ const t = await modeles.create({ projectId, name, sourcePng, palette, placement,
 | `load(ref, { revision })` | Charge **exactement** cette révision (erreur si elle ne se vérifie pas) | — |
 | `load(ref, { recover: true })` | Récupération en lecture seule (§ 5) | — |
 | `manifest(ref)` | Métadonnées validées, sans décodage d'image | — |
-| `list(projectId)` | Modèles d'un projet (supprimés exclus) | — |
+| `list(projectId)` | `{ templates, failures }` : modèles lisibles d'un projet (supprimés exclus), et modèles illisibles à part | — |
 | `revise(ref, changement)` | Image source, palette, seuil alpha, quantification, placement ou repère | oui, si quelque chose change |
 | `restoreRevision(ref, n)` | Nouvelle révision qui reprend le contenu de la révision `n` | oui (`restored`) |
 | `updateSettings(ref, …)` | Nom, stratégie, priorité | **non** |
@@ -30,6 +32,7 @@ const t = await modeles.create({ projectId, name, sourcePng, palette, placement,
 | `duplicate(ref, { name, projectId? })` | Copie de la révision courante, nouvel identifiant, statut `paused` | révision 1 (`duplicated`) |
 | `delete(ref, { confirmName })` | Suppression contrôlée : exige le nom exact ; pierre tombale, fichiers conservés | — |
 | `verify(ref)` | Relit et revérifie chaque révision (lecture seule) | — |
+| `repair(ref, { apply })` | Réparation explicite d'un manifeste courant absent ou malformé (§ 5) | — |
 
 Projets : chaque modèle appartient à un projet (`projectId`). Les
 manifestes et les blobs sont rangés par projet ; un manifeste placé sous un
@@ -56,6 +59,13 @@ autre projet que le sien est refusé.
    mêmes pixels, sinon la création échoue.
 
 Une image entièrement transparente est acceptée (0 pixel à peindre).
+
+**Placement partiellement hors toile** : accepté, avec un avertissement
+explicite (`warnings` du modèle chargé et du résumé de `list`) :
+`PLACEMENT_PARTIALLY_OUTSIDE`, avec le nombre de pixels hors des limites.
+Ces pixels ne seront jamais peints (les stratégies les ignorent). L'avertissement est
+recalculé à chaque chargement, jamais stocké. Un placement entièrement
+hors toile reste refusé (`PLACEMENT_OUTSIDE_BOUNDS`).
 Codes d'erreur : `INVALID_PNG`, `IMAGE_TOO_LARGE`, `DECODE_MISMATCH`,
 `INVALID_INPUT`, `UNSUPPORTED_QUANTIZATION`, `INVALID_NAME`, `INVALID_ID`,
 et les erreurs de géométrie (`PLACEMENT_OUTSIDE_BOUNDS`, coordonnées non
@@ -98,7 +108,17 @@ complète), `alphaThreshold`, `quantizationMethod`, `sourceImageHash`,
 | `quantizedFileHash` | Octets du PNG quantifié stocké (adresse du blob) |
 
 **Compatibilité** : un code futur de schéma 1 ajoute ses données
-facultatives dans `extensions` (manifeste ou révision), conservé tel quel.
+facultatives dans `extensions` (manifeste ou révision), conservé tel quel
+mais **validé** :
+- noms de premier niveau : une lettre, puis lettres, chiffres, `.`, `_`
+  ou `-` (64 caractères au plus) ; 64 entrées au plus ;
+- valeurs JSON simples (objets ordinaires, tableaux, chaînes de 10 000
+  caractères au plus, nombres finis, booléens, `null`) ;
+- clés `__proto__`, `constructor` et `prototype` refusées ;
+- profondeur 8 et 64 Kio au plus.
+
+La stratégie est validée elle aussi : graine entière dans [0, 2^32),
+`colorOrder` sans doublon.
 Tout autre champ inconnu est refusé (`INVALID_MANIFEST`) : un changement
 incompatible exige `schemaVersion: 2` et une migration. Un manifeste d'un
 schéma plus récent est refusé (`UNSUPPORTED_SCHEMA`), jamais remplacé par
@@ -155,6 +175,26 @@ remplace ; si elle a changé entre-temps, l'écriture est refusée
 (`CONFLICT`). Les opérations sur un même modèle sont sérialisées dans le
 processus.
 
+**Verrou du répertoire de données** (correction C) : la
+comparaison-échange lit puis remplace le manifeste. Deux processus
+pourraient donc la passer tous les deux. `openNodeTemplateManager` prend
+d'abord un verrou exclusif sur le répertoire ; une seconde instance
+échoue au démarrage (`DataDirectoryLockedError`, avec le pid et l'heure de
+démarrage du détenteur), avant toute écriture. Le stockage refuse toute
+écriture si le verrou a été rendu (`close`).
+- **Windows** (mécanisme par défaut) : `<racine>/.geoplacer.lock` reste
+  ouvert en partage exclusif (`UV_FS_O_EXLOCK` de libuv). Le noyau refuse
+  toute autre ouverture et libère le verrou à la fin du processus, même
+  tué : aucun verrou périmé n'est possible.
+- **Autres systèmes** : fichier pid créé de façon exclusive (`wx`). Un
+  verrou dont le processus n'existe plus sur cette machine est repris.
+  Cette reprise n'est pas atomique face à une autre instance qui la
+  tenterait au même instant. Ce mécanisme est testé sous Windows en le
+  forçant ; il n'a jamais été exécuté sous Linux ni macOS.
+
+Le propriétaire (pid, heure de démarrage) est écrit dans
+`.geoplacer.lock.owner`, uniquement pour le message d'erreur.
+
 **Vérification au chargement** : présence et SHA-256 des deux blobs,
 en-tête et limites, décodage, forme canonique des pixels,
 `quantizedImageHash`, cohérence avec les statistiques. Tout écart donne
@@ -170,6 +210,40 @@ en-tête et limites, décodage, forme canonique des pixels,
 - rien n'est réécrit ; une révision **demandée explicitement** qui ne se
   vérifie pas reste une erreur.
 
+**Réparation explicite** (`repair(ref, { apply })`, correction B) :
+
+| Situation | Résultat |
+|---|---|
+| Manifeste courant valide | `action: 'none'`, rien n'est écrit |
+| Manifeste courant absent ou malformé, sauvegarde valide dont la révision courante se vérifie | `action: 'restore-backup'` : la sauvegarde redevient le manifeste courant, avec `generation` = génération de la sauvegarde + 2 |
+| Manifeste d'un **schéma plus récent** | `UNSUPPORTED_SCHEMA` : jamais remplacé, rien n'est écrit |
+| Sauvegarde absente ou invalide | `INVALID_MANIFEST`, rien n'est écrit |
+| Révision courante de la sauvegarde qui ne se vérifie pas | `INTEGRITY_ERROR`, rien n'est écrit |
+
+- `apply: false` : diagnostic seul, rien n'est écrit.
+- Le fichier corrompu est conservé **octet pour octet** sous
+  `manifest.json.corrupt-<date>-<id>` (nom renvoyé dans `preservedAs`).
+- La sauvegarde `manifest.json.bak` n'est pas touchée.
+- La publication est un seul renommage, conditionné au contenu brut lu au
+  diagnostic (`CONFLICT` si le fichier a changé entre-temps).
+- Ce qui n'était que dans le manifeste corrompu (au plus la dernière
+  écriture) est perdu. Ses blobs restent sur le disque.
+- L'historique valide n'est jamais réécrit. Une révision corrompue dans
+  un manifeste valide se contourne par `restoreRevision` vers une révision
+  qui se vérifie.
+
+**Listage isolé** (correction A) : `list` renvoie les modèles lisibles dans
+`templates`, et les autres dans `failures`, avec l'identifiant, un code et
+un message fixe :
+
+| Code | Message |
+|---|---|
+| `INVALID_MANIFEST` | the manifest and its backup are missing or invalid |
+| `UNSUPPORTED_SCHEMA` | the manifest was written by a newer version of GeoPlacer |
+| `READ_ERROR` | the storage could not read the manifest |
+
+Ni contenu du manifeste ni chemin de fichier n'y apparaissent.
+
 **Tests** :
 
 - une panne est injectée à **chaque** appel au stockage de chaque
@@ -180,19 +254,23 @@ en-tête et limites, décodage, forme canonique des pixels,
   modèle est exactement dans l'ancien ou le nouvel état, entièrement
   vérifié ;
 - la suite tourne sur le stockage mémoire **et** sur le stockage fichiers ;
+- la réparation est soumise aux mêmes pannes injectées : il reste soit
+  l'état corrompu (avec la sauvegarde intacte), soit l'état réparé ;
 - en plus, un vrai processus est tué brutalement 8 fois pendant qu'il
-  écrit des révisions.
+  écrit des révisions ;
+- verrou : deux processus indépendants, puis quatre lancés en même temps
+  (3 tours), avec les deux mécanismes. Un seul entre ; les autres sont
+  refusés avant d'écrire ; le verrou est rendu après une sortie propre et
+  après un arrêt brutal.
 
 **Limites connues** :
 
-- deux **processus** qui écrivent le même modèle au même instant ne sont
-  pas pris en charge (V1 : un seul serveur local) ;
+- le verrou protège un répertoire de données **local** ; un répertoire
+  réseau partagé entre machines n'est pas pris en charge ;
 - les blobs orphelins et les fichiers `.tmp` d'une écriture interrompue ne
   sont pas encore nettoyés ;
 - une coupure d'alimentation n'a pas été testée : la garantie repose sur
-  `fsync` et le renommage atomique de NTFS ;
-- si le manifeste et sa sauvegarde sont tous deux illisibles, `list`
-  échoue pour tout le projet.
+  `fsync` et le renommage atomique de NTFS.
 
 ## 6. Performances (`npm run bench:templates`)
 

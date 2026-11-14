@@ -27,6 +27,25 @@ licence. L'historique Git complet du projet d'origine est conservé.
 - `start.bat` : installation des deux projets par le chemin vérifié.
 - Documentation française (`docs/fr/`, `docs/decisions/`).
 
+## 2026-11-14 — Phase 1B.3 : stratégies de dessin et corrections des modèles
+
+- `packages/core/src/strategy` : les huit stratégies (haut→bas, bas→haut,
+  gauche→droite, droite→gauche, centre→extérieur, aléatoire PCG32 à
+  graine, couleur par couleur, contours d'abord), curseurs par lots,
+  région éligible (pixels hors toile ignorés).
+- Modèles : listage qui isole les modèles illisibles, réparation explicite
+  depuis la sauvegarde (fichier corrompu conservé), avertissement de
+  placement partiellement hors toile, validation des `extensions`, de la
+  graine et de `colorOrder`.
+- `packages/adapters-node` : verrou exclusif du répertoire de données
+  (`openNodeTemplateManager`).
+- `npm run dev` et `npm run dev:backend` : `node --watch --import tsx` au
+  lieu de `tsx watch` (blocage sous Windows, privatenumber/tsx#623).
+- Tests de propriétés des stratégies ; tests à plusieurs processus du
+  verrou ; benchmark `npm run bench:strategies`.
+- Documentation : `docs/fr/strategies.md`, `docs/fr/modeles.md`, ADR 0002
+  § 12, `docs/fr/installation-windows.md` § 5.
+
 ## 2026-11-14 — Phase 1B.2 : gestion des modèles
 
 - `packages/core/src/template` : gestionnaire de modèles pur (via des

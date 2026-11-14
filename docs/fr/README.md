@@ -6,7 +6,14 @@ GeoPlacer est un fork de
 pour GeoPixels, avec un moteur développé et testé **uniquement sur simulateur
 local** (voir l'ADR 0001).
 
-## État actuel : Phase 1B.2, gestion des modèles
+## État actuel : Phase 1B.3, stratégies de dessin
+
+Réalisé en Phase 1B.3 :
+- les huit stratégies de dessin, déterministes et paresseuses (voir
+  [strategies.md](strategies.md)) ;
+- pour les modèles : listage qui isole les modèles illisibles, réparation
+  explicite, verrou du répertoire de données (voir [modeles.md](modeles.md)) ;
+- correction de `npm run dev` sous Windows.
 
 Réalisé en Phase 1B.2 : gestionnaire de modèles (import PNG, quantification
 enregistrée, révisions immuables, projets), persistance vérifiée par

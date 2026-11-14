@@ -18,7 +18,7 @@ npm run check                 # tsc, lint, lint:packages, puis test:all (contrô
 cd frontend; npx eslint .; npm run build
 ```
 
-## Tests des paquets (Phase 1B.2 : Vitest, 13 fichiers, 165 tests + 1 exhaustif optionnel)
+## Tests des paquets (Phase 1B.3 : Vitest, 17 fichiers, 221 tests + 1 exhaustif optionnel)
 
 | Paquet | Fichier | Objet |
 |---|---|---|
@@ -30,10 +30,14 @@ cd frontend; npx eslint .; npm run build
 | core | `color.test.ts` | RVB et hexadécimal, alpha, noir ≠ transparent, OKLab (références d'Ottosson, gris, aller-retour), distances (métrique, espace euclidien) |
 | core | `palette.test.ts` | Plus proche couleur, règle d'égalité, doublons, chemin rapide = chemin générique, quantification déterministe, palettes par agent, couleurs absentes |
 | core | `template-validation.test.ts` | En-tête PNG (types, profondeurs, CRC, tronqué), limites avant décodage (bombe PNG), identifiants et noms, pixels canoniques, quantification par défaut |
-| core | `template-manifest.test.ts` | Manifeste : aller-retour stable, `extensions` conservées, schéma plus récent refusé, 28 manifestes malformés refusés ; règles de révision |
-| core | `template-manager.test.ts` | Création, PNG invalide ou corrompu, dimensions excessives, image entièrement transparente ou opaque, seuil alpha, déterminisme, révisions, réglages sans révision, restauration, concurrence, conflit, empreinte fausse, récupération, manifeste malformé ou étranger, projets, duplication, suppression |
-| core | `template-storage.test.ts` | Suite de conformité sur le stockage mémoire (panne injectée à chaque appel) |
-| adapters-node | `adapters.test.ts` | Même suite de conformité sur le stockage fichiers ; décodage pngjs (palette + tRNS, gris 1/16 bits, entrelacé…) ; disposition des fichiers ; fichiers modifiés sur disque ; chemins refusés ; arrêt brutal d'un processus réel ; dépendances du paquet |
+| core | `template-manifest.test.ts` | Manifeste : aller-retour stable, `extensions` conservées et validées (noms, profondeur, taille, clés interdites), graine et `colorOrder` validés, schéma plus récent refusé, 41 manifestes malformés refusés ; règles de révision |
+| core | `template-manager.test.ts` | Création, PNG invalide ou corrompu, dimensions excessives, image entièrement transparente ou opaque, seuil alpha, déterminisme, révisions, réglages sans révision, restauration, concurrence, conflit, empreinte fausse, récupération, manifeste malformé ou étranger, projets, duplication, suppression ; listage isolé (manifeste illisible, schéma plus récent, erreur de lecture, sans fuite de contenu) ; réparation (diagnostic, application, manifeste absent, refus) ; avertissement de placement partiel |
+| core | `template-storage.test.ts` | Suite de conformité sur le stockage mémoire (panne injectée à chaque appel, réparation comprise ; `replaceManifest`) |
+| core | `strategy-directional.test.ts` | Ordres exacts des 4 stratégies directionnelles, 1 × 1, images transparentes, taille des lots, région éligible (y descendant ou ascendant), placement et Y inversé, entrées invalides |
+| core | `strategy-center-random.test.ts` | PCG32 : vecteurs de référence et implémentation BigInt indépendante ; centre (côtés pairs et impairs, trous, tri exact sur images aléatoires, centre de l'image et non de la région) ; aléatoire (permutation, graine, ordre figé de la version 1, répartition) |
+| core | `strategy-color-outline.test.ts` | Couleur par couleur (fréquences, égalités, `colorOrder`, couleurs absentes, comptage sur l'image entière) ; contours (carré plein, trou, autre couleur, formes fines, définition vérifiée sur images aléatoires) |
+| core | `strategy-properties.test.ts` | Propriétés des 8 stratégies sur images aléatoires : chaque pixel peignable exactement une fois, jamais un transparent, déterminisme, taille des lots, région = ordre filtré, placement et sens de l'axe y ; intégration avec le gestionnaire de modèles |
+| adapters-node | `adapters.test.ts` | Même suite de conformité sur le stockage fichiers ; décodage pngjs (palette + tRNS, gris 1/16 bits, entrelacé…) ; disposition des fichiers ; fichiers modifiés sur disque ; réparation sur disque (octets corrompus conservés) ; chemins refusés ; arrêt brutal d'un processus réel ; verrou du répertoire (un processus ; deux processus indépendants ; quatre lancés en même temps ; les deux mécanismes) ; dépendances du paquet |
 | simulator | `package.test.ts` | Résolution de `@geoplacer/core` (valeurs et types) |
 
 Test exhaustif facultatif (aller-retour OKLab des 16,7 M couleurs, environ
@@ -42,10 +46,20 @@ Test exhaustif facultatif (aller-retour OKLab des 16,7 M couleurs, environ
 Benchmarks :
 - `npm run bench:core` : résultats dans
   [geometrie-couleurs.md](geometrie-couleurs.md) § 4 ;
-- `npm run bench:templates` : résultats dans [modeles.md](modeles.md) § 6.
+- `npm run bench:templates` : résultats dans [modeles.md](modeles.md) § 6 ;
+- `npm run bench:strategies` : résultats dans [strategies.md](strategies.md) § 3.
 
 Mutation vérifiée en 1B.2 : publier le manifeste **avant** d'écrire les
 blobs fait échouer la suite de conformité (scénario « nouvelle source »).
+
+Mutations vérifiées en 1B.3 : calculer le centre sur la région au lieu de
+l'image, ou compter les couleurs sur la région, fait échouer les tests de
+propriétés (région = ordre filtré, placement).
+
+Délais : trois calculs purs de 1 à 3 s ont un délai explicite de 30 s. Un
+passage complet avait échoué une fois sur 2 fichiers, sans détail
+conservé ; trois passages suivants ont réussi. Cause la plus probable : le
+délai par défaut de 5 s sous charge, non confirmée.
 
 Les garanties de types sont vérifiées par `npm run typecheck:packages` : un
 `@ts-expect-error` devenu inutile fait échouer la vérification. Deux

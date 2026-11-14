@@ -1,10 +1,11 @@
 # Architecture de GeoPlacer
 
-État : **Phase 1B.2**. Les contrats existent depuis la 1B.0 ; la géométrie,
+État : **Phase 1B.3**. Les contrats existent depuis la 1B.0 ; la géométrie,
 les couleurs et les palettes sont implémentées en 1B.1 (voir
 [geometrie-couleurs.md](geometrie-couleurs.md)) ; le gestionnaire de
-modèles et sa persistance en 1B.2 (voir [modeles.md](modeles.md)). Le
-serveur et l'interface hérités de Wplacer fonctionnent comme avant.
+modèles et sa persistance en 1B.2 (voir [modeles.md](modeles.md)) ; les
+huit stratégies de dessin en 1B.3 (voir [strategies.md](strategies.md)).
+Le serveur et l'interface hérités de Wplacer fonctionnent comme avant.
 
 ## Arborescence
 
@@ -18,14 +19,16 @@ GeoPlacer/
 │   │   │   ├── geometry/         projection, rectangles, limites, conversion de repère (1B.1)
 │   │   │   ├── color/            RVB, OKLab, distances (1B.1)
 │   │   │   ├── palette/          palettes par agent, plus proche couleur, quantification (1B.1)
-│   │   │   └── template/         gestionnaire de modèles, manifeste, révisions, stockage mémoire (1B.2)
-│   │   ├── bench/                benchmarks (npm run bench:core)
+│   │   │   ├── template/         gestionnaire de modèles, manifeste, révisions, stockage mémoire (1B.2)
+│   │   │   └── strategy/         8 stratégies de dessin, région éligible, PCG32 (1B.3)
+│   │   ├── bench/                benchmarks (npm run bench:core, npm run bench:strategies)
 │   │   ├── test/                 Vitest (dont la suite de conformité des stockages)
 │   │   ├── tsconfig.json         compilation (sans types Node ni DOM)
 │   │   ├── tsconfig.test.json    vérification des sources et des tests
 │   │   └── vitest.config.ts
-│   ├── adapters-node/            @geoplacer/adapters-node : stockage fichiers, codec PNG (pngjs),
-│   │                             SHA-256, UUID, horloge ; benchmark npm run bench:templates (1B.2)
+│   ├── adapters-node/            @geoplacer/adapters-node : stockage fichiers, verrou du répertoire
+│   │                             de données (1B.3), codec PNG (pngjs), SHA-256, UUID, horloge ;
+│   │                             benchmark npm run bench:templates (1B.2)
 │   └── simulator/                @geoplacer/simulator (squelette, dépend de core)
 ├── src/                          serveur hérité (Express, Jest) — inchangé
 ├── frontend/                     interface React héritée — inchangée
@@ -53,6 +56,9 @@ est une décision séparée, qui n'est pas encore prise (ADR 0002, § 7).
 - Les entrées/sorties du gestionnaire de modèles passent par des **ports**
   (`TemplateStorage`, `PngCodec`, `Hasher`, `IdSource`, `TimeSource`),
   définis dans `core` et implémentés par `adapters-node` ou par les tests.
+- Dans `core`, le dossier `strategy/` n'importe que `contracts/` et
+  `geometry/` (vérifié par test) : les stratégies ne connaissent ni le
+  gestionnaire de modèles, ni la toile, ni l'ordonnanceur, ni les comptes.
 - Dans `core`, les contrats sont organisés en couches ; un fichier n'importe
   que des couches inférieures (vérifié par test) :
 

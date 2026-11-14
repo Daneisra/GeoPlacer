@@ -103,7 +103,8 @@ describe('sRGB <-> OKLab', () => {
     }
   });
 
-  it('round-trips exactly on a dense sample (every 3rd value per channel, plus edges)', () => {
+  // ~2 s of pure computation: explicit timeout so a loaded machine cannot fail it.
+  it('round-trips exactly on a dense sample (every 3rd value per channel, plus edges)', { timeout: 30_000 }, () => {
     const values = [...Array.from({ length: 86 }, (_, i) => i * 3), 254, 255];
     const out = new Float64Array(3);
     let mismatches = 0;

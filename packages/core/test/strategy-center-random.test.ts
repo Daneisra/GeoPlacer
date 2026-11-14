@@ -39,7 +39,7 @@ describe('PCG32', () => {
     expect(Array.from({ length: 6 }, () => rng.next())).toEqual([0xa15c02b7, 0x7b47f409, 0xba1d3330, 0x83d2f293, 0xbfa4784b, 0xcbed606e]);
   });
 
-  it('matches an independent 64-bit BigInt implementation (many seeds, streams, bounds)', () => {
+  it('matches an independent 64-bit BigInt implementation (many seeds, streams, bounds)', { timeout: 30_000 }, () => {
     const pick = testRandom(7);
     const seeds = [0, 1, 42, 0xffffffff, 2 ** 40 + 3, Number.MAX_SAFE_INTEGER, ...Array.from({ length: 20 }, () => pick(2 ** 31))];
     for (const seed of seeds) {

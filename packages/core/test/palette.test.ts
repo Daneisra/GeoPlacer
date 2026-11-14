@@ -93,7 +93,8 @@ describe('nearest color', () => {
     expectColorError(() => createPaletteMatcher([-1 as Rgb], oklabDistance), 'INVALID_RGB');
   });
 
-  it('the Euclidean fast path picks exactly what the generic path picks', () => {
+  // ~3 s of pure computation: explicit timeout so a loaded machine cannot fail it.
+  it('the Euclidean fast path picks exactly what the generic path picks', { timeout: 30_000 }, () => {
     // Same OKLab metric, but without euclideanSpace: forces the generic path.
     const generic: ColorDistance = { id: 'oklab-generic', distance: (a, b) => oklabDistance.distance(a, b) };
     const palette: Rgb[] = [];

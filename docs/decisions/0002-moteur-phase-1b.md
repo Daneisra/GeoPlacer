@@ -372,3 +372,34 @@ Les critères reportés de la § 10 sont tenus :
 - image quantifiée persistée, jamais recalculée au chargement.
 
 Détails : [modeles.md](../fr/modeles.md).
+
+## 12. Mise en œuvre de la Phase 1B.3 : contrats v3, stratégies
+
+`CORE_CONTRACT_VERSION` passe à **3**. Aucun manifeste existant n'est
+invalidé, sauf ceux dont la graine sort de [0, 2^32) ou dont `colorOrder`
+contient un doublon (aucun n'existait).
+
+| Élément | Changement | Raison |
+|---|---|---|
+| `TemplateManager.list` | Renvoie `{ templates, failures }` au lieu d'un tableau | Un modèle illisible ne doit pas masquer les autres (correction A) |
+| `TemplateManager.repair` | Nouveau : `repair(ref, { apply })` | Réparation volontaire d'un manifeste courant absent ou malformé (correction B) |
+| `TemplateStorage.replaceManifest` | Nouveau port : comparaison-échange sur le texte brut, conservation du fichier corrompu, sauvegarde intacte | `writeManifest` copierait le fichier corrompu sur la bonne sauvegarde |
+| `Template.warnings`, `TemplateSummary.warnings` | Avertissement dérivé `PLACEMENT_PARTIALLY_OUTSIDE`, jamais stocké | Décision du 14/11/2026 : placement partiel autorisé mais signalé |
+| `extensions` | Validées : noms, JSON simple, profondeur 8, 64 Kio | Décision du 14/11/2026 |
+| `DrawingStrategy` | Étendu sans rupture : région éligible facultative pour `order`, `cursor` (ordre par lots), `version` | Premier lot rapide ; pixels hors toile ignorés |
+| `ImageRect`, `DrawingOrderCursor` | Nouveaux types (couche 3) | Idem |
+| Verrou du répertoire de données | `@geoplacer/adapters-node` : `openNodeTemplateManager` remplace `createNodeTemplateManager` | La comparaison-échange seule ne protège pas entre processus (correction C) |
+
+Précisions sur les stratégies (§ 4) :
+- **Contour** : la règle validée le 14/11/2026 ajoute le voisin **d'une
+  autre couleur** à la définition du § 4 (voisin transparent ou hors de
+  l'image).
+- **Identifiant** : la demande de la 1B.3 écrit `outlines-first`. Le contrat
+  et les manifestes utilisent `outline-first` depuis la 1B.0. Il est
+  conservé, pour ne pas invalider les manifestes ; à confirmer.
+- **Région éligible** : avec une région, l'ordre est exactement l'ordre
+  complet filtré. Le centre, les fréquences de couleur et les contours sont
+  donc calculés sur toute l'image, jamais sur la région.
+
+Détails : [strategies.md](../fr/strategies.md) et
+[modeles.md](../fr/modeles.md).
