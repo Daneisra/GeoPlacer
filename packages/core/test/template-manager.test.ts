@@ -433,7 +433,9 @@ describe('TemplateManager: explicit repair', () => {
     if (entry === undefined) throw new Error('missing');
     const backup = entry.backup;
     entry.current = '{"schemaVersion":1,"truncated';
-    return { t, ref, entry, backup };
+    // The memory storage replaces its entry object on every write: assertions re-read it.
+    const stored = () => s.storage.state.manifests.get(`${P1}/${t.id}`);
+    return { t, ref, entry, backup, stored };
   }
 
   it('does nothing on a valid manifest', async () => {
@@ -446,10 +448,10 @@ describe('TemplateManager: explicit repair', () => {
 
   it('diagnoses without writing, then restores the backup and preserves the corrupt file', async () => {
     const s = setup();
-    const { ref, entry, backup } = await corrupted(s);
+    const { ref, backup, stored } = await corrupted(s);
     const dry = await s.manager.repair(ref, { apply: false });
     expect(dry).toEqual({ action: 'restore-backup', applied: false, problem: 'the current manifest is malformed', generation: 4, currentRevision: 2, preservedAs: null });
-    expect(entry.current).toBe('{"schemaVersion":1,"truncated');
+    expect(stored()?.current).toBe('{"schemaVersion":1,"truncated');
     expect(s.storage.state.preserved.size).toBe(0);
 
     s.clock.tick(1000);
@@ -457,7 +459,8 @@ describe('TemplateManager: explicit repair', () => {
     expect(done).toMatchObject({ action: 'restore-backup', applied: true, generation: 4, currentRevision: 2 });
     expect(done.preservedAs).not.toBeNull();
     expect(s.storage.state.preserved.get(done.preservedAs ?? '')).toBe('{"schemaVersion":1,"truncated');
-    expect(entry.backup).toBe(backup); // the good backup is never overwritten by the corrupt file
+    expect(stored()?.backup).toBe(backup); // the good backup is never overwritten by the corrupt file
+    expect(stored()?.current).not.toBe('{"schemaVersion":1,"truncated');
     const loaded = await s.manager.load(ref);
     expect(loaded.report).toMatchObject({ manifestSource: 'current', loadedRevision: 2, problems: [] });
     // History up to the backup is intact and writable again.
@@ -478,11 +481,12 @@ describe('TemplateManager: explicit repair', () => {
 
   it('never replaces a newer schema, nor repairs from an invalid backup or one that does not verify', async () => {
     const s = setup();
-    const { t, ref, entry, backup } = await corrupted(s);
+    const { t, ref, entry, backup, stored } = await corrupted(s);
     const untouched = async (code: string): Promise<void> => {
       const before = { current: entry.current, backup: entry.backup };
       await expectCode(s.manager.repair(ref, { apply: true }), code);
-      expect({ current: entry.current, backup: entry.backup }).toEqual(before);
+      expect(stored()).toBe(entry); // no write replaced the stored entry
+      expect({ current: stored()?.current, backup: stored()?.backup }).toEqual(before);
       expect(s.storage.state.preserved.size).toBe(0);
     };
     entry.current = (backup ?? '').replace('"schemaVersion": 1', '"schemaVersion": 9');
@@ -520,5 +524,95 @@ describe('TemplateManager: placement warnings', () => {
     expect((await s.manager.load(ref, { revision: 1 })).template.warnings).toEqual([]);
     const unbounded = await create(s, { placement: at(-1_000_000, 5) });
     expect(unbounded.warnings).toEqual([]);
+  });
+});
+
+describe('TemplateManager: repair generation rule (backup + 2)', () => {
+  // Invariant of every normal publish: backup = previous current, so
+  // current.generation = backup.generation + 1. A corrupted current manifest
+  // therefore had backup + 1 (when it was a normal publish); the repair uses
+  // backup + 2 so that the repaired manifest never carries the generation of
+  // the lost one.
+  async function setupCorrupt() {
+    const s = setup();
+    const t = await create(s);
+    const ref = refOf(t);
+    await s.manager.revise(ref, { placement: at(5, 5) }); // gen 2, revision 2
+    await s.manager.revise(ref, { placement: at(6, 6) }); // gen 3, revision 3 (will be lost)
+    // The memory storage replaces its entry object on every write: always re-read it.
+    const entryOf = () => {
+      const entry = s.storage.state.manifests.get(`${P1}/${t.id}`);
+      if (entry === undefined) throw new Error('missing');
+      return entry;
+    };
+    const corrupt = (text: string): void => {
+      entryOf().current = text;
+    };
+    const lost = JSON.parse(entryOf().current ?? '') as { generation: number };
+    corrupt('garbage');
+    return { s, ref, entryOf, corrupt, lostGeneration: lost.generation };
+  }
+  const generationOf = (json: string | null): number => (JSON.parse(json ?? '') as { generation: number }).generation;
+
+  it('gives a generation above the backup and above the lost manifest', async () => {
+    const { s, ref, entryOf, lostGeneration } = await setupCorrupt();
+    const backupGeneration = generationOf(entryOf().backup);
+    expect(lostGeneration).toBe(backupGeneration + 1);
+    const report = await s.manager.repair(ref, { apply: true });
+    expect(report.generation).toBe(backupGeneration + 2);
+    expect(report.generation).toBeGreaterThan(lostGeneration);
+  });
+
+  it('keeps generations increasing across repair, write, corruption, repair', async () => {
+    const { s, ref, entryOf, corrupt } = await setupCorrupt();
+    const seen: number[] = [generationOf(entryOf().backup)];
+    const first = await s.manager.repair(ref, { apply: true });
+    expect(first.action).toBe('restore-backup');
+    seen.push(first.generation); // 4
+    await s.manager.revise(ref, { placement: at(7, 7) }); // 5, backup 4
+    seen.push((await s.manager.manifest(ref)).generation);
+    corrupt('garbage again');
+    const second = await s.manager.repair(ref, { apply: true });
+    expect(second.action).toBe('restore-backup');
+    seen.push(second.generation); // backup 4 + 2 = 6
+    expect(seen).toEqual([2, 4, 5, 6]);
+  });
+
+  it('retrying an interrupted repair gives the same result', async () => {
+    const { s, ref, entryOf } = await setupCorrupt();
+    const failing: TemplateStorage = {
+      ...s.storage,
+      replaceManifest: async () => {
+        throw new Error('interrupted');
+      },
+    };
+    await expect(s.reopen(failing).repair(ref, { apply: true })).rejects.toThrow('interrupted');
+    expect(entryOf().current).toBe('garbage');
+    expect(await s.manager.repair(ref, { apply: true })).toMatchObject({ action: 'restore-backup', applied: true, generation: 4 });
+  });
+
+  it('KNOWN LIMIT: a repaired manifest corrupted again before any write is repaired to the same generation', async () => {
+    const { s, ref, corrupt } = await setupCorrupt();
+    const first = await s.manager.repair(ref, { apply: true });
+    corrupt('corrupted again');
+    s.clock.tick(1000);
+    const second = await s.manager.repair(ref, { apply: true });
+    expect([first.action, second.action]).toEqual(['restore-backup', 'restore-backup']);
+    // Same generation for two manifests that differ only by updatedAt (same
+    // revisions). Harmless for compare-and-swap (writers are serialized per
+    // template and the data directory is locked), but the generation is not
+    // a unique version id in this case.
+    expect(second.generation).toBe(first.generation);
+  });
+
+  it('KNOWN LIMIT: the revision number of the lost manifest is reused with other content', async () => {
+    const { s, ref } = await setupCorrupt(); // revision 3 (placement 6,6) is lost
+    expect((await s.manager.repair(ref, { apply: true })).currentRevision).toBe(2);
+    const next = await s.manager.revise(ref, { placement: at(9, 9) });
+    // Revision 3 now means placement (9, 9). Anything recorded against the
+    // lost revision 3 (future attempt journal, TaskId) would be ambiguous:
+    // to decide before Phase 1B.6 (docs/fr/modeles.md).
+    expect(next.template.revision).toBe(3);
+    expect(next.template.placement).toEqual(at(9, 9));
   });
 });

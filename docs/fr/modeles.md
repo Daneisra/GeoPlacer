@@ -234,6 +234,50 @@ en-tête et limites, décodage, forme canonique des pixels,
   un manifeste valide se contourne par `restoreRevision` vers une révision
   qui se vérifie.
 
+**Pourquoi « génération de la sauvegarde + 2 »** (vérifié en Phase 1B.4) :
+
+- Toute publication normale copie le manifeste courant en sauvegarde, puis
+  publie la génération suivante : courant = sauvegarde + 1.
+- Un manifeste corrompu issu d'une publication normale portait donc
+  sauvegarde + 1. Réparer en sauvegarde + 1 donnerait le même numéro à deux
+  contenus différents : le manifeste perdu et le manifeste réparé.
+- Sauvegarde + 2 évite cette collision et reste supérieur à toutes les
+  générations connues.
+
+| Scénario (tests de non-régression) | Résultat |
+|---|---|
+| Réparation simple | génération = sauvegarde + 2, supérieure à celle du manifeste perdu |
+| Réparation, écriture, corruption, réparation | générations 2 → 4 → 5 → 6 : toujours croissantes |
+| Réparation interrompue puis relancée | même résultat que sans interruption ; l'état reste corrompu, sauvegarde intacte, jusqu'à la réussite |
+| **Limite** : manifeste réparé corrompu de nouveau avant toute écriture | même génération (sauvegarde + 2) pour deux manifestes qui ne diffèrent que par `updatedAt` |
+| **Limite** : la révision perdue (présente seulement dans le manifeste corrompu) | son numéro est réutilisé par la révision suivante, avec un autre contenu |
+
+Ce que la règle garantit :
+- **Comparaison-échange** : aucun écrivain ne peut publier sur la base
+  d'un manifeste perdu. Dans le processus, les opérations sur un modèle
+  sont sérialisées et relisent le manifeste ; entre processus, le
+  répertoire est verrouillé.
+- **Historique** : il ne recule jamais au-delà de la sauvegarde.
+
+Ce qu'elle ne garantit pas :
+- **Unicité des générations** après une seconde corruption du manifeste
+  réparé, sans écriture entre les deux. C'est sans effet pratique, car les
+  deux contenus ont les mêmes révisions.
+- **Unicité des numéros de révision** après la perte d'une révision. Le
+  journal des tentatives (Phase 1B.6) identifie les tâches par
+  `(modèle, révision, x, y, couleur)` : une tentative enregistrée sur la
+  révision perdue deviendrait ambiguë.
+
+Proposition, à décider avant la Phase 1B.6 :
+- Tenir par modèle un fichier de **plus hautes valeurs atteintes**
+  (génération et révision), mis à jour **avant** chaque publication.
+- Il ne fait qu'augmenter. Une interruption entre sa mise à jour et la
+  publication laisse donc seulement une valeur trop haute, ce qui est sans
+  danger.
+- La réparation reprendrait au-dessus de ces valeurs, et le numéro d'une
+  révision perdue ne serait jamais réutilisé.
+- Le mécanisme actuel n'est pas modifié dans cette phase.
+
 **Listage isolé** (correction A) : `list` renvoie les modèles lisibles dans
 `templates`, et les autres dans `failures`, avec l'identifiant, un code et
 un message fixe :
