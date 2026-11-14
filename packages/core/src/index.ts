@@ -11,3 +11,4 @@ export const CORE_CONTRACT_VERSION = 1 as const;
 export * from './contracts/index.js';
 export * from './geometry/index.js';
 export * from './color/index.js';
+export * from './palette/index.js';
