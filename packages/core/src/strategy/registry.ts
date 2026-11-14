@@ -4,6 +4,7 @@
 
 import type { DrawingOrderCursor, DrawingStrategy, DrawingStrategyId, Template } from '../contracts/index.js';
 import { eligibleRegion, StrategyError } from './common.js';
+import { centerOut, random } from './center-random.js';
 import { bottomToTop, leftToRight, rightToLeft, topToBottom } from './directional.js';
 
 export const DRAWING_STRATEGIES: Readonly<Partial<Record<DrawingStrategyId, DrawingStrategy>>> = {
@@ -11,6 +12,8 @@ export const DRAWING_STRATEGIES: Readonly<Partial<Record<DrawingStrategyId, Draw
   'bottom-to-top': bottomToTop,
   'left-to-right': leftToRight,
   'right-to-left': rightToLeft,
+  'center-out': centerOut,
+  random,
 };
 
 export function drawingStrategy(id: DrawingStrategyId): DrawingStrategy {
