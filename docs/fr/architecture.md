@@ -1,13 +1,15 @@
 # Architecture de GeoPlacer
 
-État : **Phase 1B.5**. Les contrats existent depuis la 1B.0 ; la géométrie,
+État : **Phase 1B.6**. Les contrats existent depuis la 1B.0 ; la géométrie,
 les couleurs et les palettes sont implémentées en 1B.1 (voir
 [geometrie-couleurs.md](geometrie-couleurs.md)) ; le gestionnaire de
 modèles et sa persistance en 1B.2 (voir [modeles.md](modeles.md)) ; les
 huit stratégies de dessin en 1B.3 (voir [strategies.md](strategies.md)) ;
 la progression et le temps restant en 1B.4 (voir
 [progression.md](progression.md)) ; les ressources et les améliorations
-en 1B.5 (voir [ressources.md](ressources.md)).
+en 1B.5 (voir [ressources.md](ressources.md)) ; la planification du
+travail, les tentatives et la reprise après crash en 1B.6 (voir
+[planification.md](planification.md)).
 Le serveur et l'interface hérités de Wplacer fonctionnent comme avant.
 
 ## Arborescence
@@ -27,15 +29,17 @@ GeoPlacer/
 │   │   │   ├── canvas/           instantané de toile en mémoire (1B.4)
 │   │   │   ├── progress/         progression et estimation du temps restant (1B.4)
 │   │   │   ├── resources/        règles, états d'agent, régénération, ResourceManager (1B.5)
-│   │   │   └── upgrades/         planificateur d'améliorations simulées (1B.5)
-│   │   ├── bench/                benchmarks (npm run bench:core, npm run bench:strategies)
+│   │   │   ├── upgrades/         planificateur d'améliorations simulées (1B.5)
+│   │   │   └── work/             WorkPlanner, AttemptManager, format du journal (1B.6)
+│   │   ├── bench/                benchmarks (npm run bench:core, bench:strategies, bench:planner…)
 │   │   ├── test/                 Vitest (dont la suite de conformité des stockages)
 │   │   ├── tsconfig.json         compilation (sans types Node ni DOM)
 │   │   ├── tsconfig.test.json    vérification des sources et des tests
 │   │   └── vitest.config.ts
 │   ├── adapters-node/            @geoplacer/adapters-node : stockage fichiers, verrou du répertoire
 │   │                             de données (1B.3), codec PNG (pngjs), SHA-256, UUID, horloge ;
-│   │                             benchmark npm run bench:templates (1B.2)
+│   │                             cache d'ordre, journal des tentatives et historique (1B.6) ;
+│   │                             benchmarks bench:templates, bench:reservations, bench:journal
 │   └── simulator/                @geoplacer/simulator (squelette, dépend de core)
 ├── scripts/run-logged.mjs        contrôles avec journal complet dans test-logs/ (1B.4)
 ├── src/                          serveur hérité (Express, Jest) — inchangé
@@ -73,10 +77,11 @@ est une décision séparée, qui n'est pas encore prise (ADR 0002, § 7).
 | Couche | Fichiers | Contenu |
 |---|---|---|
 | 0 | `primitives`, `config` | Identifiants nominaux, `Rgb`, sentinelles de transparence, `Clock`, `EngineConfig` |
-| 1 | `geometry`, `palette`, `resources`, `accounts`, `ports` | `Projection`, `PaletteManager`, `ColorDistance`, `ResourceManager`, `UpgradePlanner`, `AccountManager`, ports d'E/S |
+| 1 | `geometry`, `palette`, `resources`, `accounts`, `ports` | `Projection`, `PaletteManager`, `ColorDistance`, `ResourceManager`, `AccountManager`, ports d'E/S (dont les réservations de numéros, 1B.6) |
 | 2 | `template`, `canvas` | `TemplateManager`, manifeste et révisions, `CanvasReader`, `CanvasWriter`, `CanvasProvider` |
-| 3 | `strategy`, `work`, `progress` | `DrawingStrategy`, `WorkPlanner`, `AttemptManager`, journal, historique, `ProgressCalculator`, `EtaEstimator` |
-| 4 | `scheduler` | `TaskScheduler`, événements du moteur |
+| 3 | `strategy`, `progress` | `DrawingStrategy`, cache d'ordre, `ProgressCalculator`, `EtaEstimator` |
+| 4 | `work`, `upgrades` | `WorkPlanner`, `AttemptManager`, journal, historique (1B.6 : passés de la couche 3 à la 4, car ils dépendent de `progress`) ; `UpgradePlanner` |
+| 5 | `scheduler` | `TaskScheduler`, événements du moteur |
 
 ## Séparation des responsabilités
 
@@ -117,6 +122,12 @@ détection de cycles sur tout `src`) :
 | `color` | `contracts`, `color` |
 | `palette` | `contracts`, `color`, `palette` |
 | `template` | `contracts`, `color`, `palette`, `geometry`, `template` |
+| `strategy` | `contracts`, `geometry`, `strategy` |
+| `canvas` | `contracts`, `geometry`, `canvas` |
+| `progress` | `contracts`, `geometry`, `strategy`, `resources`, `progress` |
+| `resources` | `contracts`, `resources` |
+| `upgrades` | `contracts`, `resources`, `progress`, `upgrades` |
+| `work` | `contracts`, `geometry`, `strategy`, `progress`, `resources`, `template` (uniquement le CRC-32 partagé des lignes du journal), `work` |
 
 ## Limites des contrôles automatiques
 

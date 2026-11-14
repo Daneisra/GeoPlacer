@@ -27,6 +27,27 @@ licence. L'historique Git complet du projet d'origine est conservé.
 - `start.bat` : installation des deux projets par le chemin vérifié.
 - Documentation française (`docs/fr/`, `docs/decisions/`).
 
+## 2026-11-15 — Phase 1B.6 : planification, tentatives et reprise après crash
+
+- Numérotation durable des révisions : réservations immuables
+  (`TemplateStorage.reserve`, `reservations`), manifeste schéma 2
+  (`numbering`), réparation qui ne réutilise jamais un numéro.
+- `packages/core/src/strategy` : clés de classement des stratégies et
+  cache vérifié de l'ordre aléatoire PCG32 V1 (inchangé).
+- `packages/core/src/progress` : classification des pixels partagée avec
+  le planificateur ; lecture facultative des instantanés par ligne
+  (`readRow`). L'ETA devient indisponible quand les ressources sont trop
+  anciennes (`STALE_RESOURCES`).
+- `packages/core/src/work` : `WorkPlanner` (lot dérivé de la toile),
+  `AttemptManager` (états explicites, réconciliation, reprise), format de
+  ligne vérifié du journal et de l'historique.
+- `packages/adapters-node` : cache d'ordre, journal des tentatives et
+  historique sur disque, sous le répertoire de données verrouillé.
+- Benchmarks `bench:reservations`, `bench:planner`, `bench:journal`.
+- Documentation : `docs/fr/planification.md`, ADR 0002 § 15, mises à jour
+  de `strategies.md`, `progression.md`, `modeles.md`, `architecture.md`,
+  `qualite.md`, `README.md`.
+
 ## 2026-11-14 — Phase 1B.5 : ressources et améliorations
 
 - `packages/core/src/resources` : règles de ressources versionnées et

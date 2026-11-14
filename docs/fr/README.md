@@ -6,7 +6,19 @@ GeoPlacer est un fork de
 pour GeoPixels, avec un moteur développé et testé **uniquement sur simulateur
 local** (voir l'ADR 0001).
 
-## État actuel : Phase 1B.5, ressources et améliorations
+## État actuel : Phase 1B.6, planification, tentatives et reprise
+
+Réalisé en Phase 1B.6 (voir [planification.md](planification.md)) :
+- numérotation durable des révisions par réservations immuables : un
+  numéro n'est jamais réutilisé, même après crash ou réparation (voir
+  [modeles.md](modeles.md)) ;
+- clés de classement pour sept stratégies et cache vérifié de l'ordre
+  aléatoire PCG32 V1 (voir [strategies.md](strategies.md)) ;
+- `WorkPlanner` : prochain lot dérivé du modèle, de l'ordre et de la
+  toile, sans tâche persistante par pixel ;
+- `AttemptManager`, journal et historique : états explicites,
+  réconciliation, reprise après crash testée par des processus tués ;
+- lecture des instantanés par ligne (`readRow`, facultative).
 
 Réalisé en Phase 1B.5 (voir [ressources.md](ressources.md)) :
 - règles de ressources versionnées, états d'agent observés, calculés,
@@ -76,6 +88,10 @@ Le moteur de dessin hérité n'est **pas** fonctionnel et sera remplacé.
 |---|---|
 | [architecture.md](architecture.md) | Paquets, couches, règles de dépendance, principes du moteur |
 | [modeles.md](modeles.md) | Gestionnaire de modèles, révisions, stockage, intégrité, performances |
+| [strategies.md](strategies.md) | Stratégies de dessin, clés de classement, cache de l'ordre aléatoire |
+| [progression.md](progression.md) | Progression, classification des pixels, ETA |
+| [ressources.md](ressources.md) | Règles de ressources, `ResourceManager`, améliorations |
+| [planification.md](planification.md) | `WorkPlanner`, tentatives, journal, reprise après crash |
 | [geometrie-couleurs.md](geometrie-couleurs.md) | Repères, projection, OKLab, palettes, quantification, performances |
 | [installation-windows.md](installation-windows.md) | Installation et lancement vérifiés sous Windows |
 | [securite.md](securite.md) | Modèle de menace, protections, limites |

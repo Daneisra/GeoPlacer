@@ -444,3 +444,41 @@ d'une unité.
 
 Détails : [ressources.md](../fr/ressources.md). Proposition pour les
 numéros de révision : [modeles.md](../fr/modeles.md) (réparation).
+
+## 15. Mise en œuvre de la Phase 1B.6 : contrats v6 et v7, planification et tentatives
+
+`CORE_CONTRACT_VERSION` passe à **6**, puis à **7**.
+
+| Version | Élément | Changement | Raison |
+|---|---|---|---|
+| 6 | Manifeste des modèles | Schéma **2** : champ `numbering` (`legacy` ou `reserved`). Migration 1 → 2 en mémoire ; la première écriture convertit le fichier, sans retour au schéma 1 | Numéros de révision et de génération jamais réutilisés, même après crash ou réparation |
+| 6 | `TemplateStorage` | `reserve(projet, modèle, type, valeur)` et `reservations(projet, modèle)` : réservations immuables, créées en exclusif (`wx` puis fsync) **avant** la publication | Un crash laisse un trou dans la numérotation, jamais une réutilisation |
+| 6 | `RepairOptions`, `RepairReport` | `allowMissingReservations` ; `numbering` (bases, maxima, numéros brûlés, réservations manquantes) | Réparation explicite et traçable |
+| 6 | `OrderCacheKey`, `OrderCacheStore` | Nouveaux (couche 3) | Cache vérifié et facultatif de l'ordre aléatoire PCG32 V1 |
+| 7 | `CanvasSnapshot.readRow` | Méthode facultative : lecture d'une ligne, valeurs identiques à `get` | Lecture plus rapide, sans second format |
+| 7 | `work.ts` | Passe de la couche 3 à la **couche 4** (dépend de `progress`). Réécrit : `WorkPlanner.nextBatch(préparé, requête)` avec politique des pixels inconnus, points en cours, énergie engagée, refus explicites ; `PreparedTemplate` | Travail dérivé de la toile, sans tâche persistante par pixel |
+| 7 | Tentatives | États `leased`, `started`, `finished`, `failed`, `cancelled`, `needs-reconciliation` ; `Attempt` (dont `needsReconciliationAt`) ; `JournalEvent`, `AttemptJournal`, `HistoryEntry`, `HistoryStore`, `RecoveryReport`, `AttemptManager` | Reprise après crash sans relance aveugle ; aucune promesse « exactement une fois » |
+| 7 | `EtaUnavailableCode` | `STALE_RESOURCES` devient une **indisponibilité** (avant : avertissement) ; nouvel avertissement `RESOURCE_AGE_NOT_EVALUATED` | Une ETA fondée sur des ressources trop anciennes n'est jamais présentée comme fiable |
+
+**Exception à la règle des dossiers** : `work/` importe le CRC-32 de
+`template/png-header.ts`, uniquement pour le format des lignes du journal
+(pas de copie d'un second CRC-32). L'exception est inscrite dans le test
+d'architecture.
+
+**Écarts avec le § 3** :
+- `nextBatch` ne parcourt pas l'ordre de la stratégie : il classe les
+  pixels restants par leur **clé** d'ordre et garde les k plus petites.
+  Le résultat est identique (test de propriété), sans générer l'ordre
+  complet.
+- Le journal est vérifié ligne par ligne (CRC-32), et un dommage avant la
+  dernière ligne est signalé, jamais ignoré.
+- **Pas encore faits** : le compactage atomique du journal (qui ne
+  garderait que les tentatives ouvertes) et la rotation de l'historique.
+  Le journal grossit sans limite ; le coût mesuré est donné dans
+  [planification.md](../fr/planification.md) § 8.
+- Les commits 5 (journal et gestionnaire) et 6 (reprise) proposés sont
+  réunis, car la reprise est au cœur du gestionnaire.
+
+Détails : [planification.md](../fr/planification.md),
+[strategies.md](../fr/strategies.md) § 4,
+[modeles.md](../fr/modeles.md) (numérotation des révisions).

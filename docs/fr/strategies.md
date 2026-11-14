@@ -247,7 +247,7 @@ Phase 1B.3) :
   de 2 Mo, quelle que soit la taille.
 - Le déterminisme n'a été dégradé nulle part pour gagner du temps.
 
-## 4. Reprise d'un ordre : analyse (à décider avant la Phase 1B.6)
+## 4. Reprise d'un ordre : analyse et décision
 
 **Le problème** : un curseur ne fait qu'avancer. Pour reprendre un modèle
 presque terminé, ou repeindre des pixels abîmés en début d'ordre, il faut
@@ -341,6 +341,49 @@ cache facultatif, sur disque réel (pixel art, une exécution) :
    O(1). `nextBatch` = comparaison avec la toile, puis les k plus petites
    clés. À mesurer par un prototype avant décision.
 
+### Mise en œuvre (Phase 1B.6)
+
+Décision appliquée : **clé de classement** pour sept stratégies, et
+**table des rangs** de l'ordre PCG32 V1, inchangé, pour l'aléatoire.
+`prepareOrderKeys(image, config)` renvoie `key(i)` pour chaque index
+d'image `i`. Notations : `N` est le nombre de pixels de l'image, `(ix, iy)`
+la position du pixel et `W × H` la taille de l'image.
+
+| Stratégie | Clé | Mémoire |
+|---|---|---|
+| Haut vers le bas | `i` | aucune |
+| Bas vers le haut | `(H − 1 − iy) · W + ix` | aucune |
+| Gauche vers la droite | `ix · H + iy` | aucune |
+| Droite vers la gauche | `(W − 1 − ix) · H + iy` | aucune |
+| Centre vers l'extérieur | `d² · N + i` | aucune |
+| Couleur par couleur | `rang de la couleur · N + i` | table des rangs de couleur (quelques Ko) |
+| Contours d'abord | `(contour ? 0 : N) + i` | aucune (contour testé sur 4 voisins) |
+| Aléatoire | rang du pixel dans l'ordre PCG32 V1 | 4 octets par pixel (64 Mio en 4096²) |
+
+**Équivalence** : pour chaque stratégie, trier les pixels peignables par
+leur clé redonne **exactement** l'ordre validé en 1B.3. C'est testé sur
+toutes les stratégies, avec des images, des régions, des graines et des
+`colorOrder` variés. L'ordre des modèles existants ne change pas.
+
+**Cache de l'ordre aléatoire** (`loadRandomOrder`, adaptateur
+`FileOrderCacheStore`) :
+
+- **Clé complète** : projet, modèle, révision, stratégie et sa version,
+  graine, empreinte de l'image quantifiée, format (`1`).
+- **Fichier** : `GPORDER1`, puis un en-tête JSON (clé, longueur, SHA-256
+  du contenu, boutisme), puis les index en Uint32 petit-boutiste. Il est
+  écrit de façon atomique sous le répertoire de données verrouillé, dans
+  `cache/orders/<projet>/<modèle>/random-r<rév>-v<ver>-s<graine>.order`.
+- **Vérifié avant usage** : clé, longueur, SHA-256, puis permutation des
+  pixels peignables.
+- **Jamais la source de vérité** : en cas d'absence ou de défaut, l'ordre
+  est régénéré, le cache réécrit au mieux et le problème signalé
+  (`keyProblem`). Un cache corrompu ne rend jamais le modèle inutilisable,
+  et supprimer `cache/` est toujours sans risque (testé).
+
+Les mesures du `WorkPlanner` qui s'appuient sur ces clés sont dans
+[planification.md](planification.md) § 8.
+
 ## 5. Limites connues
 
 - **Couleur par couleur** sur une image bruitée de 2000 × 2000 : 149 ms
@@ -348,10 +391,11 @@ cache facultatif, sur disque réel (pixel art, une exécution) :
   quand elle est chargée ; l'objectif de 200 ms n'est donc pas garanti.
 - **Identifiant** `outline-first` : conservé (décision du 14/11/2026).
 - **Ordre complet coûteux** pour le centre et l'aléatoire en 4096 × 4096
-  (§ 3) : la reprise d'un modèle presque terminé n'est pas encore résolue.
-- **Ordre de génération seulement** : aucune comparaison avec la toile
-  (`WorkPlanner`), aucun ordonnanceur, aucune file. Prévu dans les phases
-  suivantes.
+  (§ 3). Depuis la 1B.6, le `WorkPlanner` n'en a plus besoin, sauf pour
+  l'aléatoire : il lui faut la table des rangs, construite une fois par
+  révision (environ 3 s en 4096², 1,5 s depuis le cache vérifié).
+- **Aucun ordonnanceur** : le choix du modèle et de l'agent est prévu dans
+  une phase suivante.
 - Le pixel hors toile est **toujours** exclu quand les limites sont
   connues. Il n'existe pas d'option pour l'inclure, puisqu'il ne peut pas
   être peint.

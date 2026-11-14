@@ -71,10 +71,22 @@ aléatoires) contre une implémentation naïve indépendante.
 
 ### Méthode de calcul
 
-- Un seul parcours de la région éligible, dans l'ordre de l'image.
+- Un seul parcours de la région éligible, ligne par ligne, par la
+  **classification partagée** `scanEligibleRows` (Phase 1B.6). Le
+  `WorkPlanner` utilise la même ; la progression et le planificateur ne
+  peuvent donc pas diverger sur l'état d'un pixel.
 - Pour chaque pixel, la position sur la toile est calculée par la
   projection de la Phase 1B.1 (axe y montant ou descendant).
-- La valeur est lue par `snapshot.get`, avec un seul objet point réutilisé.
+- **Lecture par ligne** : si l'instantané fournit `readRow(y, x0, x1, out)`
+  (facultatif, Phase 1B.6), une ligne entière est copiée d'un coup. Sinon,
+  la valeur est lue par `snapshot.get`, avec un seul objet point réutilisé.
+  Les deux chemins donnent les mêmes résultats (test de propriété
+  d'équivalence). Il n'y a **pas de second format** : `readRow` renvoie
+  exactement les valeurs de `get`.
+- Les pixels hors du rectangle de l'instantané sont **inconnus** sans
+  interroger l'instantané. Une valeur invalide renvoyée par `get` (NaN,
+  fraction, hors 24 bits) est conservée telle quelle, puis classée
+  inconnue (`invalid`), par les deux chemins.
 - Les compteurs sont dans un `Float64Array` (5 compteurs par couleur).
   Aucun objet n'est créé par pixel.
 - Le résultat **ne dépend que** du modèle (image, placement, repère) et de
@@ -176,8 +188,12 @@ le commit :
 **Avertissements** (n'empêchent pas l'estimation, Phase 1B.5) :
 `FRESHNESS_NOT_EVALUATED` (instantané sans politique de fraîcheur),
 `SIMULATED_RESOURCES` (états simulés), `RESOURCE_AGE_NOT_EVALUATED` (âge des
-observations de ressources non jugé, faute de `maxResourceAgeMs`),
-`STALE_RESOURCES` (observation plus ancienne que `maxResourceAgeMs`).
+observations de ressources non jugé, faute de `maxResourceAgeMs`).
+
+Depuis la Phase 1B.6, une observation de ressources plus ancienne que
+`maxResourceAgeMs` n'est plus un simple avertissement : l'ETA est
+**indisponible** (`STALE_RESOURCES`), et n'est jamais présentée comme
+fiable.
 
 L'ETA vaut **0** quand il ne reste aucun travail : modèle entièrement
 observé et conforme, ou aucun pixel éligible. C'est vrai même sans
@@ -189,6 +205,7 @@ valeur arbitraire de remplacement.
 |---|---|
 | `INVALID_PARAMETERS` | paramètre, règles ou état de ressources invalide : règles incohérentes, état invalide, d'un autre agent, d'autres règles ou daté après `now`, cadence négative, couverture minimale hors de [0, 100], pause vide, agent en double, instantané « future »… |
 | `STALE_SNAPSHOT` | instantané trop ancien pour la politique de sa source |
+| `STALE_RESOURCES` | observation de ressources plus ancienne que `maxResourceAgeMs` (Phase 1B.6) |
 | `INSUFFICIENT_OBSERVATION` | couverture inférieure à `minCoveragePercent` (paramètre obligatoire, sans valeur par défaut) |
 | `NO_AGENT` | du travail reste et aucun agent n'est fourni |
 | `INSUFFICIENT_ENERGY` | aucun agent ne peut accumuler l'énergie d'un pixel, ou, même sans limite de temps, les agents capables de peindre certaines couleurs ne régénèrent jamais assez d'énergie (couleurs listées) |
@@ -247,15 +264,22 @@ compteurs par couleur.
   seul agent**. Avec plusieurs agents, seule la monotonie est testée ; la
   répartition reste l'hypothèse optimiste n° 6.
 
-- Pas de lecture en masse des instantanés : un appel `get` par pixel.
-  **Étude de la Phase 1B.5** (`npm run bench:snapshot-read`) : la même
-  boucle de comptage, mais lisant une ligne entière, est ×1,9 à ×2,1 plus
-  rapide sur le pixel art (2000² : 77–78 → 38–39 ms) et ×1,4 sur le bruit
-  (145 → 104 ms), où la recherche de couleur domine. Résultats identiques.
-  Ce prototype utilise le lecteur le moins cher possible (vue sans copie) ;
-  un vrai lecteur copierait la ligne. Avantage réel mais conditionnel :
-  aucun contrat modifié ; ajout de `readRow` facultatif proposé pour la
-  1B.6, avec une table de couleurs compacte pour le bruit.
+- **Lecture par ligne (Phase 1B.6)** : `readRow` est implémentée, avec
+  copie de la ligne, par l'instantané en tableau. Mesures dans un même
+  build :
+
+  | Taille | Image | `readRow` | `get` seul | Gain |
+  |---|---|---|---|---|
+  | 2000² | pixel art | 88 ms | 107 ms | ×1,22 |
+  | 2000² | bruit | 169 ms | 210 ms | ×1,24 |
+  | 4096² | pixel art | 351 ms | 532 ms | ×1,52 |
+  | 4096² | bruit | 673 ms | 840 ms | ×1,25 |
+
+  Le gain est plus faible que celui du prototype de la 1B.5 (vue sans
+  copie). Le chemin `get` seul est un peu plus lent qu'en 1B.4, à cause de
+  la classification partagée en deux passes ; ce coût est accepté pour
+  garder une seule définition de l'état d'un pixel. La table de couleurs
+  compacte pour le bruit n'est pas faite.
 - L'ETA ne connaît ni les refus d'écriture ni les modifications par des
   tiers. Ses hypothèses optimistes sont nommées dans le résultat.
 - Les intervalles de régénération sont supposés constants. Une

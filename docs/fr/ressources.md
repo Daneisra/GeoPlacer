@@ -178,9 +178,10 @@ d'énergie, et chaque couleur débloquable qu'il n'a pas.
   à prendre.
 - **Âge des observations de ressources** : l'énergie est projetée depuis
   la dernière observation, et une dépense faite ailleurs depuis serait
-  inconnue. Avec `maxResourceAgeMs`, une observation plus ancienne lève
-  l'avertissement `STALE_RESOURCES` ; sans politique, un âge non nul lève
-  `RESOURCE_AGE_NOT_EVALUATED`. Ce sont des avertissements, pas des refus.
+  inconnue. Avec `maxResourceAgeMs`, une observation plus ancienne rend
+  l'ETA **indisponible** (`STALE_RESOURCES`, Phase 1B.6 ; c'était un
+  avertissement en 1B.5) ; sans politique, un âge non nul lève
+  l'avertissement `RESOURCE_AGE_NOT_EVALUATED`.
 - **Régénération de plusieurs unités** (nouveau) : le gain utile par pas
   est min(quantité, capacité − coût + 1), car l'énergie est plafonnée à la
   capacité ; avec 1, rien ne change. Vérifié empiriquement (simulation,
@@ -220,7 +221,11 @@ quelques milliers de dépenses. Corrigé (état de tête, `consumeEnergy`).
 - Le registre garde tous les identifiants de dépenses vus (détection des
   doublons) : il grandit avec le temps ; une purge sera nécessaire avec
   la file persistante (1B.6+).
-- L'âge d'une observation de ressources est signalé, jamais jugé
-  bloquant : à décider s'il doit rendre l'ETA indisponible.
+- L'âge d'une observation de ressources : depuis la 1B.6, il rend l'ETA
+  indisponible et fait refuser la planification (`STALE_RESOURCES`) quand
+  une politique `maxResourceAgeMs` est fournie.
+- Le registre des dépenses n'est pas persisté : après un redémarrage, une
+  nouvelle observation est exigée avant de planifier
+  ([planification.md](planification.md) § 6).
 - Les règles d'un fournisseur réel restent à saisir par l'utilisateur ;
   rien n'est lu d'un service.

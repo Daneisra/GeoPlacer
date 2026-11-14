@@ -18,7 +18,7 @@ npm run check                 # tsc, lint, lint:packages, puis test:all (contrô
 cd frontend; npx eslint .; npm run build
 ```
 
-## Tests des paquets (Phase 1B.5 : Vitest, 23 fichiers, 305 tests + 1 exhaustif optionnel)
+## Tests des paquets (Phase 1B.6 : Vitest, 28 fichiers, 373 tests + 1 exhaustif optionnel)
 
 | Paquet | Fichier | Objet |
 |---|---|---|
@@ -43,7 +43,12 @@ cd frontend; npx eslint .; npm run build
 | core | `eta-equivalence.test.ts` | ETA identique à la version 1B.4 figée sur 2 000 cas aléatoires |
 | core | `upgrades.test.ts` | Améliorations possibles et impossibles, effets, ETA avant / après, couleur rendant l'estimation possible, bénéfice nul non recommandé, autres agents, instantané périmé, déterminisme, comparaison exacte, confirmation, application unique, propriétés |
 | core | `strategy-properties.test.ts` | Propriétés des 8 stratégies sur images aléatoires : chaque pixel peignable exactement une fois, jamais un transparent, déterminisme, taille des lots, région = ordre filtré, placement et sens de l'axe y ; intégration avec le gestionnaire de modèles |
-| adapters-node | `adapters.test.ts` | Même suite de conformité sur le stockage fichiers ; décodage pngjs (palette + tRNS, gris 1/16 bits, entrelacé…) ; disposition des fichiers ; fichiers modifiés sur disque ; réparation sur disque (octets corrompus conservés) ; chemins refusés ; arrêt brutal d'un processus réel ; verrou du répertoire (un processus ; deux processus indépendants ; quatre lancés en même temps ; les deux mécanismes) ; dépendances du paquet |
+| core | `strategy-keys.test.ts` | Clés de classement (1B.6) : trier par clé redonne exactement l'ordre validé de chaque stratégie (régions, graines, `colorOrder`) ; table des rangs de l'aléatoire |
+| core | `order-cache.test.ts` | Cache de l'ordre aléatoire : aller-retour, clé différente refusée, longueur, SHA-256, permutation invalide, en-tête illisible ; régénération et réécriture au mieux, problème signalé ; magasin en panne |
+| core | `work-planner.test.ts` | `WorkPlanner` : modèle correct, partiellement incorrect, presque terminé ; pixels inconnus (deux politiques), couleurs indisponibles, points en cours, budget et attente, refus (instantané périmé ou futur, repère, ressources périmées ou incertaines, agent indisponible) ; nouvelle révision ; propriété « premiers k de l'ordre filtré » (160 cas, 8 stratégies) ; cache = sans cache |
+| core | `attempts.test.ts` | `AttemptManager` : succès, échec, annulation, bail déjà réservé, doublons, énergie insuffisante, couleur ou agent indisponible, duplication concurrente, bail expiré, changement de révision, résultat inconnu, réponse perdue, écriture refusée puis replanifiée, réconciliation (lecture trop ancienne refusée), pixel redevenu incorrect, reprise après interruption, reprise idempotente, registre des dépenses perdu, observation rapportée sans double consommation, journal corrompu, fin déchirée, événements incohérents, injection de fautes à chaque écriture du journal, machine d'états complète ; propriétés : trois agents simulés sur une toile locale avec fautes et crashs |
+| core | `journal-codec.test.ts` | Format des lignes : aller-retour ASCII, somme valide sur un contenu invalide, version inconnue ; propriétés : coupure à chaque octet, octet altéré jamais lu comme un événement |
+| adapters-node | `adapters.test.ts` | Même suite de conformité sur le stockage fichiers ; décodage pngjs (palette + tRNS, gris 1/16 bits, entrelacé…) ; disposition des fichiers ; fichiers modifiés sur disque ; réparation sur disque (octets corrompus conservés) ; chemins refusés ; arrêt brutal d'un processus réel ; numéros jamais réutilisés malgré arrêts, corruption et réparations interrompues (1B.6) ; réservations sur disque ; cache d'ordre sur disque ; journal et historique sur disque (fin déchirée mise de côté, dommage conservé), processus réels tués pendant les ajouts au journal ; verrou du répertoire (un processus ; deux processus indépendants ; quatre lancés en même temps ; les deux mécanismes) ; dépendances du paquet |
 | simulator | `package.test.ts` | Résolution de `@geoplacer/core` (valeurs et types) |
 
 Test exhaustif facultatif (aller-retour OKLab des 16,7 M couleurs, environ
@@ -63,7 +68,13 @@ Benchmarks :
 - `npm run bench:snapshot-read` : lecture par ligne contre lecture par
   pixel ([progression.md](progression.md) § 5) ;
 - `npm run bench:order-cache` : cache d'ordre sur disque
-  ([strategies.md](strategies.md) § 4).
+  ([strategies.md](strategies.md) § 4) ;
+- `npm run bench:reservations` : réservations de numéros
+  ([modeles.md](modeles.md)) ;
+- `npm run bench:planner` : `WorkPlanner` en 1000², 2000², 4096²
+  ([planification.md](planification.md) § 8) ;
+- `npm run bench:journal` : coût du journal et de la reprise
+  ([planification.md](planification.md) § 8).
 
 Simulation de l'ETA sur d'autres graines :
 `$env:GEOPLACER_ETA_SEED="5"; npx vitest run --root packages/core test/eta.test.ts`.
@@ -95,6 +106,18 @@ Phase 1B.5 :
   conservé, même quand la relance réussissait (erreurs de rédaction de
   tests, et trois défauts réels : deux bornes de l'ETA et le registre
   cubique).
+
+Phase 1B.6, mutations vérifiées (chacune fait échouer au moins un test) :
+- numéroter d'après le manifeste seul (sans les réservations) : suite de
+  conformité et test en processus réels ;
+- `nextBatch` qui ignore les points en cours (3 tests) ou qui inverse la
+  comparaison du tas (propriété) ;
+- parcours inversé des lignes qui saute une ligne (propriété) ;
+- gestionnaire sans sérialisation (duplication concurrente) ;
+- reprise qui libère les baux malgré un journal endommagé (2 tests) ;
+- incertitude non reconstruite à la reprise, lecture de réconciliation
+  antérieure à l'envoi en réconciliation (2 tests), dépense enregistrée en
+  plus de l'observation rapportée.
 
 Mutation vérifiée en 1B.4 : compter un pixel `UNKNOWN` comme correct fait
 échouer deux tests de progression. Écraser la sauvegarde lors d'une
