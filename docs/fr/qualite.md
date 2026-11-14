@@ -122,6 +122,27 @@ Phase 1B.6, mutations vérifiées (chacune fait échouer au moins un test) :
   antérieure à l'envoi en réconciliation (2 tests), dépense enregistrée en
   plus de l'observation rapportée.
 
+Phase 1B.6, échecs rencontrés (journaux complets conservés hors du dépôt) :
+- **test des processus tués pendant les ajouts au journal**, deux échecs :
+  - sur un clone neuf : `history.log` absent ;
+  - en local, une fois sur trois : `attempts.log` absent.
+
+  **Cause établie** : l'enfant pouvait être tué avant sa première clôture,
+  ou même avant son premier ajout, car le démarrage est plus lent sur un
+  clone neuf. Le test supposait que ces fichiers existent toujours. Ce
+  n'est pas un défaut du produit. **Correction** : l'enfant ne se déclare
+  prêt qu'après 12 itérations, et un historique absent compte comme vide.
+  Cinq passages consécutifs ont ensuite réussi.
+- **Test de propriétés multi-agents** : dépassement du délai de 5 s dans
+  la suite complète (6,7 s, contre environ 3,3 s seul). La charge est
+  déterministe (graine fixe) : 30 toiles de 300 actions. Ce n'est pas un
+  blocage. Délai explicite de 30 s, comme les autres calculs lourds.
+- Deux échecs de mise au point n'ont été conservés que sous forme
+  d'extraits, pas de journal complet :
+  - premier passage de `attempts.test.ts` : erreurs de rédaction du test ;
+  - `EPERM` de `ftruncate` sous Windows sur un descripteur en ajout,
+    corrigé par un descripteur séparé.
+
 Mutation vérifiée en 1B.4 : compter un pixel `UNKNOWN` comme correct fait
 échouer deux tests de progression. Écraser la sauvegarde lors d'une
 réparation fait échouer quatre tests. Deux assertions de la 1B.3 étaient

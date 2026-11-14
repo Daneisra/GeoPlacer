@@ -636,7 +636,7 @@ describe('state machine', () => {
 });
 
 describe('several simulated agents sharing one project (properties)', () => {
-  it('interleaved leases, starts, writes, crashes and expiries: never two open attempts on a point, no pixel applied twice, the canvas converges', async () => {
+  it('interleaved leases, starts, writes, crashes and expiries: never two open attempts on a point, no pixel applied twice, the canvas converges', { timeout: 30_000 }, async () => {
     const next = testRandom(0x1b6);
     const random = (): number => next(1_000_000) / 1_000_000;
     const pick = <T,>(items: readonly T[]): T => items[Math.floor(random() * items.length)]!;

@@ -556,6 +556,7 @@ describe('attempt journal and history on disk', () => {
       }
       // Replay the file with the pure state machine: no invalid transition, no attempt twice.
       const bytes = await readFile(path.join(root, 'journal', 'attempts.log'));
+      expect(bytes.length).toBeGreaterThan(0);
       const load = decodeJournal(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength));
       expect(load.corruptLines).toEqual([]);
       const attempts = new Map<string, Attempt>();
@@ -566,7 +567,11 @@ describe('attempt journal and history on disk', () => {
         attempts.set(id, next as Attempt);
       }
       // The history file is torn at most at its end too; every closed attempt in it is in the journal.
-      const historyBytes = await readFile(path.join(root, 'journal', 'history.log'));
+      // Absent when the child was killed before closing any attempt.
+      const historyBytes = await readFile(path.join(root, 'journal', 'history.log')).catch((error: { code?: string }) => {
+        if (error.code === 'ENOENT') return Buffer.alloc(0);
+        throw error;
+      });
       const historyLoad = decodeChecksummedLines(new Uint8Array(historyBytes.buffer, historyBytes.byteOffset, historyBytes.byteLength), isHistoryEntry);
       expect(historyLoad.corruptLines).toEqual([]);
       for (const entry of historyLoad.values) expect(attempts.get(entry.attemptId)?.closedAt).not.toBeNull();

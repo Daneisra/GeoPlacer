@@ -47,9 +47,11 @@ async function main(): Promise<void> {
   // Nothing was painted by the children: the canvas is empty (all observed-incorrect).
   const empty = createArraySnapshot({ rect: { minX: 0, minY: 0, width: W, height: W }, coordinateSystem: { yAxis: 'down' }, source: 'simulated', observedAt: tick(), pixels: new Int32Array(W * W).fill(-1) });
   for (const id of report.toReconcile) await manager.reconcile(id, empty, tick());
-  process.stdout.write(`ready ${JSON.stringify(report)}\n`);
   observe();
   for (let i = 0; ; i++) {
+    // Ready once attempts are closed, left leased and left started: a kill
+    // from then on always leaves work for the next recovery.
+    if (i === 12) process.stdout.write(`ready ${JSON.stringify(report)}\n`);
     const x = i % W;
     const y = Math.floor(i / W) % W;
     const writes = [{ taskId: `projet/m@1:${x},${y}:#ff0000` as TaskId, point: { x, y }, color: RED }];
