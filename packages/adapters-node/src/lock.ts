@@ -10,9 +10,10 @@
  *   held open with an exclusive share mode (libuv UV_FS_O_EXLOCK). The kernel
  *   refuses any other open, from this process or another, and releases the
  *   lock when the process exits or is killed: no stale lock is possible.
- * - 'pid-file' (default elsewhere): `<root>/.geoplacer.lock` is created
- *   exclusively ('wx') and holds the owner's pid, host and a random token. A
- *   lock whose owner process no longer exists on this host is taken over.
+ * - 'pid-file' (default elsewhere): `<root>/.geoplacer.lock` holds the
+ *   owner's pid, host and a random token. It is written to a temp file and
+ *   published with link() (atomic, fails if it exists), so it is never seen
+ *   empty. A lock whose owner process no longer exists on this host is taken over.
  *   Best effort: the takeover of a stale lock is not atomic against another
  *   instance taking it over at the same instant (see docs/fr/modeles.md).
  *
@@ -22,7 +23,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { mkdir, open, readFile, rename, rm, writeFile, type FileHandle } from 'node:fs/promises';
+import { link, mkdir, open, readFile, rename, rm, writeFile, type FileHandle } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import path from 'node:path';
 
@@ -135,46 +136,55 @@ async function acquireShareLock(root: string, owner: LockOwner): Promise<DataDir
 
 async function acquirePidFile(root: string, owner: LockOwner): Promise<DataDirectoryLock> {
   const file = path.join(root, LOCK);
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const handle = await open(file, 'wx');
-      try {
-        await handle.writeFile(`${JSON.stringify(owner)}\n`);
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
-      await writeFile(path.join(root, OWNER), `${JSON.stringify(owner)}\n`);
-      return makeLock(root, 'pid-file', async () => {
-        // Only remove the lock if it is still ours.
-        if ((await readOwner(file))?.token === owner.token) await rm(file, { force: true });
-        await rm(path.join(root, OWNER), { force: true });
-      });
-    } catch (error) {
-      if (errorCode(error) !== 'EEXIST') throw error;
-    }
-    const existing = await readOwner(file);
-    if (existing !== null && (existing.host !== owner.host || processAlive(existing.pid))) {
-      throw new DataDirectoryLockedError({ pid: existing.pid, startedAt: existing.startedAt });
-    }
-    // Stale (dead owner on this host) or unreadable (crash while creating it):
-    // move it aside, then check that we moved the file we judged stale.
-    const aside = `${file}.stale-${randomUUID()}`;
-    try {
-      await rename(file, aside);
-    } catch (error) {
-      if (errorCode(error) === 'ENOENT') continue;
-      throw error;
-    }
-    const moved = await readOwner(aside);
-    if (existing !== null && moved?.token !== existing.token) {
-      // Another instance replaced it in between: give it back and refuse.
-      await rename(aside, file).catch(() => undefined);
-      throw new DataDirectoryLockedError(moved === null ? null : { pid: moved.pid, startedAt: moved.startedAt });
-    }
-    await rm(aside, { force: true });
+  // The owner is written to a private temp file first, then published with
+  // link(), which fails if the lock exists: the lock file is never visible
+  // empty or half-written, so an unreadable lock is a damaged one.
+  const temp = `${file}.${owner.token}.tmp`;
+  const handle = await open(temp, 'wx');
+  try {
+    await handle.writeFile(`${JSON.stringify(owner)}\n`);
+    await handle.sync();
+  } finally {
+    await handle.close();
   }
-  throw new DataDirectoryLockedError(null);
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await link(temp, file);
+        await writeFile(path.join(root, OWNER), `${JSON.stringify(owner)}\n`);
+        return makeLock(root, 'pid-file', async () => {
+          // Only remove the lock if it is still ours.
+          if ((await readOwner(file))?.token === owner.token) await rm(file, { force: true });
+          await rm(path.join(root, OWNER), { force: true });
+        });
+      } catch (error) {
+        if (errorCode(error) !== 'EEXIST') throw error;
+      }
+      const existing = await readOwner(file);
+      if (existing !== null && (existing.host !== owner.host || processAlive(existing.pid))) {
+        throw new DataDirectoryLockedError({ pid: existing.pid, startedAt: existing.startedAt });
+      }
+      // Stale (dead owner on this host) or damaged: move it aside, then check
+      // that the moved file is the one judged stale (same token, or still
+      // unreadable); otherwise another instance took it meanwhile.
+      const aside = `${file}.stale-${randomUUID()}`;
+      try {
+        await rename(file, aside);
+      } catch (error) {
+        if (errorCode(error) === 'ENOENT') continue;
+        throw error;
+      }
+      const moved = await readOwner(aside);
+      if (moved?.token !== existing?.token) {
+        await rename(aside, file).catch(() => undefined);
+        throw new DataDirectoryLockedError(moved === null ? null : { pid: moved.pid, startedAt: moved.startedAt });
+      }
+      await rm(aside, { force: true });
+    }
+    throw new DataDirectoryLockedError(null);
+  } finally {
+    await rm(temp, { force: true });
+  }
 }
 
 /** Acquires the data directory (created if needed) or throws DataDirectoryLockedError. */

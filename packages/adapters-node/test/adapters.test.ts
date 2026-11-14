@@ -316,6 +316,11 @@ describe('data directory lock (one process)', () => {
     // Another host's lock is never judged stale from here.
     await writeFile(path.join(root, '.geoplacer.lock'), JSON.stringify({ ...dead, host: 'autre-machine' }));
     await expect(acquireDataDirectoryLock(root, { mechanism: 'pid-file' })).rejects.toBeInstanceOf(DataDirectoryLockedError);
+    // Published with link(), a lock is never empty: an empty one is damaged and taken over.
+    await writeFile(path.join(root, '.geoplacer.lock'), '');
+    const again = await acquireDataDirectoryLock(root, { mechanism: 'pid-file' });
+    await again.release();
+    expect((await readdir(root)).filter((f) => f.endsWith('.tmp') || f.includes('.stale-'))).toEqual([]);
   });
 });
 

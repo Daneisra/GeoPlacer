@@ -167,7 +167,7 @@ Images de 32 couleurs :
 - **Atteint** par sept stratégies sur huit :
   - moins de 10 ms pour les quatre directionnelles, le centre et les
     contours ;
-  - 77 à 97 ms pour l'aléatoire.
+  - 56 à 97 ms pour l'aléatoire.
 - **Non atteint par couleur par couleur sur le bruit** : 531 à 549 ms. Sur
   le pixel art, 146 à 179 ms, juste sous l'objectif.
 
@@ -199,7 +199,12 @@ Pistes possibles, à valider, sans changer l'ordre produit :
     par pixel, transparents compris.
   - La seconde exécution est plus lente que la première ; la cause n'est
     pas identifiée.
-  - Sans gravité pour le moteur, qui ne demande que des lots bornés.
+  - **Problème ouvert** : le curseur ne fait qu'avancer. L'ADR 0002 prévoit
+    un ordre « calculé une fois, puis mis en cache ». Un planificateur qui
+    reprend un modèle presque terminé devra donc parcourir presque tout
+    l'ordre : 7 à 13 s pour le centre et 5 à 6,5 s pour l'aléatoire en
+    4096 × 4096. À trancher avant le `WorkPlanner` (Phase 1B.6, objectif
+    `nextBatch` < 200 ms sur 2000 × 2000 fait à 99 %).
 - **Gauche/droite** : en 4096 × 4096, environ 1 s contre 0,15 s pour
   haut/bas. Le parcours par colonnes saute d'une ligne à l'autre, ce qui
   défavorise le cache du processeur.
@@ -218,6 +223,8 @@ Pistes possibles, à valider, sans changer l'ordre produit :
 - **Identifiant** `outline-first` : la demande de la Phase 1B.3 écrit
   `outlines-first`. L'identifiant du contrat et des manifestes est
   conservé ; à confirmer.
+- **Ordre complet coûteux** pour le centre et l'aléatoire en 4096 × 4096
+  (§ 3) : la reprise d'un modèle presque terminé n'est pas encore résolue.
 - **Ordre de génération seulement** : aucune comparaison avec la toile
   (`WorkPlanner`), aucun ordonnanceur, aucune file. Prévu dans les phases
   suivantes.

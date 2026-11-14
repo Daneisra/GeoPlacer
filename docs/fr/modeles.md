@@ -186,8 +186,10 @@ démarrage du détenteur), avant toute écriture. Le stockage refuse toute
   ouvert en partage exclusif (`UV_FS_O_EXLOCK` de libuv). Le noyau refuse
   toute autre ouverture et libère le verrou à la fin du processus, même
   tué : aucun verrou périmé n'est possible.
-- **Autres systèmes** : fichier pid créé de façon exclusive (`wx`). Un
-  verrou dont le processus n'existe plus sur cette machine est repris.
+- **Autres systèmes** : fichier pid (pid, machine, jeton aléatoire), écrit
+  dans un fichier temporaire puis publié par `link()`, qui échoue s'il
+  existe déjà : le verrou n'est jamais visible vide. Un verrou dont le
+  processus n'existe plus sur cette machine est repris.
   Cette reprise n'est pas atomique face à une autre instance qui la
   tenterait au même instant. Ce mécanisme est testé sous Windows en le
   forçant ; il n'a jamais été exécuté sous Linux ni macOS.
@@ -267,6 +269,12 @@ Ni contenu du manifeste ni chemin de fichier n'y apparaissent.
 
 - le verrou protège un répertoire de données **local** ; un répertoire
   réseau partagé entre machines n'est pas pris en charge ;
+- il ne couvre que le répertoire du nouveau moteur, ouvert par
+  `openNodeTemplateManager` : le serveur hérité et ses fichiers ne sont pas
+  concernés, et le serveur ne prend pas encore ce verrou au démarrage ;
+- sous Windows, il repose sur un indicateur de libuv (`UV_FS_O_EXLOCK`,
+  `0x10000000`) que Node.js n'exporte pas : à revérifier à chaque mise à
+  jour majeure de Node ;
 - les blobs orphelins et les fichiers `.tmp` d'une écriture interrompue ne
   sont pas encore nettoyés ;
 - une coupure d'alimentation n'a pas été testée : la garantie repose sur
