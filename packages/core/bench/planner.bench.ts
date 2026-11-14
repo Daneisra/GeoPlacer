@@ -1,16 +1,19 @@
 /**
  * Phase 1B.6 benchmark: WorkPlanner on 1000², 2000² and 4096².
  *
- *   npm run bench:planner                         -> every scenario, one process per size
- *   node --expose-gc --import tsx planner.bench.ts <size>
+ *   npm run bench:planner                         -> every scenario, one process per size and image
+ *   node --expose-gc --import tsx planner.bench.ts <size> [pixel-art|noise|uniform]
  *
- * Image: pixel art, 32 colors, ~3 % transparent. For each strategy:
+ * Images: pixel art (32 colors, ~3 % transparent) at every size; noise
+ * (32 colors, 1/8 transparent) and uniform (one color) at 2000². For each
+ * strategy:
  * - prepareMs: order keys built once per revision (random: PCG32 order and
  *   its rank table, generated; then read back from an in-memory cache with
  *   a real SHA-256 check);
  * - firstBatchMs: nextBatch of 1,000 pixels on an empty canvas (everything
  *   to do), i.e. the time to the first batch once the template is prepared;
- * - nearDoneMs: the same on a canvas 99.9 % correct (0.1 % scattered wrong);
+ * - nearDoneMs: the same on a canvas ~99.9 % correct (~0.1 % scattered
+ *   wrong; the exact number of candidates is printed);
  * - unknown50Ms / unknown50IncludeMs: half of the rows not observed, with
  *   the 'skip' and 'include' policies.
  * Reported: median of 5 runs after one warm-up; extra memory = peak of JS
@@ -26,12 +29,26 @@ import { DRAWING_STRATEGIES, TRANSPARENT, TRANSPARENT_U32, UNKNOWN, createArrayS
 
 const COLORS = Array.from({ length: 32 }, (_, i) => ((i * 2654435761) >>> 8) & 0xffffff);
 
-function makeImage(size: number): TemplateImage {
+type Kind = 'pixel-art' | 'noise' | 'uniform';
+
+function makeImage(size: number, kind: Kind): TemplateImage {
   const pixels = new Uint32Array(size * size);
+  let seed = 0x9e3779b9;
   for (let iy = 0; iy < size; iy++) {
     for (let ix = 0; ix < size; ix++) {
-      const block = ((ix >> 4) * 31 + (iy >> 4) * 17) % 33;
-      pixels[iy * size + ix] = block === 32 ? TRANSPARENT_U32 : COLORS[block]!;
+      let value: number;
+      if (kind === 'uniform') value = COLORS[3]!;
+      else if (kind === 'noise') {
+        seed ^= seed << 13;
+        seed ^= seed >>> 17;
+        seed ^= seed << 5;
+        const v = seed >>> 0;
+        value = (v & 7) === 0 ? TRANSPARENT_U32 : COLORS[(v >>> 3) & 31]!;
+      } else {
+        const block = ((ix >> 4) * 31 + (iy >> 4) * 17) % 33;
+        value = block === 32 ? TRANSPARENT_U32 : COLORS[block]!;
+      }
+      pixels[iy * size + ix] = value;
     }
   }
   return { width: size, height: size, pixels };
@@ -68,7 +85,7 @@ function snapshot(image: TemplateImage, wrongEvery: number, observedRows: number
     const p = pixels[i]!;
     if (Math.floor(i / width) >= observedRows) out[i] = UNKNOWN;
     else if (p === TRANSPARENT_U32) out[i] = TRANSPARENT;
-    else out[i] = wrongEvery === 1 || (i * 2654435761) % wrongEvery === 0 ? TRANSPARENT : p;
+    else out[i] = wrongEvery === 1 || (Math.imul(i, 0x9e3779b1) >>> 0) % wrongEvery === 0 ? TRANSPARENT : p;
   }
   return createArraySnapshot({ rect: { minX: 0, minY: 0, width, height: image.height }, coordinateSystem: { yAxis: 'down' }, source: 'simulated', observedAt: 0, pixels: out });
 }
@@ -111,8 +128,8 @@ function time(fn: () => void): { ms: number; extraKb: number } {
 
 const hasher: Hasher = { sha256Hex: async (bytes) => createHash('sha256').update(bytes).digest('hex') };
 
-async function run(size: number): Promise<void> {
-  const image = makeImage(size);
+async function run(size: number, kind: Kind): Promise<void> {
+  const image = makeImage(size, kind);
   const empty = snapshot(image, 1, size);
   const nearDone = snapshot(image, 1000, size);
   const halfUnknown = snapshot(image, 1, size / 2);
@@ -138,12 +155,14 @@ async function run(size: number): Promise<void> {
     let writes = 0;
     const first = time(() => void (writes = nextBatch(prepared, request(empty, 'skip')).writes.length));
     if (writes !== 1000) throw new Error(`first batch of ${writes}`);
-    const near = time(() => void nextBatch(prepared, request(nearDone, 'skip')));
+    let nearCandidates = 0;
+    const near = time(() => void (nearCandidates = nextBatch(prepared, request(nearDone, 'skip')).candidates));
     const unknownSkip = time(() => void nextBatch(prepared, request(halfUnknown, 'skip')));
     const unknownInclude = time(() => void nextBatch(prepared, request(halfUnknown, 'include')));
     console.log(
       JSON.stringify({
         size: `${size}x${size}`,
+        image: kind,
         strategy: id,
         prepareMs: prepare.ms,
         ...(cachedMs === null ? {} : { prepareFromCacheMs: cachedMs }),
@@ -152,6 +171,7 @@ async function run(size: number): Promise<void> {
         firstBatchExtraKb: first.extraKb,
         firstBatchTotalMs: +(prepare.ms + first.ms).toFixed(1),
         nearDoneMs: near.ms,
+        nearDoneCandidates: nearCandidates,
         unknown50Ms: unknownSkip.ms,
         unknown50IncludeMs: unknownInclude.ms,
       }),
@@ -159,13 +179,20 @@ async function run(size: number): Promise<void> {
   }
 }
 
-const [sizeArg] = process.argv.slice(2);
-if (sizeArg !== undefined) await run(Number(sizeArg));
+const [sizeArg, kindArg] = process.argv.slice(2);
+if (sizeArg !== undefined) await run(Number(sizeArg), (kindArg ?? 'pixel-art') as Kind);
 else {
   console.log(`Node ${process.version}, ${process.platform}/${process.arch}; median of 5 runs, one process per size`);
   const self = fileURLToPath(import.meta.url);
-  for (const size of [1000, 2000, 4096]) {
-    const result = spawnSync(process.execPath, ['--expose-gc', '--import', 'tsx', self, String(size)], { stdio: 'inherit' });
+  const runs: [number, Kind][] = [
+    [1000, 'pixel-art'],
+    [2000, 'pixel-art'],
+    [4096, 'pixel-art'],
+    [2000, 'noise'],
+    [2000, 'uniform'],
+  ];
+  for (const [size, kind] of runs) {
+    const result = spawnSync(process.execPath, ['--expose-gc', '--import', 'tsx', self, String(size), kind], { stdio: 'inherit' });
     if (result.status !== 0) process.exitCode = 1;
   }
 }

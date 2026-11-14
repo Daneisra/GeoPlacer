@@ -196,9 +196,12 @@ déjà présent dans le cœur, et couvre le JSON.
 - Un événement valide mais qui n'est pas une transition permise est
   ignoré et compté (`inconsistentEvents`).
 
-**Écriture** : une seule écriture de ligne complète, puis `fsync`, avant
-de rendre la main. Les adaptateurs exigent le verrou du répertoire de
-données.
+**Écriture** : une ligne complète (une écriture partielle est complétée),
+puis `fsync`, avant de rendre la main. En cas d'erreur, le fichier est
+rouvert avant l'ajout suivant : une ligne partielle est alors mise de
+côté et coupée, au lieu d'être suivie d'une nouvelle ligne (testé par
+injection : ligne partielle puis erreur ; mutation vérifiée). Les adaptateurs
+exigent le verrou du répertoire de données.
 
 **Durabilité** : elle est testée contre l'**arrêt brutal du processus**
 (processus réels tués pendant les ajouts). Elle n'est **pas** démontrée
@@ -243,46 +246,76 @@ agents sur un même projet, sans être activé sur un service réel :
 - l'énergie engagée et l'incertitude des ressources sont comptées par
   agent ;
 - un test de propriétés fait travailler trois agents simulés sur une
-  toile locale, avec fautes injectées et crashs simulés. Il vérifie :
-  - qu'aucun point n'est dans deux tentatives ouvertes ;
+  toile locale (30 toiles aléatoires, 300 actions chacune). Les actions
+  sont tirées au hasard et **entrelacées** : bail pour n'importe quel
+  agent pendant que d'autres tentatives sont ouvertes, bail qui réutilise
+  un point en cours (doit être refusé), démarrage, écriture et clôture
+  avec fautes injectées, écriture puis crash avant la clôture, expiration.
+  Il vérifie :
+  - qu'aucun point n'est dans deux tentatives ouvertes, après chaque
+    action ;
+  - que le planificateur ne propose jamais un point en cours ;
   - qu'aucun pixel n'est appliqué deux fois ;
-  - que le travail éligible est conservé (tout pixel incorrect finit
-    correct) ;
+  - que le travail éligible est conservé : tout pixel incorrect finit
+    correct, appliqué une seule fois ;
   - qu'une dépense n'est enregistrée qu'une fois par identifiant.
+
+  Le test vérifie aussi qu'il n'est pas vide : plusieurs tentatives
+  ouvertes en même temps, des chevauchements refusés, des tentatives
+  libérées et réconciliées après crash, des tentatives démarrées puis
+  expirées. Retirer le refus `OVERLAP` du bail, ou l'exclusion des points
+  en cours du planificateur, le fait échouer (mutations vérifiées).
 
 ## 8. Performances
 
-Conditions : Windows 10, Node 22.23.2, machine de développement. Image en
-pixel art à 32 couleurs, avec environ 3 % de pixels transparents.
-Médiane de 5 exécutions après un échauffement, un processus par taille.
-Les instantanés sont en mémoire, avec `readRow`.
+Conditions : Windows 10, Node 22.23.2, machine de développement. Images :
+- pixel art à 32 couleurs, avec environ 3 % de pixels transparents, à
+  toutes les tailles ;
+- bruit à 32 couleurs (1/8 transparent) et image uniforme, en 2000².
+
+Médiane de 5 exécutions après un échauffement, un processus par taille et
+par image. Les instantanés sont en mémoire, avec `readRow`. Les
+fourchettes réunissent deux passes complètes du banc.
 
 ### Premier lot de 1 000 pixels (`npm run bench:planner`)
 
 Le modèle est déjà préparé. La toile est vide : tout est à peindre. Le
 temps est celui de `nextBatch`.
 
-| Stratégie | 1000² | 2000² | 4096² |
-|---|---|---|---|
-| Haut vers le bas | 31 ms | 83 ms | 312 ms |
-| Bas vers le haut | 25 ms | 99 ms | 363 ms |
-| Gauche vers la droite | 27 ms | 97 ms | 361 ms |
-| Droite vers la gauche | 27 ms | 101 ms | 356 ms |
-| Centre vers l'extérieur | 38 ms | 119 ms | 449 ms |
-| Aléatoire | 27 ms | 85 ms | 353 ms |
-| Couleur par couleur | 35 ms | 140 ms | 522 ms |
-| Contours d'abord | 42 ms | 149 ms | 699 ms |
+| Stratégie | Pixel art 1000² | Pixel art 2000² | Pixel art 4096² | Bruit 2000² | Uniforme 2000² |
+|---|---|---|---|---|---|
+| Haut vers le bas | 31–34 ms | 80–83 ms | 312–331 ms | 143 ms | 77 ms |
+| Bas vers le haut | 25–30 ms | 93–99 ms | 363–405 ms | 158 ms | 98 ms |
+| Gauche vers la droite | 25–27 ms | 97–101 ms | 361–397 ms | 149 ms | 94 ms |
+| Droite vers la gauche | 27–28 ms | 101–103 ms | 356–409 ms | 155 ms | 95 ms |
+| Centre vers l'extérieur | 33–38 ms | 119–133 ms | 445–449 ms | 181 ms | 112 ms |
+| Aléatoire | 23–27 ms | 85–99 ms | 345–353 ms | 147 ms | 77 ms |
+| Couleur par couleur | 31–35 ms | 140–167 ms | 522–523 ms | **256 ms** | 117 ms |
+| Contours d'abord | 42 ms | 149–177 ms | 640–699 ms | **202 ms** | 152 ms |
 
-**Objectif de moins de 200 ms en 2000²** : atteint par les huit stratégies
-une fois le modèle préparé.
+**Objectif de moins de 200 ms en 2000²**, une fois le modèle préparé :
+- **atteint** par les huit stratégies sur le pixel art et l'image
+  uniforme ;
+- **dépassé sur l'image bruitée** par deux stratégies :
+  - **couleur par couleur** (256 ms) : la couleur change presque à chaque
+    pixel, donc la mémoire de la dernière couleur ne sert plus, et les
+    clés arrivent dans le désordre (nombreux remplacements dans le tas) ;
+  - **contours d'abord** (202 ms) : presque tous les pixels d'une image
+    bruitée sont des contours ;
+- **centre vers l'extérieur** (181 ms) est proche du seuil.
 
-Avant deux optimisations, trois stratégies le dépassaient en 2000² :
+Pistes non réalisées : une table compacte des couleurs débloquées (index
+de couleur au lieu d'un `Set`), et une sélection par seuil plutôt qu'un
+tas. Aucune ne justifiait de toucher à la fiabilité dans cette phase.
+
+Avant deux optimisations, trois stratégies dépassaient le seuil en 2000²
+sur le pixel art :
 
 | Stratégie | Avant | Après |
 |---|---|---|
-| Bas vers le haut | 266 ms | 99 ms |
-| Contours d'abord | 212 ms | 149 ms |
-| Couleur par couleur | 204 ms | 140 ms |
+| Bas vers le haut | 266 ms | 93–99 ms |
+| Contours d'abord | 212 ms | 149–177 ms |
+| Couleur par couleur | 204 ms | 140–167 ms |
 
 Les deux optimisations ne changent pas le résultat (test de propriété et
 mutation vérifiée) :
@@ -295,9 +328,9 @@ mutation vérifiée) :
 
 | Stratégie | 1000² | 2000² | 4096² |
 |---|---|---|---|
-| Aléatoire, ordre généré | 146 ms | 724 ms | 3,18 s |
-| Aléatoire, depuis le cache vérifié | 43 ms | 265 ms | 1,19 s |
-| Couleur par couleur | 12 ms | 32 ms | 132 ms |
+| Aléatoire, ordre généré | 131–146 ms | 724–731 ms | 2,96–3,18 s |
+| Aléatoire, depuis le cache vérifié | 34–43 ms | 265–308 ms | 1,15–1,19 s |
+| Couleur par couleur | 12–14 ms | 32–42 ms | 119–132 ms |
 | Autres stratégies | moins de 0,1 ms | moins de 0,1 ms | moins de 0,1 ms |
 
 Le cache de l'aléatoire est vérifié par SHA-256 et contrôle de
@@ -305,8 +338,8 @@ permutation. La table des rangs occupe 3,8 Mio en 1000², 15,3 Mio en
 2000² et 64 Mio en 4096².
 
 **Au-delà du seuil** : le **tout premier lot d'une révision aléatoire**.
-Il inclut la préparation : 808 ms en 2000² avec génération de l'ordre,
-environ 350 ms depuis le cache. Les lots suivants réutilisent la
+Il inclut la préparation : environ 0,8 s en 2000² avec génération de
+l'ordre, environ 0,4 s depuis le cache. Les lots suivants réutilisent la
 préparation. En 4096², aucun objectif n'est fixé : de 312 à 699 ms selon
 la stratégie.
 
@@ -319,9 +352,10 @@ Seule la table des rangs de l'aléatoire grandit avec l'image.
 
 | Scénario | 1000² | 2000² | 4096² |
 |---|---|---|---|
-| 99,9 % correct (0,1 % de pixels faux dispersés) | 11 à 17 ms | 41 à 47 ms | 172 à 196 ms |
-| 50 % des lignes inconnues, politique `skip` | 19 à 27 ms | 64 à 104 ms | 277 à 429 ms |
-| 50 % des lignes inconnues, politique `include` | 24 à 39 ms | 80 à 160 ms | 335 à 636 ms |
+| Environ 99,9 % correct : 957, 3 873 et 16 280 pixels faux dispersés (pixel art) | 11 à 17 ms | 41 à 61 ms | 169 à 226 ms |
+| Idem, bruit et uniforme (2000²) | — | 40 à 55 ms | — |
+| 50 % des lignes inconnues, politique `skip` | 18 à 34 ms | 64 à 114 ms | 276 à 429 ms |
+| 50 % des lignes inconnues, politique `include` | 21 à 41 ms | 80 à 187 ms | 335 à 636 ms |
 
 Un modèle presque terminé est **le cas le moins cher** : peu de pixels
 passent dans le tas. Le temps restant est celui de la comparaison avec la
@@ -361,8 +395,10 @@ faire. Il est proposé pour la phase suivante.
 - Le journal **grossit sans compactage**, et les tentatives closes restent
   en mémoire après la reprise : 146 Mio, 3,8 s et 420 Mio pour 1 000
   tentatives de 1 000 pixels (§ 8).
-- Le tout premier lot d'une révision aléatoire dépasse 200 ms en 2000²
-  (préparation de la table des rangs, § 8).
+- En 2000², sur une image **bruitée**, le premier lot dépasse 200 ms pour
+  « couleur par couleur » (256 ms) et « contours d'abord » (202 ms). Le
+  tout premier lot d'une révision aléatoire dépasse aussi le seuil
+  (préparation de la table des rangs). Voir § 8.
 - **Historique** : une entrée peut manquer si le crash survient entre la
   clôture journalisée et l'ajout à l'historique. Le journal fait foi. Si
   l'ajout à l'historique échoue, `finish` rejette alors que la tentative

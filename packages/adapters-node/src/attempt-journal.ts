@@ -85,8 +85,21 @@ class LineFile {
   async append(line: string): Promise<void> {
     this.lock.assertHeld();
     const handle = await this.handleForAppend();
-    await handle.write(line, null, 'ascii');
-    await handle.sync();
+    try {
+      const bytes = Buffer.from(line, 'ascii');
+      let written = 0;
+      while (written < bytes.length) {
+        const { bytesWritten } = await handle.write(bytes, written, bytes.length - written, null);
+        if (bytesWritten <= 0) throw new Error('journal append wrote nothing');
+        written += bytesWritten;
+      }
+      await handle.sync();
+    } catch (error) {
+      // The file may end with a partial line: reopen before the next append
+      // so that it is moved aside and cut off, never followed by a new line.
+      await this.close().catch(() => undefined);
+      throw error;
+    }
   }
 
   async close(): Promise<void> {

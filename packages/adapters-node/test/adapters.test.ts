@@ -472,6 +472,27 @@ describe('attempt journal and history on disk', () => {
     await reopened.close();
   });
 
+  it('a failed append (partial line written, then an error) never leaves damage before the end', async () => {
+    const root = await tempRoot();
+    const lock = await acquireDataDirectoryLock(root);
+    locks.push(lock);
+    const journal = new FileAttemptJournal(lock);
+    await journal.append(leased('a', 1));
+    // Fault injection on the real file handle: write 10 bytes, then fail.
+    const handle = (journal as unknown as { lines: { handle: { write: (...args: unknown[]) => Promise<{ bytesWritten: number }> } } }).lines.handle;
+    const realWrite = handle.write.bind(handle);
+    handle.write = async (buffer: unknown) => {
+      await realWrite((buffer as Buffer).subarray(0, 10), 0, 10, null);
+      throw new Error('disk failure');
+    };
+    await expect(journal.append(started('a', 2))).rejects.toThrow('disk failure');
+    expect((await journal.load()).discardedTailBytes).toBe(10);
+    await journal.append(started('a', 3));
+    expect(await journal.load()).toEqual({ events: [leased('a', 1), started('a', 3)], discardedTailBytes: 0, corruptLines: [] });
+    expect((await readdir(path.dirname(journal.file))).filter((n) => n.startsWith('attempts.log.torn-'))).toHaveLength(1);
+    await journal.close();
+  });
+
   it('history: separate append-only file, filtered queries', async () => {
     const root = await tempRoot();
     const lock = await acquireDataDirectoryLock(root);

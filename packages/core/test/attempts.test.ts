@@ -636,65 +636,128 @@ describe('state machine', () => {
 });
 
 describe('several simulated agents sharing one project (properties)', () => {
-  it('never two open attempts on a point, no pixel applied twice, eligible work conserved, the canvas converges', async () => {
+  it('interleaved leases, starts, writes, crashes and expiries: never two open attempts on a point, no pixel applied twice, the canvas converges', async () => {
     const next = testRandom(0x1b6);
     const random = (): number => next(1_000_000) / 1_000_000;
-    for (let run = 0; run < 25; run++) {
+    const pick = <T,>(items: readonly T[]): T => items[Math.floor(random() * items.length)]!;
+    let maxOpen = 0;
+    let reconciledAfterCrash = 0;
+    let releasedAfterCrash = 0;
+    let overlapRefused = 0;
+    let expiredStarted = 0;
+    for (let run = 0; run < 30; run++) {
       const width = 3 + Math.floor(random() * 6);
       const height = 2 + Math.floor(random() * 5);
       const colors = [RED, GREEN, BLUE];
-      const t = template(image(width, height, () => (random() < 0.15 ? null : colors[Math.floor(random() * 3)]!)), 'modele', 1, { id: random() < 0.5 ? 'random' : 'center-out', ...(random() < 0.5 ? {} : { seed: 7 }) } as StrategyConfig);
+      const strategy = { id: pick(['random', 'center-out', 'bottom-to-top', 'outline-first'] as const), ...(random() < 0.5 ? {} : { seed: 7 }) } as StrategyConfig;
+      const t = template(image(width, height, () => (random() < 0.15 ? null : pick(colors))), 'modele', 1, strategy);
       const prepared = prepareTemplateSync(t);
       const w = new World(width, height, { idempotent: random() < 0.5 });
-      // Some pixels already correct, some wrong.
-      for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) if (random() < 0.3) w.sim.set(x, y, colors[Math.floor(random() * 3)]!);
+      for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) if (random() < 0.3) w.sim.set(x, y, pick(colors));
       await w.manager.recover(w.now);
       const agents = [A1, A2, 'agent-3' as AgentId];
-      for (const a of agents) w.observe(a, 3);
+      for (const a of agents) w.observe(a, 4);
       const initiallyWrong = countWrong(t, w.sim);
-      for (let step = 0; step < 400 && countWrong(t, w.sim) > 0; step++) {
-        const agent = agents[Math.floor(random() * agents.length)]!;
-        if (random() < 0.08) w.sim.faults.push((random() < 0.5 ? 'before-apply' : 'answer-lost') as WriteFault);
-        if (random() < 0.05) {
-          // Crash: a new manager replays the journal; uncertain attempts are reconciled.
-          w.manager = w.newManager();
-          const report = await w.manager.recover(w.tick());
-          for (const id of report.toReconcile) await w.manager.reconcile(id, w.sim.snapshot(w.tick()), w.tick());
-        }
-        // Interleave: lease for one agent while another one's attempt is open.
-        const plan = w.plan(prepared, agent, 1 + Math.floor(random() * 4));
-        if (plan.status === 'refused' || plan.status === 'waiting') {
-          w.observe(agent, 3);
-          continue;
-        }
-        if (plan.status !== 'ok') continue;
-        const open = w.manager.inFlight();
-        expect(plan.writes.some((x) => open.has(`${x.point.x},${x.point.y}`))).toBe(false);
-        const leased = await w.lease(t, agent, plan.writes);
-        await w.manager.start(leased.attemptId, w.tick());
+      const reconcileAll = async (ids: readonly string[]): Promise<void> => {
+        const snapshot = w.sim.snapshot(w.tick());
+        for (const id of ids) await w.manager.reconcile(id as never, snapshot, w.tick());
+      };
+      /** Writes a started attempt; an unknown result is left open (to reconcile later). */
+      const write = async (attempt: Attempt, finish: boolean): Promise<void> => {
         try {
-          const result = await w.sim.applyPixels(agent, leased.writes, { attemptId: leased.attemptId });
-          await w.manager.finish(leased.attemptId, result.outcomes, w.tick());
+          const result = await w.sim.applyPixels(attempt.agent, attempt.writes, { attemptId: attempt.attemptId });
+          if (finish) await w.manager.finish(attempt.attemptId, result.outcomes, w.tick());
         } catch (error) {
           if (!(error instanceof SimulatedWriteError)) throw error;
-          await w.manager.reconcile(leased.attemptId, w.sim.snapshot(w.tick()), w.tick());
+          if (finish) await reconcileAll([attempt.attemptId]);
         }
-        // Points of open attempts are pairwise distinct.
-        const points = w.manager.open().flatMap((a) => a.writes.map((x) => `${x.point.x},${x.point.y}`));
+      };
+      for (let step = 0; step < 300; step++) {
+        const open = w.manager.open();
+        const leased = open.filter((x) => x.state === 'leased');
+        const started = open.filter((x) => x.state === 'started');
+        const action = random();
+        if (action < 0.35) {
+          // Plan and lease for any agent, while other attempts are open.
+          const agent = pick(agents);
+          const plan = w.plan(prepared, agent, 1 + Math.floor(random() * 3));
+          if (plan.status === 'refused' || plan.status === 'waiting') {
+            w.observe(agent, 4);
+            continue;
+          }
+          if (plan.status !== 'ok') continue;
+          const busy = w.manager.inFlight();
+          expect(plan.writes.some((x) => busy.has(`${x.point.x},${x.point.y}`))).toBe(false);
+          await w.lease(t, agent, plan.writes, 50 + Math.floor(random() * 200));
+        } else if (action < 0.42 && open.length > 0) {
+          // A lease that reuses a point in flight is refused entirely.
+          const victim = pick(pick(open).writes);
+          const agent = pick(agents);
+          w.observe(agent, 4);
+          const extra = { taskId: `x-${step}` as TaskId, point: { x: (victim.point.x + 1) % width, y: victim.point.y }, color: RED };
+          const writes = busy(w).has(`${extra.point.x},${extra.point.y}`) ? [victim] : [extra, victim];
+          expect(await code(w.lease(t, agent, writes))).toBe('OVERLAP');
+          overlapRefused++;
+        } else if (action < 0.6 && leased.length > 0) {
+          const a = pick(leased);
+          if (w.now < a.expiresAt) await w.manager.start(a.attemptId, w.tick());
+        } else if (action < 0.8 && started.length > 0) {
+          if (random() < 0.15) w.sim.faults.push(pick(['before-apply', 'answer-lost'] as WriteFault[]));
+          await write(pick(started), true);
+        } else if (action < 0.88) {
+          // Crash: maybe after a write landed, before its result was journaled.
+          if (started.length > 0 && random() < 0.6) await write(pick(started), false);
+          w.manager = w.newManager();
+          const report = await w.manager.recover(w.tick());
+          releasedAfterCrash += report.released.length;
+          reconciledAfterCrash += report.toReconcile.length;
+          await reconcileAll(report.toReconcile);
+          for (const a of agents) w.observe(a, 4);
+        } else if (action < 0.94) {
+          // Time passes: expired leases are cancelled, expired started attempts reconciled.
+          const changed = await w.manager.expire(w.tick(150));
+          const uncertain = changed.filter((x) => x.state === 'needs-reconciliation');
+          expiredStarted += uncertain.length;
+          await reconcileAll(uncertain.map((x) => x.attemptId));
+        } else {
+          for (const a of agents) w.observe(a, 4);
+        }
+        // Points of open attempts are pairwise distinct; the energy committed never exceeds the agent's.
+        const after = w.manager.open();
+        maxOpen = Math.max(maxOpen, after.length);
+        const points = after.flatMap((x) => x.writes.map((y) => `${y.point.x},${y.point.y}`));
         expect(new Set(points).size).toBe(points.length);
       }
-      expect({ run, wrong: countWrong(t, w.sim) }).toEqual({ run, wrong: 0 });
-      // Each pixel was applied at most once (nobody repaints it here) and only eligible ones.
+      // Drain: close what is open, then plain cycles until the canvas is correct.
+      for (const a of w.manager.open()) {
+        if (a.state === 'leased') await w.manager.cancel(a.attemptId, 'drain', w.tick());
+        else if (a.state === 'started') await write(a, true);
+        else await reconcileAll([a.attemptId]);
+      }
+      for (let k = 0; k < 200 && countWrong(t, w.sim) > 0; k++) {
+        const agent = pick(agents);
+        w.observe(agent, 4);
+        await w.cycle(prepared, agent, 3);
+      }
+      expect({ run, wrong: countWrong(t, w.sim), open: w.manager.open().length }).toEqual({ run, wrong: 0, open: 0 });
+      // Nobody repaints here: each eligible wrong pixel was applied exactly once, by one attempt.
       expect([...w.sim.appliedAt.values()].every((n) => n === 1)).toBe(true);
       expect(w.sim.appliedAt.size).toBe(initiallyWrong);
-      // Spends recorded once per attempt id, for applied pixels only.
       for (const a of agents) {
-        const ids = w.resources.recordedSpends(a).map((s) => s.operationId);
+        const ids = w.resources.recordedSpends(a).map((x) => x.operationId);
         expect(new Set(ids).size).toBe(ids.length);
       }
     }
+    // The scenarios really happened (not vacuous).
+    expect(maxOpen).toBeGreaterThan(2);
+    expect(overlapRefused).toBeGreaterThan(10);
+    expect(reconciledAfterCrash).toBeGreaterThan(0);
+    expect(releasedAfterCrash).toBeGreaterThan(0);
+    expect(expiredStarted).toBeGreaterThan(0);
   });
 });
+
+const busy = (w: World): ReadonlySet<string> => w.manager.inFlight();
 
 function countWrong(t: Template, sim: SimCanvas): number {
   let wrong = 0;
