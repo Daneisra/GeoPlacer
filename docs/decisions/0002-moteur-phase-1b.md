@@ -267,5 +267,21 @@ Réalisé :
 | `SchedulerDependencies` sans progression | `progress` et `eta` ajoutés | Les événements `progress` portent `etaMs` |
 | — | Identifiants `ProjectId`, type `Timestamp` | Clarté des contrats |
 
-Points restant à décider avant ou pendant la 1B.1 : voir le rapport de la
-Phase 1B.0.
+### Points ouverts avant la 1B.1
+
+1. **Système de coordonnées en double** : il est porté à la fois par
+   `Template.coordinateSystem` et par `CanvasReader.coordinateSystem`, et
+   `CanvasSnapshot` n'en porte aucun. Règle proposée : celui du lecteur fait
+   foi ; un modèle dont le système diffère est refusé à la planification
+   (erreur explicite, jamais de conversion implicite). À trancher avant
+   d'implémenter `Projection`.
+2. **Dérivation des identifiants** : `TaskId` et `AttemptId` sont dits
+   stables, mais leur règle n'est pas encore fixée. Proposition :
+   - `TaskId` = empreinte de `(templateId, révision, x, y, couleur)` ;
+   - `AttemptId` = `(agentId, horodatage du bail, compteur)`, unique et
+     journalisé.
+3. **Interface sans `.env`** : l'interface n'est servie qu'avec
+   `NODE_ENV=production`. Faut-il la servir par défaut ? Décision à prendre
+   par l'utilisateur.
+4. **Routes de l'API sous `/api/`** (F13) : à étudier, avec une
+   compatibilité transitoire pour le frontend existant.

@@ -99,7 +99,8 @@ npm run test:packages         # Vitest dans chaque paquet
 npm run lint:packages         # ESLint sur packages/
 
 # Tout
-npm run test:all              # Jest puis Vitest
+npm run test:all              # typecheck des paquets, puis Jest, puis Vitest
+npm run check                 # tsc, lint, lint:packages, puis test:all (contrôle complet)
 npm run build                 # paquets + backend + frontend
 
 # Un seul paquet, ou en mode surveillance
@@ -139,6 +140,20 @@ commité. Il ne doit contenir aucun secret.
   valeurs par défaut ci-dessous (vérifié sur un clone neuf). Une valeur
   vide est traitée comme absente ; une valeur invalide est remplacée par son
   défaut, avec un avertissement `Invalid …` au démarrage.
+- **Sans `.env`, seule l'API fonctionne** : `NODE_ENV` n'est alors pas
+  défini, et l'interface compilée n'est servie qu'avec
+  `NODE_ENV=production` (fournie par `.env.example`). Sans `.env`,
+  `http://127.0.0.1:3000/` répond 404 alors que `/settings` répond 200
+  (vérifié). Pour l'interface : créer `.env` depuis l'exemple, ou lancer
+  `$env:NODE_ENV="production"; npm start`.
+- **Attention aux anciennes branches** : `.env` est encore suivi sur
+  `main`, `feat/phase1a-fondation` et `backup/*`. Passer sur l'une d'elles
+  **écrase en silence** le `.env` local par la version suivie, et revenir
+  sur une branche récente **le supprime** (vérifié). Avant de changer de
+  branche, copier `.env` hors du dépôt (par exemple
+  `Copy-Item .env ..GeoPlacer-env-sauvegarde`). Pour le récupérer :
+  recopier cette sauvegarde, ou repartir de `Copy-Item .env.example .env`.
+  Le problème disparaîtra une fois ces branches remplacées.
 - **Fichiers ignorés** : `.env` et `.env.*` sont ignorés par Git, sauf
   `.env.example` et `.env.*.example`.
 
@@ -148,7 +163,7 @@ commité. Il ne doit contenir aucun secret.
 | `PORT` | `3000` | Port principal. S'il est occupé, le serveur essaie une liste de ports de repli. |
 | `ALLOWED_HOSTS` | *(vide)* | Noms d'hôte supplémentaires acceptés (protection contre le DNS rebinding) |
 | `ALLOWED_ORIGINS` | `http://localhost:*,http://127.0.0.1:*,chrome-extension://*` | Origines navigateur autorisées |
-| `JSON_BODY_LIMIT` | `12mb` | Taille maximale d'un corps JSON (un modèle de 2000×2000 pèse environ 11,4 Mo) |
+| `JSON_BODY_LIMIT` | `12mb` | Taille maximale d'un corps JSON (un modèle de 2000×2000 pèse environ 11,4 Mo). Format : un entier, suivi éventuellement de `b`, `kb` ou `mb` ; toute autre forme (`1gb`, `1.5mb`) est remplacée par `12mb`, avec un avertissement |
 | `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX` | `60000` / `300` | Limiteur de débit, appliqué à toutes les routes |
 
 Voir `docs/fr/securite.md` pour le détail des protections.

@@ -77,6 +77,23 @@ est une décision séparée, qui n'est pas encore prise (ADR 0002, § 7).
 - **Aucune intégration non autorisée.** Aucun fournisseur n'écrit sur un
   service public.
 
+## Limites des contrôles automatiques
+
+- Le test d'architecture vérifie les **imports** (aucun paquet externe,
+  aucun module `node:`). L'absence d'API Node ou DOM utilisées comme
+  globales est garantie par la compilation de `core` (`types: []`), pas par
+  ce test.
+- Les garanties de types (`@ts-expect-error`) ne sont vérifiées que par
+  `npm run typecheck:packages`, inclus dans `npm run test:all` et
+  `npm run check`.
+
+## Documentation héritée
+
+Le `README.md` racine (section d'installation) et `docs/*.md` en anglais
+viennent du projet d'origine et ne sont pas mis à jour. Ils décrivent
+encore un `.env` suivi par Git et les anciennes commandes. La documentation
+à jour est en français, dans `docs/fr/`.
+
 ## Commandes
 
 Voir [installation-windows.md](installation-windows.md) § 4 et

@@ -13,7 +13,8 @@ npm run lint                  # ESLint backend
 npm run typecheck:packages    # types des paquets, tests compris
 npm run test:packages         # Vitest
 npm run lint:packages         # ESLint des paquets
-npm run test:all              # Jest puis Vitest
+npm run test:all              # typecheck des paquets, puis Jest, puis Vitest
+npm run check                 # tsc, lint, lint:packages, puis test:all (contrôle complet)
 cd frontend; npx eslint .; npm run build
 ```
 
