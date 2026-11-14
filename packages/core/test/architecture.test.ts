@@ -79,6 +79,10 @@ describe('@geoplacer/core architecture', () => {
       template: ['contracts', 'color', 'palette', 'geometry', 'template'],
       // Strategies: pure orders over a TemplateImage; no template manager, no I/O.
       strategy: ['contracts', 'geometry', 'strategy'],
+      // Pure in-memory canvas snapshots (simulated or imported data, decoded elsewhere).
+      canvas: ['contracts', 'geometry', 'canvas'],
+      // Progress and ETA: template image, geometry and eligible region only; no scheduler, no I/O.
+      progress: ['contracts', 'geometry', 'strategy', 'progress'],
     };
     for (const file of sourceFiles(srcDir)) {
       const folder = path.relative(srcDir, file).split(path.sep)[0] ?? '';

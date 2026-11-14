@@ -21,9 +21,16 @@ export type CanvasSource = 'simulated' | 'imported-snapshot';
 
 export interface CanvasSnapshot {
   readonly rect: CanvasRect;
+  /** Coordinate system of `rect` and of the points given to `get` (Phase 1B.4: explicit, never assumed). */
+  readonly coordinateSystem: CoordinateSystem;
   readonly source: CanvasSource;
   /** When the pixels were observed (an imported snapshot can be stale). */
   readonly observedAt: Timestamp;
+  /**
+   * Pixel at a canvas point: a 24-bit color, TRANSPARENT (empty) or UNKNOWN
+   * (outside `rect`, not observed). Must not keep `point`: callers reuse one
+   * object for every pixel.
+   */
   get(point: CanvasPoint): CanvasPixel;
 }
 
