@@ -7,13 +7,13 @@ import type { ReadWriteCanvasProvider } from './canvas.js';
 import type { EngineConfig } from './config.js';
 import type { Clock, AgentId, Timestamp } from './primitives.js';
 import type { EtaEstimator, ProgressCalculator, ProgressSnapshot } from './progress.js';
-import type { ResourceManager, ResourceSnapshot } from './resources.js';
+import type { AgentResourceState, ResourceManager } from './resources.js';
 import type { TemplateManager } from './template.js';
 import type { AttemptManager, HistoryEntry, HistoryStore, WorkPlanner } from './work.js';
 
 export type EngineEvent =
   | { readonly type: 'progress'; readonly progress: ProgressSnapshot; readonly etaMs: number | null }
-  | { readonly type: 'resources'; readonly agent: AgentId; readonly resources: ResourceSnapshot }
+  | { readonly type: 'resources'; readonly agent: AgentId; readonly resources: AgentResourceState }
   | { readonly type: 'agent-status'; readonly agent: AgentId; readonly status: AccountStatus }
   | { readonly type: 'attempt'; readonly entry: HistoryEntry }
   | { readonly type: 'error'; readonly message: string };

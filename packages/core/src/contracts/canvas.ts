@@ -11,7 +11,7 @@
 
 import type { CanvasPoint, CanvasRect, CoordinateSystem } from './geometry.js';
 import type { AbortSignalLike, AgentId, AttemptId, CanvasPixel, Rgb, TaskId, Timestamp } from './primitives.js';
-import type { ResourceSnapshot } from './resources.js';
+import type { ResourceObservation } from './resources.js';
 
 /**
  * Where canvas data comes from. Progress computed from 'imported-snapshot'
@@ -56,8 +56,8 @@ export type PixelWriteOutcome =
 export interface ApplyResult {
   readonly attemptId: AttemptId;
   readonly outcomes: readonly PixelWriteOutcome[];
-  /** Resources reported by the canvas after the write, when available. */
-  readonly resources?: ResourceSnapshot;
+  /** Resources reported by the canvas after the write, when available (an observation, never a projection). */
+  readonly resources?: ResourceObservation;
 }
 
 export interface WriteOptions {

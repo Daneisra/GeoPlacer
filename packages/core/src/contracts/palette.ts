@@ -2,7 +2,7 @@
  * Palettes and color matching. Layer 1.
  *
  * A Palette is a catalog (quantization, UI). What an agent can actually paint
- * is its own unlocked color set (ResourceSnapshot.unlockedColors): each agent
+ * is its own unlocked color set (AgentResourceState.unlockedColors): each agent
  * has its own palette.
  */
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentId, ColorProgress, EtaAgent, EtaParameters, ProgressSnapshot, Rgb, TemplateId } from '../src/index.js';
-import { ETA_ASSUMPTIONS, createEtaEstimator, estimateEta, etaAgentFrom } from '../src/index.js';
+import { ETA_ASSUMPTIONS, estimateEta } from '../src/index.js';
 import { testRandom } from './helpers/strategy.js';
 
 const RED = 0xff0000 as Rgb;
@@ -165,12 +165,6 @@ describe('EtaEstimator: values', () => {
     expect(r.assignments.find((a) => a.agent === 'slow')!.pixels).toBeGreaterThanOrEqual(2);
   });
 
-  it('builds an agent from a resource observation and model', () => {
-    const a = etaAgentFrom('x' as AgentId, { energy: 3, maxEnergy: 9, currency: 0, unlockedColors: new Set([RED]), observedAt: NOW }, { regenIntervalMs: 30_000 }, NOW + 1);
-    expect(a).toEqual({ id: 'x', energy: 3, maxEnergy: 9, regenIntervalMs: 30_000, observedAt: NOW, unlockedColors: new Set([RED]), availableFrom: NOW + 1 });
-    // Burst of 3 pixels at once (no cadence), but the agent is only available 1 ms later.
-    expect(createEtaEstimator().estimate(progress([[RED, 0, 3, 0]]), [a], params, NOW).durationMs).toBe(1);
-  });
 });
 
 /**

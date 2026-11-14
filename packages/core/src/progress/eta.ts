@@ -32,8 +32,6 @@ import type {
   EtaResult,
   EtaUnavailableReason,
   ProgressSnapshot,
-  ResourceModel,
-  ResourceSnapshot,
   Rgb,
   Timestamp,
 } from '../contracts/index.js';
@@ -51,19 +49,6 @@ export const ETA_ASSUMPTIONS: readonly string[] = [
 ];
 
 const isInt = (v: unknown, min = 0): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= min;
-
-/** EtaAgent from a resource observation and the service's resource model. */
-export function etaAgentFrom(id: AgentId, resources: ResourceSnapshot, model: Pick<ResourceModel, 'regenIntervalMs'>, availableFrom?: Timestamp): EtaAgent {
-  return {
-    id,
-    energy: resources.energy,
-    maxEnergy: resources.maxEnergy,
-    regenIntervalMs: model.regenIntervalMs,
-    observedAt: resources.observedAt,
-    unlockedColors: resources.unlockedColors,
-    ...(availableFrom === undefined ? {} : { availableFrom }),
-  };
-}
 
 /** Sorted, merged pause windows. */
 function mergePauses(pauses: readonly EtaPause[]): EtaPause[] {

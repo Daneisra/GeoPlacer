@@ -82,7 +82,9 @@ describe('@geoplacer/core architecture', () => {
       // Pure in-memory canvas snapshots (simulated or imported data, decoded elsewhere).
       canvas: ['contracts', 'geometry', 'canvas'],
       // Progress and ETA: template image, geometry and eligible region only; no scheduler, no I/O.
-      progress: ['contracts', 'geometry', 'strategy', 'progress'],
+      progress: ['contracts', 'geometry', 'strategy', 'resources', 'progress'],
+      // Resource rules and agent states: pure, contracts only.
+      resources: ['contracts', 'resources'],
     };
     for (const file of sourceFiles(srcDir)) {
       const folder = path.relative(srcDir, file).split(path.sep)[0] ?? '';
