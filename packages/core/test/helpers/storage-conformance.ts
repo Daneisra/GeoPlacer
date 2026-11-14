@@ -189,7 +189,7 @@ export function storageConformance(target: ConformanceTarget): void {
         });
       }
 
-      it('leaves the corrupt state (backup intact) or the repaired one after a failure during repair', async () => {
+      it('leaves the corrupt state (backup intact) or the repaired one after a failure during repair', { timeout: 30_000 }, async () => {
         for (let k = 0; ; k++) {
           let reachedAny = false;
           for (const after of [false, true]) {
@@ -223,7 +223,7 @@ export function storageConformance(target: ConformanceTarget): void {
         }
       });
 
-      it('leaves no copy or a complete one after a failure during duplication', async () => {
+      it('leaves no copy or a complete one after a failure during duplication', { timeout: 30_000 }, async () => {
         for (let k = 0; ; k++) {
           let reachedAny = false;
           for (const after of [false, true]) {
@@ -287,7 +287,7 @@ export function storageConformance(target: ConformanceTarget): void {
         expect(Math.max(...contentOf.keys())).toBeGreaterThan(kept.length);
       });
 
-      it('leaves no template or a complete one after a failure during creation', async () => {
+      it('leaves no template or a complete one after a failure during creation', { timeout: 30_000 }, async () => {
         for (let k = 0; ; k++) {
           let reachedAny = false;
           for (const after of [false, true]) {

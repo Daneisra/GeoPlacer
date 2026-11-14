@@ -137,6 +137,14 @@ Phase 1B.6, échecs rencontrés (journaux complets conservés hors du dépôt) :
   la suite complète (6,7 s, contre environ 3,3 s seul). La charge est
   déterministe (graine fixe) : 30 toiles de 300 actions. Ce n'est pas un
   blocage. Délai explicite de 30 s, comme les autres calculs lourds.
+- **Conformité du stockage fichiers, duplication interrompue** : délai de
+  5 s atteint une fois sur un clone neuf (5,0 s). Le test prend 1,9 à
+  2,2 s dans le dépôt et avait réussi sur deux clones neufs précédents.
+  C'est une boucle d'injection de fautes sur disque réel, avec un fsync
+  par opération. **Cause non établie** : des entrées-sorties plus lentes
+  dans le dossier temporaire du clone restent une hypothèse. Délai
+  explicite de 30 s pour les trois tests d'opérations interrompues ; ce
+  délai ne prouve rien sur la cause.
 - Deux échecs de mise au point n'ont été conservés que sous forme
   d'extraits, pas de journal complet :
   - premier passage de `attempts.test.ts` : erreurs de rédaction du test ;
