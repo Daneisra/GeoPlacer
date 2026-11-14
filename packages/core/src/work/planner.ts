@@ -202,6 +202,12 @@ export function nextBatch(prepared: PreparedTemplate, request: PlanRequest): Pla
   let skippedInFlight = 0;
   let skippedUnknown = 0;
   const pixels = template.image.pixels;
+  const checkInFlight = inFlight.size > 0;
+  let lastColor = -1;
+  let lastUnlocked = false;
+  // Rows in the direction of increasing keys when the strategy goes upward:
+  // fewer heap replacements, same result (the k smallest keys).
+  const descending = template.strategy.id === 'bottom-to-top';
   scanEligibleRows(template, snapshot, (row) => {
     const base = row.iy * width + row.ix0;
     for (let c = 0; c < row.count; c++) {
@@ -213,11 +219,15 @@ export function nextBatch(prepared: PreparedTemplate, request: PlanRequest): Pla
       }
       const index = base + c;
       const color = pixels[index]!;
-      if (!palette.has(color)) {
+      if (color !== lastColor) {
+        lastColor = color;
+        lastUnlocked = palette.has(color);
+      }
+      if (!lastUnlocked) {
         missingColors.set(color, (missingColors.get(color) ?? 0) + 1);
         continue;
       }
-      if (inFlight.has(index)) {
+      if (checkInFlight && inFlight.has(index)) {
         skippedInFlight++;
         continue;
       }
@@ -234,7 +244,7 @@ export function nextBatch(prepared: PreparedTemplate, request: PlanRequest): Pla
         siftDown(0);
       }
     }
-  });
+  }, descending);
   const unavailableColors = [...missingColors.entries()].sort((a, b) => a[0] - b[0]).map(([color, count]) => ({ color: color as Rgb, pixels: count }));
   const stats = { candidates, unavailableColors, skippedInFlight, skippedUnknown, budget };
   if (candidates === 0) return empty('nothing-to-do', basis, stats);

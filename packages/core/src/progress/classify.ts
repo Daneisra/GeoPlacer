@@ -43,10 +43,12 @@ export interface RowScan {
 }
 
 /**
- * Calls `onRow` for every row of the eligible region. The template and
- * snapshot must share the coordinate system (checked by the callers).
+ * Calls `onRow` for every row of the eligible region, by increasing image
+ * row (or decreasing with `descending`: same rows, same states). The
+ * template and snapshot must share the coordinate system (checked by the
+ * callers).
  */
-export function scanEligibleRows(template: ProgressTemplate, snapshot: CanvasSnapshot, onRow: (row: RowScan) => void): ImageRect {
+export function scanEligibleRows(template: ProgressTemplate, snapshot: CanvasSnapshot, onRow: (row: RowScan) => void, descending = false): ImageRect {
   const { image, placement, coordinateSystem } = template;
   const { width, pixels } = image;
   const region = eligibleRegion(image, placement, coordinateSystem);
@@ -66,7 +68,8 @@ export function scanEligibleRows(template: ProgressTemplate, snapshot: CanvasSna
   const ry1 = ry0 + snapshot.rect.height;
   const kFrom = Math.max(0, Math.min(region.width, rx0 - x0));
   const kTo = Math.max(kFrom, Math.min(region.width, rx1 - x0));
-  for (let iy = region.iy; iy < region.iy + region.height; iy++) {
+  for (let r = 0; r < region.height; r++) {
+    const iy = descending ? region.iy + region.height - 1 - r : region.iy + r;
     const y = t.originY + t.yStep * iy;
     observed.fill(UNKNOWN);
     if (y >= ry0 && y < ry1 && kTo > kFrom) {

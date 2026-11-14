@@ -99,21 +99,26 @@ export function isJournalEvent(e: unknown): e is JournalEvent {
   }
 }
 
+/** ASCII bytes to text, by chunks (no per-character concatenation). */
+function asciiText(bytes: Uint8Array, start: number, end: number): string {
+  const parts: string[] = [];
+  for (let i = start; i < end; i += 8192) parts.push(String.fromCharCode.apply(null, bytes.subarray(i, Math.min(end, i + 8192)) as unknown as number[]));
+  return parts.join('');
+}
+
 function decodeLine<T>(bytes: Uint8Array, start: number, end: number, valid: (value: unknown) => value is T): T | null {
   // "xxxxxxxx " + at least "{}"
   if (end - start < 11 || bytes[start + 8] !== 0x20) return null;
-  let text = '';
   for (let i = start; i < end; i++) {
     const b = bytes[i]!;
     if (b < 0x20 || b > 0x7e) return null;
-    text += String.fromCharCode(b);
   }
-  const crcText = text.slice(0, 8);
+  const crcText = asciiText(bytes, start, start + 8);
   if (!/^[0-9a-f]{8}$/.test(crcText)) return null;
   if (crc32(bytes, start + 9, end) !== Number.parseInt(crcText, 16)) return null;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text.slice(9));
+    parsed = JSON.parse(asciiText(bytes, start + 9, end));
   } catch {
     return null;
   }
