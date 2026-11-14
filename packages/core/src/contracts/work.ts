@@ -219,6 +219,8 @@ export interface RecoveryReport {
   readonly toReconcile: readonly AttemptId[];
   readonly discardedTailBytes: number;
   readonly corruptLines: readonly number[];
+  /** Journal events that were not valid transitions (ignored, reported). */
+  readonly inconsistentEvents: number;
 }
 
 export interface AttemptManager {

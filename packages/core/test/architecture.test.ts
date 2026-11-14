@@ -89,7 +89,8 @@ describe('@geoplacer/core architecture', () => {
       // Upgrade planning: simulations over resources and the ETA; no purchase, no I/O.
       upgrades: ['contracts', 'resources', 'progress', 'upgrades'],
       // Work planning, attempts and recovery: pure, over the other domains; I/O through ports.
-      work: ['contracts', 'geometry', 'strategy', 'progress', 'resources', 'work'],
+      // (template: the shared crc32 of the journal lines only.)
+      work: ['contracts', 'geometry', 'strategy', 'progress', 'resources', 'template', 'work'],
     };
     for (const file of sourceFiles(srcDir)) {
       const folder = path.relative(srcDir, file).split(path.sep)[0] ?? '';

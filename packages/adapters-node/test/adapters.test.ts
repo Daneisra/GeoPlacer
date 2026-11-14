@@ -4,10 +4,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
-import type { ProjectId, TemplateId, TemplateManager } from '@geoplacer/core';
-import { TemplateError, asProjectId, createTemplateManager, loadRandomOrder, random, rgb } from '@geoplacer/core';
+import type { Attempt, AttemptId, JournalEvent, ProjectId, TemplateId, TemplateManager } from '@geoplacer/core';
+import { TemplateError, asProjectId, createTemplateManager, decodeJournal, encodeJournalLine, loadRandomOrder, random, rgb, transition } from '@geoplacer/core';
 import {
   DataDirectoryLockedError,
+  FileAttemptJournal,
+  FileHistoryStore,
   FileOrderCacheStore,
   NodeTemplateStorage,
   acquireDataDirectoryLock,
@@ -79,6 +81,10 @@ async function expectCode(promise: Promise<unknown>, code: string): Promise<void
   );
   expect(error).toBeInstanceOf(TemplateError);
   expect((error as TemplateError).code).toBe(code);
+}
+
+async function appendFileRaw(file: string, text: string): Promise<void> {
+  await writeFile(file, text, { flag: 'a' });
 }
 
 async function filesUnder(dir: string): Promise<string[]> {
@@ -384,6 +390,151 @@ describe('number reservations on disk', () => {
     await rm(dir, { recursive: true });
     await writeFile(dir, 'not a directory');
     await expect(storage.reservations(P, t.id)).rejects.toThrow();
+  });
+});
+
+describe('attempt journal and history on disk', () => {
+  const started = (id: string, at: number): JournalEvent => ({ type: 'started', attemptId: id as AttemptId, at });
+  const leased = (id: string, at: number): JournalEvent => ({
+    type: 'leased',
+    attempt: {
+      attemptId: id as AttemptId,
+      agent: 'agent-1' as never,
+      projectId: 'projet' as never,
+      templateId: 'm' as never,
+      revision: 1,
+      writes: [{ taskId: `t-${id}` as never, point: { x: 1, y: 2 }, color: 0xff0000 as never }],
+      energyCost: 1,
+      state: 'leased',
+      leasedAt: at,
+      expiresAt: at + 10,
+      startedAt: null,
+      closedAt: null,
+      results: [],
+      reason: null,
+    },
+  });
+
+  it('appends durable lines under the locked data directory and reads them back', async () => {
+    const root = await tempRoot();
+    const lock = await acquireDataDirectoryLock(root);
+    locks.push(lock);
+    const journal = new FileAttemptJournal(lock);
+    expect(await journal.load()).toEqual({ events: [], discardedTailBytes: 0, corruptLines: [] });
+    const events = [leased('a', 1), started('a', 2)];
+    for (const e of events) await journal.append(e);
+    expect(journal.file).toBe(path.join(root, 'journal', 'attempts.log'));
+    expect(await readFile(journal.file, 'utf8')).toBe(events.map(encodeJournalLine).join(''));
+    expect((await journal.load()).events).toEqual(events);
+    await journal.close();
+    expect(() => new FileAttemptJournal({ ...lock, assertHeld: () => { throw new Error('released'); } })).toThrow('released');
+  });
+
+  it('a torn last line is reported, moved aside and cut off before the next append; damage before the end is kept', async () => {
+    const root = await tempRoot();
+    const lock = await acquireDataDirectoryLock(root);
+    locks.push(lock);
+    const file = path.join(root, 'journal', 'attempts.log');
+    await mkdir(path.dirname(file), { recursive: true });
+    const torn = encodeJournalLine(started('a', 2)).slice(0, 17);
+    await writeFile(file, encodeJournalLine(leased('a', 1)) + torn);
+    const journal = new FileAttemptJournal(lock);
+    expect(await journal.load()).toMatchObject({ events: [leased('a', 1)], discardedTailBytes: 17, corruptLines: [] });
+    await journal.append(leased('b', 3));
+    expect(await journal.load()).toEqual({ events: [leased('a', 1), leased('b', 3)], discardedTailBytes: 0, corruptLines: [] });
+    const aside = (await readdir(path.dirname(file))).filter((n) => n.startsWith('attempts.log.torn-'));
+    expect(aside).toHaveLength(1);
+    expect(await readFile(path.join(path.dirname(file), aside[0]!), 'utf8')).toBe(torn);
+    // Damage in the middle: reported on every load, never removed.
+    const bytes = await readFile(file);
+    bytes[20]! ^= 0x01;
+    await writeFile(file, bytes);
+    await journal.close();
+    const reopened = new FileAttemptJournal(lock);
+    await reopened.append(started('b', 4));
+    const load = await reopened.load();
+    expect(load).toMatchObject({ corruptLines: [1], discardedTailBytes: 0 });
+    expect(load.events).toEqual([leased('b', 3), started('b', 4)]);
+    expect((await readFile(file)).length).toBe(bytes.length + encodeJournalLine(started('b', 4)).length);
+    await reopened.close();
+  });
+
+  it('history: separate append-only file, filtered queries', async () => {
+    const root = await tempRoot();
+    const lock = await acquireDataDirectoryLock(root);
+    locks.push(lock);
+    const history = new FileHistoryStore(lock);
+    const entry = (at: number, agent: string, templateId: string) => ({ at, agent: agent as never, templateId: templateId as never, revision: 1, attemptId: `a${at}` as never, state: 'finished' as const, applied: 1, alreadyCorrect: 0, rejected: 0, unknown: 0, observedCorrect: 0, observedIncorrect: 0 });
+    for (const [i, [agent, t]] of [['x', 'm'], ['y', 'm'], ['x', 'n'], ['x', 'm']].entries()) await history.append(entry(i + 1, agent!, t!));
+    expect((await history.query({ agent: 'x' as never, templateId: 'm' as never, limit: 10 })).map((e) => e.at)).toEqual([1, 4]);
+    expect((await history.query({ since: 2, limit: 2 })).map((e) => e.at)).toEqual([3, 4]);
+    await appendFileRaw(history.file, 'garbage\n');
+    expect(await history.query({ limit: 10 })).toHaveLength(4);
+    expect(history.lastQueryCorruptLines).toBe(1);
+    expect(path.relative(root, history.file).split(path.sep)).toEqual(['journal', 'history.log']);
+    await history.close();
+  });
+
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const repoRoot = path.resolve(here, '..', '..', '..');
+
+  /** Runs attempts-child until it is ready, kills it `delayMs` later; resolves with its recovery report. */
+  function attemptsAndKill(root: string, base: number, delayMs: number): Promise<{ released: string[]; toReconcile: string[]; corruptLines: number[]; inconsistentEvents: number; discardedTailBytes: number }> {
+    return new Promise((resolve, reject) => {
+      const proc = spawn(process.execPath, ['--import', 'tsx', path.join(here, 'fixtures', 'attempts-child.ts'), root, String(base)], {
+        cwd: repoRoot,
+        env: { ...process.env, TSX_TSCONFIG_PATH: path.join(here, 'fixtures', 'tsconfig.child.json') },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let out = '';
+      let err = '';
+      let report: unknown;
+      proc.stdout.on('data', (chunk: Buffer) => {
+        out += chunk.toString();
+        const match = /ready (\{.*\})\n/.exec(out);
+        if (match && report === undefined) {
+          report = JSON.parse(match[1]!);
+          setTimeout(() => proc.kill('SIGKILL'), delayMs);
+        }
+      });
+      proc.stderr.on('data', (chunk: Buffer) => (err += chunk.toString()));
+      proc.on('exit', (code, signal) => {
+        if (report === undefined) reject(new Error(`attempts child failed (code ${String(code)}): ${err}`));
+        else if (signal === null && code !== 0) reject(new Error(`attempts child exited ${String(code)}: ${err}`));
+        else resolve(report as never);
+      });
+    });
+  }
+
+  it('real process kills during appends: the journal always replays without damage, uncertain attempts are reconciled', { timeout: 180_000 }, async () => {
+    const root = await tempRoot();
+    const delays = [50, 120, 30, 200, 80, 160, 45, 250];
+    let reconciled = 0;
+    let released = 0;
+    for (const [round, delayMs] of delays.entries()) {
+      const report = await attemptsAndKill(root, (round + 1) * 1_000_000_000, delayMs);
+      // A process kill tears at most the last line: never damage before it.
+      expect(report.corruptLines).toEqual([]);
+      expect(report.inconsistentEvents).toBe(0);
+      if (round > 0) {
+        released += report.released.length;
+        reconciled += report.toReconcile.length;
+      }
+      // Replay the file with the pure state machine: no invalid transition, no attempt twice.
+      const bytes = await readFile(path.join(root, 'journal', 'attempts.log'));
+      const load = decodeJournal(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+      expect(load.corruptLines).toEqual([]);
+      const attempts = new Map<string, Attempt>();
+      for (const e of load.events) {
+        const id = e.type === 'leased' ? e.attempt.attemptId : e.attemptId;
+        const next = transition(attempts.get(id), e);
+        expect(typeof next === 'string' ? next : 'ok').toBe('ok');
+        attempts.set(id, next as Attempt);
+      }
+    }
+    // The children left leased and started attempts behind at every kill: released and reconciled at restart.
+    expect(released).toBeGreaterThan(0);
+    expect(reconciled).toBeGreaterThan(0);
   });
 });
 

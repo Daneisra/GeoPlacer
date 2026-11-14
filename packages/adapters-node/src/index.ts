@@ -19,6 +19,7 @@ export {
   type LockOptions,
   type LockOwner,
 } from './lock.js';
+export { FileAttemptJournal, FileHistoryStore } from './attempt-journal.js';
 export { FileOrderCacheStore } from './order-cache.js';
 export { pngjsCodec } from './png-codec.js';
 export { NodeTemplateStorage, type NodeTemplateStorageOptions } from './storage.js';
