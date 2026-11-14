@@ -12,3 +12,4 @@ export * from './geometry/index.js';
 export * from './color/index.js';
 export * from './palette/index.js';
 export * from './template/index.js';
+export * from './strategy/index.js';
