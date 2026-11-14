@@ -9,8 +9,11 @@
  * Frequencies are counted over the WHOLE image, never over the eligible
  * region, so that moving the template does not change the color order.
  * Within a color: top to bottom, left to right. Counting sort: one counting
- * pass, one placing pass into a single Uint32Array; no per-pixel object and
- * no comparison sort of pixels (only the few distinct colors are sorted).
+ * pass over the image (plus one over the region when it is not the whole
+ * image), one placing pass into a single Uint32Array. Colors map to dense ids
+ * through a typed-array hash table (color-table.ts), never a Map per pixel;
+ * no per-pixel object and no comparison sort of pixels (only the few
+ * distinct colors are sorted).
  *
  * outline-first — a paintable pixel is an outline pixel when at least one of
  * its 4 orthogonal neighbours is outside the image, transparent or of a
@@ -22,7 +25,8 @@
 
 import type { DrawingOrderCursor, ImageRect, StrategyConfig, TemplateImage } from '../contracts/index.js';
 import { TRANSPARENT_U32 } from '../contracts/index.js';
-import { arrayCursor, defineStrategy, StrategyError } from './common.js';
+import { arrayCursor, defineStrategy, isWholeImage, StrategyError } from './common.js';
+import { ColorIdTable } from './color-table.js';
 
 // ───────────────────────── color-by-color ─────────────────────────
 
@@ -39,64 +43,102 @@ function explicitOrder(config: StrategyConfig): readonly number[] {
   return order;
 }
 
-/** Colors in drawing order, with their pixel count over the whole image (runs of equal pixels are counted at once). */
-export function colorRanking(image: TemplateImage, config: StrategyConfig): { readonly colors: readonly number[]; readonly counts: readonly number[] } {
+interface ColorCensus {
+  readonly table: ColorIdTable;
+  /** Pixel count by color id, over the whole image. */
+  readonly counts: Float64Array;
+  /** Ids in drawing order. */
+  readonly rankedIds: Int32Array;
+}
+
+/** One pass over the whole image: color ids, counts, then the color rank. */
+function census(image: TemplateImage, config: StrategyConfig): ColorCensus {
   const explicit = explicitOrder(config);
-  const counts = new Map<number, number>();
+  const table = new ColorIdTable();
+  let counts = new Float64Array(64);
   const { pixels } = image;
   let last = TRANSPARENT_U32;
-  let run = 0;
+  let id = -1;
   for (let i = 0; i < pixels.length; i++) {
     const p = pixels[i]!;
-    if (p === last) {
-      run++;
-      continue;
+    if (p === TRANSPARENT_U32) continue;
+    if (p !== last) {
+      last = p;
+      id = table.idOf(p);
+      if (id >= counts.length) {
+        const grown = new Float64Array(counts.length * 2);
+        grown.set(counts);
+        counts = grown;
+      }
     }
-    if (last !== TRANSPARENT_U32) counts.set(last, (counts.get(last) ?? 0) + run);
-    last = p;
-    run = 1;
+    counts[id]! += 1;
   }
-  if (last !== TRANSPARENT_U32) counts.set(last, (counts.get(last) ?? 0) + run);
-  const listed = explicit.filter((c) => counts.has(c));
-  const listedSet = new Set(listed);
-  const rest = [...counts.keys()].filter((c) => !listedSet.has(c)).sort((a, b) => counts.get(a)! - counts.get(b)! || a - b);
-  const colors = [...listed, ...rest];
-  return { colors, counts: colors.map((c) => counts.get(c)!) };
+  // Rank: listed colors present in the image, then least frequent first, ties by RGB value.
+  const listed: number[] = [];
+  const isListed = new Uint8Array(table.size);
+  for (const color of explicit) {
+    const listedId = table.find(color);
+    if (listedId >= 0) {
+      listed.push(listedId);
+      isListed[listedId] = 1;
+    }
+  }
+  const rest: number[] = [];
+  for (let k = 0; k < table.size; k++) if (isListed[k] === 0) rest.push(k);
+  rest.sort((a, b) => counts[a]! - counts[b]! || table.colorOf(a) - table.colorOf(b));
+  return { table, counts, rankedIds: Int32Array.from([...listed, ...rest]) };
+}
+
+/** Colors in drawing order, with their pixel count over the whole image. */
+export function colorRanking(image: TemplateImage, config: StrategyConfig): { readonly colors: readonly number[]; readonly counts: readonly number[] } {
+  const { table, counts, rankedIds } = census(image, config);
+  return { colors: Array.from(rankedIds, (id) => table.colorOf(id)), counts: Array.from(rankedIds, (id) => counts[id]!) };
 }
 
 function colorCursor(image: TemplateImage, config: StrategyConfig, r: ImageRect): DrawingOrderCursor {
-  const { colors } = colorRanking(image, config);
+  const { table, counts, rankedIds } = census(image, config);
   const { width, pixels } = image;
-  const rank = new Map<number, number>(colors.map((c, k) => [c, k]));
-  // Counts inside the region, then the start offset of each color.
-  const start = new Float64Array(colors.length + 1);
+  const colorCount = table.size;
   const x1 = r.ix + r.width;
   const y1 = r.iy + r.height;
-  let last = TRANSPARENT_U32;
-  let lastRank = -1;
-  for (let iy = r.iy; iy < y1; iy++) {
-    for (let i = iy * width + r.ix, end = iy * width + x1; i < end; i++) {
-      const p = pixels[i]!;
-      if (p === TRANSPARENT_U32) continue;
-      if (p !== last) {
-        last = p;
-        lastRank = rank.get(p)!;
+  // Pixels per color inside the region: the whole-image counts when the region is the image.
+  let inside = counts;
+  if (!isWholeImage(image, r)) {
+    inside = new Float64Array(colorCount);
+    let last = TRANSPARENT_U32;
+    let id = -1;
+    for (let iy = r.iy; iy < y1; iy++) {
+      for (let i = iy * width + r.ix, end = iy * width + x1; i < end; i++) {
+        const p = pixels[i]!;
+        if (p === TRANSPARENT_U32) continue;
+        if (p !== last) {
+          last = p;
+          id = table.find(p);
+        }
+        inside[id]! += 1;
       }
-      start[lastRank + 1]! += 1;
     }
   }
-  for (let k = 1; k <= colors.length; k++) start[k]! += start[k - 1]!;
-  const order = new Uint32Array(start[colors.length]!);
-  last = TRANSPARENT_U32;
+  // Start offset of each rank, indexed by color id.
+  const start = new Float64Array(colorCount);
+  let total = 0;
+  for (let rank = 0; rank < colorCount; rank++) {
+    const id = rankedIds[rank]!;
+    start[id] = total;
+    total += inside[id]!;
+  }
+  const order = new Uint32Array(total);
+  let last = TRANSPARENT_U32;
+  let id = -1;
   for (let iy = r.iy; iy < y1; iy++) {
     for (let i = iy * width + r.ix, end = iy * width + x1; i < end; i++) {
       const p = pixels[i]!;
       if (p === TRANSPARENT_U32) continue;
       if (p !== last) {
         last = p;
-        lastRank = rank.get(p)!;
+        id = table.find(p);
       }
-      order[start[lastRank]!++] = i;
+      order[start[id]!++] = i;
     }
   }
   return arrayCursor(order);

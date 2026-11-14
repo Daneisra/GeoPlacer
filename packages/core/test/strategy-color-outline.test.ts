@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Rgb, StrategyConfig, TemplateImage } from '../src/index.js';
-import { StrategyError, colorByColor, colorRanking, isOutlinePixel, outlineFirst } from '../src/index.js';
+import { ColorIdTable, StrategyError, colorByColor, colorRanking, isOutlinePixel, outlineFirst } from '../src/index.js';
 import { art, coords, drainWith, image, inRegion, paintable, testRandom } from './helpers/strategy.js';
 
 const C = (ch: string): Rgb => ch.charCodeAt(0) as Rgb; // art() colors are char codes
@@ -94,6 +94,56 @@ describe('outline-first', () => {
       const region = { ...r, width: pick(img.width - r.ix + 1), height: pick(img.height - r.iy + 1) };
       expect([...outlineFirst.order(img, { id: 'outline-first' }, region)]).toEqual(full.filter((i) => inRegion(img, region, i)));
       expect(drainWith(outlineFirst.cursor(img, { id: 'outline-first' }), [1, 4, 9])).toEqual(full);
+    }
+  });
+});
+
+describe('color-by-color: typed-array color table (Phase 1B.4 optimization)', () => {
+  it('maps colors to dense ids in order of first appearance, across growth', () => {
+    const table = new ColorIdTable(2);
+    const colors = Array.from({ length: 5000 }, (_, k) => (k * 2654435761) >>> 8);
+    colors.forEach((c, k) => expect(table.idOf(c)).toBe(k));
+    colors.forEach((c, k) => {
+      expect(table.idOf(c)).toBe(k);
+      expect(table.find(c)).toBe(k);
+      expect(table.colorOf(k)).toBe(c);
+    });
+    expect(table.size).toBe(5000);
+    expect(table.find(0xfffffffe)).toBe(-1);
+    expect(table.find(0)).toBe(colors.indexOf(0));
+  });
+
+  /** Independent reference: explicit sort by (color rank, index), rank computed with plain arrays. */
+  function reference(img: TemplateImage, config: StrategyConfig, r?: { ix: number; iy: number; width: number; height: number }): number[] {
+    const counts = new Map<number, number>();
+    for (const p of img.pixels) if (p !== 0xffffffff) counts.set(p, (counts.get(p) ?? 0) + 1);
+    const listed = (config.colorOrder ?? []).filter((c) => counts.has(c));
+    const rest = [...counts.keys()].filter((c) => !listed.includes(c as Rgb)).sort((a, b) => counts.get(a)! - counts.get(b)! || a - b);
+    const rank = new Map([...listed, ...rest].map((c, k) => [c as number, k]));
+    return paintable(img)
+      .filter((i) => r === undefined || inRegion(img, r, i))
+      .sort((a, b) => rank.get(img.pixels[a]!)! - rank.get(img.pixels[b]!)! || a - b);
+  }
+
+  it('keeps exactly the reference order: uniform, pixel art, noise, many colors, regions, colorOrder', () => {
+    const pick = testRandom(44);
+    const images: TemplateImage[] = [
+      image(37, 23, () => 0x123456), // uniform
+      image(64, 48, (x, y) => (((x >> 3) + (y >> 3)) % 5 === 0 ? null : 0x010101 * (((x >> 3) * 7 + (y >> 3)) % 9))), // pixel art
+      image(50, 50, () => (pick(8) === 0 ? null : 0x10203 * pick(32))), // noise, 32 colors
+      image(60, 40, () => (pick(10) === 0 ? null : pick(400) * 977)), // 400 colors: table growth
+    ];
+    for (const img of images) {
+      const present = [...new Set(img.pixels)].filter((p) => p !== 0xffffffff);
+      const configs: StrategyConfig[] = [
+        { id: 'color-by-color' },
+        { id: 'color-by-color', colorOrder: [present[present.length - 1], 0xabcdef, present[0]].filter((c, k, a) => c !== undefined && a.indexOf(c) === k) as Rgb[] },
+      ];
+      for (const config of configs) {
+        expect([...colorByColor.order(img, config)]).toEqual(reference(img, config));
+        const r = { ix: 3, iy: 2, width: img.width - 7, height: img.height - 5 };
+        expect([...colorByColor.order(img, config, r)]).toEqual(reference(img, config, r));
+      }
     }
   });
 });
