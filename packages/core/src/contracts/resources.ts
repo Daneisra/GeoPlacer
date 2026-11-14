@@ -167,6 +167,8 @@ export interface ObservationResult {
   readonly state: AgentResourceState;
   /** Recorded spends at or before observedAt, now considered included in the observation. */
   readonly absorbedSpends: readonly string[];
+  /** Recorded spends after observedAt that the observation contradicts (not enough energy): they consume only what is available. */
+  readonly inconsistentSpends: readonly string[];
   /** Whether the regeneration progress was carried over from the previous state, reported, or reset. */
   readonly regenPhase: 'reported' | 'carried-over' | 'reset-lower-bound';
 }
