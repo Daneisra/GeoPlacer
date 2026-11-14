@@ -3,6 +3,14 @@ setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
 if not exist "data\" mkdir "data"
+
+rem Local configuration: .env is not tracked by Git. Create it from the
+rem template on first run; an existing .env is never overwritten.
+if not exist ".env" if exist ".env.example" (
+  copy /Y ".env.example" ".env" >nul
+  echo [setup] Created .env from .env.example
+)
+
 if exist "users.json" move /Y "users.json" "data\users.json"
 if exist "templates.json" move /Y "templates.json" "data\templates.json"
 
@@ -45,7 +53,7 @@ if "%GEOPLACER_SETUP_ONLY%"=="1" (
 
 call cls
 echo [run] Starting backend and frontend in separate windows...
-start "Backend" cmd /k "npx tsx watch --env-file=.env src/server.ts"
+start "Backend" cmd /k "npx tsx watch --env-file-if-exists=.env src/server.ts"
 start "Frontend" cmd /k "cd frontend && npm run dev"
 exit /b 0
 

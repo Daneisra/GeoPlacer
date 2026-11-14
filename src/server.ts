@@ -43,7 +43,7 @@ import {
   createWebSocketVerifier,
   type LocalAccessPolicy,
 } from './middleware/local-access.js';
-import { APP_HOST, APP_HOST_RESOLUTION, APP_PRIMARY_PORT, APP_FALLBACK_PORTS, DATA_DIR, USERS_FILE, SETTINGS_FILE, TEMPLATES_PATH, ALLOWED_ORIGINS, ALLOWED_HOSTS, RATE_LIMIT_WINDOW_MS, RATE_LIMIT_MAX, MAX_WS_CONNECTIONS, WS_PING_INTERVAL_MS, GRACEFUL_SHUTDOWN_TIMEOUT_MS, KEEP_ALIVE_INTERVAL_MS, MS, JSON_LIMIT } from './config/constants.js';
+import { APP_HOST, SERVER_CONFIG, APP_PRIMARY_PORT, APP_FALLBACK_PORTS, DATA_DIR, USERS_FILE, SETTINGS_FILE, TEMPLATES_PATH, ALLOWED_ORIGINS, ALLOWED_HOSTS, RATE_LIMIT_WINDOW_MS, RATE_LIMIT_MAX, MAX_WS_CONNECTIONS, WS_PING_INTERVAL_MS, GRACEFUL_SHUTDOWN_TIMEOUT_MS, KEEP_ALIVE_INTERVAL_MS, MS, JSON_LIMIT } from './config/constants.js';
 import { loadSettings } from './config/settings.js';
 import { log, logger, wsLogClients, wsErrorClients } from './utils/logger.js';
 import { loadJSON, saveJSON } from './utils/helpers.js';
@@ -395,9 +395,9 @@ async function startServer(): Promise<void> {
       throw new Error('Failed to load templates data');
     }
 
-    // Report how the bind address was resolved
-    if (APP_HOST_RESOLUTION.warning) {
-      logger.warn(APP_HOST_RESOLUTION.warning);
+    // Report configuration values that were invalid and replaced by defaults
+    for (const warning of SERVER_CONFIG.warnings) {
+      logger.warn(warning);
     }
     if (isWildcardHost(APP_HOST)) {
       logger.warn(`HOST=${APP_HOST}: the server is reachable from the local network. Use 127.0.0.1 unless this is intended.`);

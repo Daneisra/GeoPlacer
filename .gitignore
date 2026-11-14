@@ -1,6 +1,9 @@
 # Environment files
 .env
 .env.local
+.env.*
+!.env.example
+!.env.*.example
 node_modules/
 users.json
 templates.json

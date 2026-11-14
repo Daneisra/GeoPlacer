@@ -3,14 +3,20 @@
  */
 
 import type { Palette, ColorNames } from '../types/index.js';
-import { resolveBindHost } from './network.js';
+import { resolveServerConfig } from './server-config.js';
 
 // ============ Server Configuration ============
 
+/**
+ * Configuration resolved once from the environment (a missing or partial
+ * .env falls back to safe defaults; see server-config.ts and .env.example).
+ */
+export const SERVER_CONFIG = resolveServerConfig(process.env);
+
 /** Bind address: HOST from the environment, 127.0.0.1 by default or when invalid. */
-export const APP_HOST_RESOLUTION = resolveBindHost(process.env.HOST);
+export const APP_HOST_RESOLUTION = SERVER_CONFIG.host;
 export const APP_HOST = APP_HOST_RESOLUTION.host;
-export const APP_PRIMARY_PORT = Number(process.env.PORT) || 3000;
+export const APP_PRIMARY_PORT = SERVER_CONFIG.port;
 export const APP_FALLBACK_PORTS = [
   80,
   5173,
@@ -28,36 +34,32 @@ export const APP_FALLBACK_PORTS = [
  * one label of letters/digits/hyphens). Origins whose host is an allowed host
  * name (see ALLOWED_HOSTS) are always accepted.
  */
-export const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(',').map((origin) => origin.trim())
-  : ['http://localhost:*', 'http://127.0.0.1:*', 'chrome-extension://*'];
+export const ALLOWED_ORIGINS = SERVER_CONFIG.allowedOrigins;
 
 /**
  * Extra host names the server answers to, besides localhost/127.0.0.1/::1 and
  * the bind address (comma-separated). Any other Host header is rejected to
  * prevent DNS rebinding.
  */
-export const ALLOWED_HOSTS = process.env.ALLOWED_HOSTS
-  ? process.env.ALLOWED_HOSTS.split(',').map((host) => host.trim()).filter(Boolean)
-  : [];
+export const ALLOWED_HOSTS = SERVER_CONFIG.allowedHosts;
 
 // Sized for the local UI: status polling (5 s), template polling (10-30 s) and
 // the extension (30 s) use about 20 requests per minute.
-export const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS) || 60 * 1000; // 1 minute
-export const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX) || 300;
+export const RATE_LIMIT_WINDOW_MS = SERVER_CONFIG.rateLimitWindowMs; // default: 1 minute
+export const RATE_LIMIT_MAX = SERVER_CONFIG.rateLimitMax;
 
 // ============ WebSocket Configuration ============
 
-export const MAX_WS_CONNECTIONS = Number(process.env.MAX_WS_CONNECTIONS) || 50;
-export const WS_PING_INTERVAL_MS = Number(process.env.WS_PING_INTERVAL_MS) || 30_000;
+export const MAX_WS_CONNECTIONS = SERVER_CONFIG.maxWsConnections;
+export const WS_PING_INTERVAL_MS = SERVER_CONFIG.wsPingIntervalMs;
 
 // ============ Server Lifecycle Configuration ============
 
-export const GRACEFUL_SHUTDOWN_TIMEOUT_MS = Number(process.env.GRACEFUL_SHUTDOWN_TIMEOUT_MS) || 10_000;
+export const GRACEFUL_SHUTDOWN_TIMEOUT_MS = SERVER_CONFIG.gracefulShutdownTimeoutMs;
 
 // ============ WPlace API Endpoints ============
 
-export const WPLACE_BASE = process.env.WPLACE_BASE || 'https://backend.wplace.live';
+export const WPLACE_BASE = SERVER_CONFIG.wplaceBase;
 export const WPLACE_FILES = `${WPLACE_BASE}/files/s0`;
 export const WPLACE_ME = `${WPLACE_BASE}/me`;
 export const WPLACE_PURCHASE = `${WPLACE_BASE}/purchase`;
@@ -80,7 +82,7 @@ export const COLOR_ORDERING_PATH = `${DATA_DIR}/color_ordering.json`;
  * for 1000x1000 and 11.4 MB for 2000x2000 in the worst case (random colors).
  * Override with JSON_BODY_LIMIT (bytes, or "12mb"-style strings).
  */
-export const JSON_LIMIT = process.env.JSON_BODY_LIMIT?.trim() || '12mb';
+export const JSON_LIMIT = SERVER_CONFIG.jsonBodyLimit;
 
 // ============ Time Constants (milliseconds) ============
 
@@ -94,7 +96,7 @@ export const MS = {
   ONE_HOUR: 3_600_000,
 } as const;
 
-export const KEEP_ALIVE_INTERVAL_MS = Number(process.env.KEEP_ALIVE_INTERVAL_MS) || MS.ONE_HOUR;
+export const KEEP_ALIVE_INTERVAL_MS = SERVER_CONFIG.keepAliveIntervalMs;
 
 // ============ HTTP Status Codes ============
 
