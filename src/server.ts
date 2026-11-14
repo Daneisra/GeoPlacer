@@ -35,6 +35,7 @@ import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 // Import services and utilities
 import { networkInterfaces } from 'node:os';
 import { isWildcardHost } from './config/network.js';
+import { detectFrontend, isUiNavigation, FRONTEND_NOT_BUILT_MESSAGE } from './config/frontend.js';
 import {
   buildAllowedHostnames,
   compileOriginPatterns,
@@ -217,20 +218,25 @@ const swaggerOptions = {
 const swaggerSpec = swaggerJsdoc(swaggerOptions);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
-// Serve frontend static files in production
-if (process.env.NODE_ENV === 'production') {
-  const frontendDist = path.join(__dirname, '../frontend/dist');
-  app.use(express.static(frontendDist));
-  
-  // SPA fallback - serve index.html for non-API routes
-  app.use((req, res, next) => {
-    if (!req.path.startsWith('/api') && !req.path.startsWith('/ws') && !req.path.startsWith('/api-docs')) {
-      res.sendFile(path.join(frontendDist, 'index.html'));
-    } else {
-      next();
-    }
-  });
+// Serve the compiled UI whenever it exists (independent of NODE_ENV)
+const frontend = detectFrontend(path.join(__dirname, '../frontend/dist'));
+if (frontend.available) {
+  app.use(express.static(frontend.distDir));
 }
+
+// SPA fallback: GET/HEAD navigations outside the API get the UI, or an
+// explicit message when it is not built. Other methods reach the 404 handler.
+app.use((req, res, next) => {
+  if (!isUiNavigation(req.method, req.path)) {
+    next();
+    return;
+  }
+  if (frontend.available) {
+    res.sendFile(frontend.indexFile);
+  } else {
+    res.status(503).type('text/plain; charset=utf-8').send(FRONTEND_NOT_BUILT_MESSAGE);
+  }
+});
 
 // Error handling middleware (must be after routes)
 app.use(notFoundHandler);
@@ -398,6 +404,11 @@ async function startServer(): Promise<void> {
     // Report configuration values that were invalid and replaced by defaults
     for (const warning of SERVER_CONFIG.warnings) {
       logger.warn(warning);
+    }
+    if (frontend.available) {
+      logger.info('Management UI: serving the compiled build (frontend/dist).');
+    } else {
+      logger.warn('Management UI: not built (frontend/dist/index.html missing); navigations get a 503 message.');
     }
     if (isWildcardHost(APP_HOST)) {
       logger.warn(`HOST=${APP_HOST}: the server is reachable from the local network. Use 127.0.0.1 unless this is intended.`);
