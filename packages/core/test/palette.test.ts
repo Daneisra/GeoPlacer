@@ -84,6 +84,23 @@ describe('nearest color', () => {
     expectColorError(() => createPaletteMatcher([-1 as Rgb], oklabDistance), 'INVALID_RGB');
   });
 
+  it('the Euclidean fast path picks exactly what the generic path picks', () => {
+    // Same OKLab metric, but without euclideanSpace: forces the generic path.
+    const generic: ColorDistance = { id: 'oklab-generic', distance: (a, b) => oklabDistance.distance(a, b) };
+    const palette: Rgb[] = [];
+    for (const r of [0, 85, 170, 255]) for (const g of [0, 85, 170, 255]) for (const b of [0, 85, 170, 255]) palette.push(rgb(r, g, b));
+    const fast = createPaletteMatcher(palette, oklabDistance, 0);
+    const slow = createPaletteMatcher(palette, generic, 0);
+    let seed = 2024;
+    let differences = 0;
+    for (let i = 0; i < 50_000; i++) {
+      seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+      const color = (seed & 0xffffff) as Rgb;
+      if (fast.nearestIndex(color) !== slow.nearestIndex(color)) differences++;
+    }
+    expect(differences).toBe(0);
+  });
+
   it('gives the same answers when its bounded memo is cleared', () => {
     const colors = [BLACK, WHITE, RED, GREEN, BLUE];
     const reference = createPaletteMatcher(colors, oklabDistance);

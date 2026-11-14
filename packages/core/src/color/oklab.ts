@@ -11,7 +11,7 @@
  * tie-breaking is still deterministic (see palette matching).
  */
 
-import type { ColorDistance, Rgb } from '../contracts/index.js';
+import type { ColorDistance, EuclideanColorSpace, Rgb } from '../contracts/index.js';
 import { blueOf, greenOf, redOf } from './rgb.js';
 
 export interface Oklab {
@@ -77,45 +77,63 @@ export function oklabToRgb(lab: Oklab): Rgb {
 }
 
 /** Euclidean distance in OKLab (ΔE_OK). */
-export function oklabDeltaE(x: Oklab, y: Oklab): number {
-  return Math.hypot(x.L - y.L, x.a - y.a, x.b - y.b);
-}
-
 /**
- * OKLab perceptual distance as a replaceable ColorDistance. Converted colors
- * are memoised (bounded cache, cleared when full) because nearest-color
- * searches compare the same palette colors many times.
+ * Euclidean distance in OKLab (ΔE_OK), computed as sqrt of the sum of
+ * squares so that it orders colors exactly like the squared distances used
+ * by nearest-color searches.
  */
-export function createOklabDistance(maxCachedColors = 65_536): ColorDistance {
-  const cache = new Map<number, Float64Array>();
-  const labOf = (color: Rgb): Float64Array => {
-    let lab = cache.get(color);
-    if (lab === undefined) {
-      if (cache.size >= maxCachedColors) cache.clear();
-      lab = new Float64Array(3);
-      rgbToOklabInto(color, lab);
-      cache.set(color, lab);
-    }
-    return lab;
-  };
-  return {
-    id: 'oklab',
-    distance(a: Rgb, b: Rgb): number {
-      if (a === b) return 0;
-      const x = labOf(a);
-      const y = labOf(b);
-      return Math.hypot((x[0] ?? 0) - (y[0] ?? 0), (x[1] ?? 0) - (y[1] ?? 0), (x[2] ?? 0) - (y[2] ?? 0));
-    },
-  };
+export function oklabDeltaE(x: Oklab, y: Oklab): number {
+  const dL = x.L - y.L;
+  const da = x.a - y.a;
+  const db = x.b - y.b;
+  return Math.sqrt(dL * dL + da * da + db * db);
 }
 
-/** Default OKLab distance instance. */
-export const oklabDistance: ColorDistance = createOklabDistance();
+function euclidean3(x: Float64Array, y: Float64Array): number {
+  const d0 = (x[0] ?? 0) - (y[0] ?? 0);
+  const d1 = (x[1] ?? 0) - (y[1] ?? 0);
+  const d2 = (x[2] ?? 0) - (y[2] ?? 0);
+  return Math.sqrt(d0 * d0 + d1 * d1 + d2 * d2);
+}
+
+const scratchA = new Float64Array(3);
+const scratchB = new Float64Array(3);
+
+/** OKLab space: palettes are projected once by nearest-color searches. */
+export const OKLAB_SPACE: EuclideanColorSpace = {
+  dimensions: 3,
+  project: (color, out, offset) => rgbToOklabInto(color, out, offset),
+};
+
+/** OKLab perceptual distance (default), as a replaceable ColorDistance. */
+export const oklabDistance: ColorDistance = {
+  id: 'oklab',
+  euclideanSpace: OKLAB_SPACE,
+  distance(a: Rgb, b: Rgb): number {
+    if (a === b) return 0;
+    rgbToOklabInto(a, scratchA);
+    rgbToOklabInto(b, scratchB);
+    return euclidean3(scratchA, scratchB);
+  },
+};
+
+/** sRGB space with 0-255 channels (the legacy Wplacer metric). */
+export const RGB_SPACE: EuclideanColorSpace = {
+  dimensions: 3,
+  project: (color, out, offset) => {
+    out[offset] = redOf(color);
+    out[offset + 1] = greenOf(color);
+    out[offset + 2] = blueOf(color);
+  },
+};
 
 /** Euclidean distance in sRGB (the legacy Wplacer metric), kept for comparison. */
 export const rgbEuclideanDistance: ColorDistance = {
   id: 'rgb-euclidean',
+  euclideanSpace: RGB_SPACE,
   distance(a: Rgb, b: Rgb): number {
-    return Math.hypot(redOf(a) - redOf(b), greenOf(a) - greenOf(b), blueOf(a) - blueOf(b));
+    RGB_SPACE.project(a, scratchA, 0);
+    RGB_SPACE.project(b, scratchB, 0);
+    return euclidean3(scratchA, scratchB);
   },
 };

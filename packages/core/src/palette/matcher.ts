@@ -25,6 +25,53 @@ export interface PaletteMatcher {
 /** Bounded memo: cleared when full, so huge photo-like images cannot exhaust memory. */
 export const DEFAULT_MATCH_CACHE_SIZE = 262_144;
 
+/**
+ * Index of the nearest color. Both paths scan in palette order and keep the
+ * first strictly smaller value, so ties go to the first color.
+ * - Euclidean-space distances (OKLab, RGB): palette projected once, the
+ *   source projected once, squared distances compared (same ordering).
+ * - Any other distance: distance(color, candidate) for each candidate.
+ */
+function createSearch(colors: readonly Rgb[], distance: ColorDistance): (color: Rgb) => number {
+  const space = distance.euclideanSpace;
+  if (space === undefined) {
+    return (color) => {
+      let best = 0;
+      let bestDistance = Infinity;
+      for (let i = 0; i < colors.length; i++) {
+        const d = distance.distance(color, colors[i] as Rgb);
+        if (d < bestDistance) {
+          bestDistance = d;
+          best = i;
+        }
+      }
+      return best;
+    };
+  }
+
+  const dims = space.dimensions;
+  const coords = new Float64Array(colors.length * dims);
+  colors.forEach((c, i) => space.project(c, coords, i * dims));
+  const probe = new Float64Array(dims);
+  return (color) => {
+    space.project(color, probe, 0);
+    let best = 0;
+    let bestSquared = Infinity;
+    for (let i = 0, base = 0; i < colors.length; i++, base += dims) {
+      let squared = 0;
+      for (let d = 0; d < dims; d++) {
+        const diff = (probe[d] ?? 0) - (coords[base + d] ?? 0);
+        squared += diff * diff;
+      }
+      if (squared < bestSquared) {
+        bestSquared = squared;
+        best = i;
+      }
+    }
+    return best;
+  };
+}
+
 export function createPaletteMatcher(
   colors: readonly Rgb[],
   distance: ColorDistance,
@@ -41,6 +88,7 @@ export function createPaletteMatcher(
   }
   if (unique.length === 0) throw new ColorError('EMPTY_PALETTE', 'cannot match colors against an empty palette');
 
+  const search = createSearch(unique, distance);
   const memo = new Map<number, number>();
 
   const nearestIndex = (color: Rgb): number => {
@@ -49,17 +97,11 @@ export function createPaletteMatcher(
     const cached = memo.get(color);
     if (cached !== undefined) return cached;
 
-    let best = 0;
-    let bestDistance = Infinity;
-    for (let i = 0; i < unique.length; i++) {
-      const d = distance.distance(color, unique[i] as Rgb);
-      if (d < bestDistance) {
-        bestDistance = d;
-        best = i;
-      }
+    const best = search(color);
+    if (maxCachedColors > 0) {
+      if (memo.size >= maxCachedColors) memo.clear();
+      memo.set(color, best);
     }
-    if (memo.size >= maxCachedColors) memo.clear();
-    memo.set(color, best);
     return best;
   };
 

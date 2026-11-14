@@ -13,7 +13,8 @@ export {
   rgbToHex,
 } from './rgb.js';
 export {
-  createOklabDistance,
+  OKLAB_SPACE,
+  RGB_SPACE,
   linearToSrgbChannel,
   oklabDeltaE,
   oklabDistance,

@@ -6,7 +6,6 @@ import {
   TRANSPARENT_U32,
   asRgb,
   blueOf,
-  createOklabDistance,
   greenOf,
   isRgb,
   isTransparentAlpha,
@@ -165,11 +164,21 @@ describe('color distances', () => {
     expect(oklabDistance.distance(black, rgb(1, 1, 1))).toBeGreaterThan(0);
   });
 
-  it('stays correct when its bounded cache is cleared', () => {
-    const tiny = createOklabDistance(2);
-    const expected = samples.map((x) => oklabDistance.distance(x, 0x123456 as Rgb));
-    for (let round = 0; round < 3; round++) {
-      samples.forEach((x, i) => expect(tiny.distance(x, 0x123456 as Rgb)).toBe(expected[i]));
+  it('declares Euclidean spaces consistent with distance()', () => {
+    for (const distance of [oklabDistance, rgbEuclideanDistance]) {
+      const space = distance.euclideanSpace;
+      expect(space?.dimensions).toBe(3);
+      if (space === undefined) continue;
+      const x = new Float64Array(3);
+      const y = new Float64Array(3);
+      for (const a of samples) {
+        for (const b of samples) {
+          space.project(a, x, 0);
+          space.project(b, y, 0);
+          const euclid = Math.sqrt(((x[0] ?? 0) - (y[0] ?? 0)) ** 2 + ((x[1] ?? 0) - (y[1] ?? 0)) ** 2 + ((x[2] ?? 0) - (y[2] ?? 0)) ** 2);
+          expect(distance.distance(a, b)).toBe(euclid);
+        }
+      }
     }
   });
 

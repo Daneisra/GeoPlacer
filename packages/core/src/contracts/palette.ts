@@ -28,6 +28,18 @@ export interface ColorDistance {
   readonly id: string;
   /** Non-negative; 0 means identical colors. */
   distance(a: Rgb, b: Rgb): number;
+  /**
+   * Optional: set when distance(a, b) is the Euclidean distance between
+   * project(a) and project(b). Nearest-color searches then project each color
+   * once and compare squared distances (same ordering, far fewer conversions).
+   */
+  readonly euclideanSpace?: EuclideanColorSpace;
+}
+
+export interface EuclideanColorSpace {
+  readonly dimensions: number;
+  /** Writes the coordinates of `color` into out[offset .. offset + dimensions - 1]. */
+  project(color: Rgb, out: Float64Array, offset: number): void;
 }
 
 export interface QuantizeOptions {
