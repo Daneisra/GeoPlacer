@@ -78,6 +78,15 @@ describe('nearest color', () => {
     expect(matcher.nearestIndex(WHITE)).toBe(2);
   });
 
+  it('never matches transparency or out-of-range values to a color', () => {
+    const matcher = createPaletteMatcher([BLACK, WHITE], oklabDistance);
+    for (const bad of [TRANSPARENT_U32, -1, 0x1000000]) {
+      expectColorError(() => matcher.nearest(bad as Rgb), 'INVALID_RGB');
+      expectColorError(() => matcher.nearestIndex(bad as Rgb), 'INVALID_RGB');
+    }
+    expect(matcher.isExact(TRANSPARENT_U32 as Rgb)).toBe(false);
+  });
+
   it('rejects empty and invalid palettes', () => {
     expectColorError(() => createPaletteMatcher([], oklabDistance), 'EMPTY_PALETTE');
     expectColorError(() => createPaletteMatcher([0x1000000 as Rgb], oklabDistance), 'INVALID_RGB');

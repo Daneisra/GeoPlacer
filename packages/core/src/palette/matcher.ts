@@ -92,6 +92,9 @@ export function createPaletteMatcher(
   const memo = new Map<number, number>();
 
   const nearestIndex = (color: Rgb): number => {
+    // Rejects TRANSPARENT_U32, TRANSPARENT and anything outside 24 bits:
+    // transparency must never be matched to a color.
+    if (!isRgb(color)) throw new ColorError('INVALID_RGB', `cannot match a non-color value: ${String(color)}`);
     const exact = positions.get(color);
     if (exact !== undefined) return exact;
     const cached = memo.get(color);

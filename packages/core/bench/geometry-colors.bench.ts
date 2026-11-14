@@ -113,6 +113,24 @@ report(
   })
 );
 
+report(
+  'projection: PlacementTransform into two Float64Array (stored)',
+  measure(() => {
+    const t = placementTransform(placement, system);
+    const xs = new Float64Array(PIXELS);
+    const ys = new Float64Array(PIXELS);
+    let i = 0;
+    for (let iy = 0; iy < HEIGHT; iy++) {
+      const y = canvasYOf(t, iy);
+      for (let ix = 0; ix < WIDTH; ix++, i++) {
+        xs[i] = canvasXOf(t, ix);
+        ys[i] = y;
+      }
+    }
+    return xs;
+  })
+);
+
 // ── 2. OKLab ───────────────────────────────────────────────────────────────
 report(
   'oklab: rgbToOklabInto, all 16,777,216 colors',

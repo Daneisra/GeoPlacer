@@ -70,7 +70,11 @@ describe('RGB representation', () => {
 });
 
 describe('sRGB <-> OKLab', () => {
-  // Reference values from B. Ottosson, "A perceptual color space for image processing" (2020).
+  // Matrices: B. Ottosson, "A perceptual color space for image processing" (published 23 Dec 2020,
+  // sRGB matrices updated 25 Jan 2021), https://bottosson.github.io/posts/oklab/ (coefficients checked
+  // against the page). The page only tabulates XYZ inputs: its D65 white (L 1, a 0, b 0) is sRGB white.
+  // The primaries below are widely quoted values recomputed from those matrices: they serve as
+  // regression values, not as values published on the page.
   const references: ReadonlyArray<readonly [string, number, number, number]> = [
     ['#ff0000', 0.627955, 0.224863, 0.125846],
     ['#00ff00', 0.86644, -0.233888, 0.179498],
@@ -125,6 +129,23 @@ describe('sRGB <-> OKLab', () => {
     expect(oklabToRgb({ L: 2, a: 0, b: 0 })).toBe(0xffffff);
     expect(oklabToRgb({ L: -1, a: 0, b: 0 })).toBe(0x000000);
     expect(isRgb(oklabToRgb({ L: 0.7, a: 0.4, b: -0.4 }))).toBe(true);
+  });
+});
+
+describe('invalid values are rejected at the checked entry points', () => {
+  it('refuses non-colors in conversions and distances', () => {
+    for (const bad of [TRANSPARENT, TRANSPARENT_U32, 0x1000000, 0.5]) {
+      expectColorError(() => rgbToOklab(bad as Rgb), 'INVALID_RGB');
+      expectColorError(() => oklabDistance.distance(bad as Rgb, 0 as Rgb), 'INVALID_RGB');
+      expectColorError(() => rgbEuclideanDistance.distance(0 as Rgb, bad as Rgb), 'INVALID_RGB');
+    }
+  });
+
+  it('refuses non-finite OKLab coordinates instead of returning black', () => {
+    for (const bad of [NaN, Infinity, -Infinity]) {
+      expectColorError(() => oklabToRgb({ L: bad, a: 0, b: 0 }), 'INVALID_OKLAB');
+      expectColorError(() => oklabToRgb({ L: 0.5, a: bad, b: 0 }), 'INVALID_OKLAB');
+    }
   });
 });
 

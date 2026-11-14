@@ -12,7 +12,8 @@
  */
 
 import type { ColorDistance, EuclideanColorSpace, Rgb } from '../contracts/index.js';
-import { blueOf, greenOf, redOf } from './rgb.js';
+import { ColorError } from './errors.js';
+import { asRgb, blueOf, greenOf, redOf } from './rgb.js';
 
 export interface Oklab {
   /** Lightness, 0 (black) to ~1 (white). */
@@ -40,7 +41,11 @@ export function linearToSrgbChannel(value: number): number {
   return Math.min(255, Math.max(0, Math.round(v * 255)));
 }
 
-/** Writes the OKLab coordinates of `color` into out[offset..offset+2] (no allocation). */
+/**
+ * Writes the OKLab coordinates of `color` into out[offset..offset+2] (no
+ * allocation). Hot path: the color is NOT validated; use rgbToOklab for
+ * untrusted input.
+ */
 export function rgbToOklabInto(color: Rgb, out: Float64Array | number[], offset = 0): void {
   const r = srgbChannelToLinear(redOf(color));
   const g = srgbChannelToLinear(greenOf(color));
@@ -57,7 +62,7 @@ export function rgbToOklabInto(color: Rgb, out: Float64Array | number[], offset 
 
 export function rgbToOklab(color: Rgb): Oklab {
   const out = [0, 0, 0];
-  rgbToOklabInto(color, out);
+  rgbToOklabInto(asRgb(color), out);
   return { L: out[0] ?? 0, a: out[1] ?? 0, b: out[2] ?? 0 };
 }
 
@@ -66,6 +71,9 @@ export function rgbToOklab(color: Rgb): Oklab {
  * channel (documented, not an error): OKLab covers more than sRGB.
  */
 export function oklabToRgb(lab: Oklab): Rgb {
+  if (!Number.isFinite(lab.L) || !Number.isFinite(lab.a) || !Number.isFinite(lab.b)) {
+    throw new ColorError('INVALID_OKLAB', `OKLab coordinates must be finite numbers, got (${lab.L}, ${lab.a}, ${lab.b})`);
+  }
   const l = Math.pow(lab.L + 0.3963377774 * lab.a + 0.2158037573 * lab.b, 3);
   const m = Math.pow(lab.L - 0.1055613458 * lab.a - 0.0638541728 * lab.b, 3);
   const s = Math.pow(lab.L - 0.0894841775 * lab.a - 1.291485548 * lab.b, 3);
@@ -99,7 +107,7 @@ function euclidean3(x: Float64Array, y: Float64Array): number {
 const scratchA = new Float64Array(3);
 const scratchB = new Float64Array(3);
 
-/** OKLab space: palettes are projected once by nearest-color searches. */
+/** OKLab space: palettes are projected once by nearest-color searches. project() is an unchecked hot path. */
 export const OKLAB_SPACE: EuclideanColorSpace = {
   dimensions: 3,
   project: (color, out, offset) => rgbToOklabInto(color, out, offset),
@@ -110,6 +118,8 @@ export const oklabDistance: ColorDistance = {
   id: 'oklab',
   euclideanSpace: OKLAB_SPACE,
   distance(a: Rgb, b: Rgb): number {
+    asRgb(a);
+    asRgb(b);
     if (a === b) return 0;
     rgbToOklabInto(a, scratchA);
     rgbToOklabInto(b, scratchB);
@@ -132,6 +142,8 @@ export const rgbEuclideanDistance: ColorDistance = {
   id: 'rgb-euclidean',
   euclideanSpace: RGB_SPACE,
   distance(a: Rgb, b: Rgb): number {
+    asRgb(a);
+    asRgb(b);
     RGB_SPACE.project(a, scratchA, 0);
     RGB_SPACE.project(b, scratchB, 0);
     return euclidean3(scratchA, scratchB);
