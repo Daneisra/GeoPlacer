@@ -26,7 +26,8 @@
     "test": "jest",
     "test:legacy": "jest",
     "test:packages": "npm run test --workspaces",
-    "test:all": "npm run test:legacy && npm run test:packages",
+    "test:all": "npm run typecheck:packages && npm run test:legacy && npm run test:packages",
+    "check": "tsc --noEmit && npm run lint && npm run lint:packages && npm run test:all",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage"
   },
