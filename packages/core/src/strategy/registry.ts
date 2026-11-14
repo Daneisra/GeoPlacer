@@ -5,19 +5,22 @@
 import type { DrawingOrderCursor, DrawingStrategy, DrawingStrategyId, Template } from '../contracts/index.js';
 import { eligibleRegion, StrategyError } from './common.js';
 import { centerOut, random } from './center-random.js';
+import { colorByColor, outlineFirst } from './color-outline.js';
 import { bottomToTop, leftToRight, rightToLeft, topToBottom } from './directional.js';
 
-export const DRAWING_STRATEGIES: Readonly<Partial<Record<DrawingStrategyId, DrawingStrategy>>> = {
+export const DRAWING_STRATEGIES: Readonly<Record<DrawingStrategyId, DrawingStrategy>> = {
   'top-to-bottom': topToBottom,
   'bottom-to-top': bottomToTop,
   'left-to-right': leftToRight,
   'right-to-left': rightToLeft,
   'center-out': centerOut,
   random,
+  'color-by-color': colorByColor,
+  'outline-first': outlineFirst,
 };
 
 export function drawingStrategy(id: DrawingStrategyId): DrawingStrategy {
-  const strategy = DRAWING_STRATEGIES[id];
+  const strategy = Object.hasOwn(DRAWING_STRATEGIES, id) ? DRAWING_STRATEGIES[id] : undefined;
   if (strategy === undefined) throw new StrategyError('INVALID_CONFIG', `unknown drawing strategy '${String(id)}'`);
   return strategy;
 }
