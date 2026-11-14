@@ -45,3 +45,30 @@ export interface DrawingStrategy {
   /** Same sequence as `order`, produced in batches (the first batch is cheap for most strategies). */
   cursor(image: TemplateImage, config: StrategyConfig, region?: ImageRect): DrawingOrderCursor;
 }
+
+/**
+ * Identity of a cached strategy order (Phase 1B.6). The order of the whole
+ * image does not depend on the placement, but the key includes the template
+ * revision as requested: a new revision rebuilds the cache.
+ */
+export interface OrderCacheKey {
+  readonly projectId: string;
+  readonly templateId: string;
+  readonly revision: number;
+  readonly strategy: DrawingStrategyId;
+  readonly strategyVersion: number;
+  readonly seed: number;
+  /** SHA-256 of the canonical quantized pixels of the revision. */
+  readonly quantizedImageHash: string;
+  /** Cache file format. */
+  readonly format: 1;
+}
+
+/**
+ * Optional storage of strategy orders. Never the source of truth: a
+ * missing, damaged or mismatching entry is rebuilt from the strategy.
+ */
+export interface OrderCacheStore {
+  read(key: OrderCacheKey): Promise<Uint8Array | null>;
+  write(key: OrderCacheKey, bytes: Uint8Array): Promise<void>;
+}

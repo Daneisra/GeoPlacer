@@ -19,6 +19,7 @@ export {
   type LockOptions,
   type LockOwner,
 } from './lock.js';
+export { FileOrderCacheStore } from './order-cache.js';
 export { pngjsCodec } from './png-codec.js';
 export { NodeTemplateStorage, type NodeTemplateStorageOptions } from './storage.js';
 export { randomIdSource, systemClock } from './system.js';

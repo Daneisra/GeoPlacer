@@ -5,9 +5,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import type { ProjectId, TemplateId, TemplateManager } from '@geoplacer/core';
-import { TemplateError, asProjectId, createTemplateManager, rgb } from '@geoplacer/core';
+import { TemplateError, asProjectId, createTemplateManager, loadRandomOrder, random, rgb } from '@geoplacer/core';
 import {
   DataDirectoryLockedError,
+  FileOrderCacheStore,
   NodeTemplateStorage,
   acquireDataDirectoryLock,
   nodeSha256Hasher,
@@ -330,6 +331,36 @@ describe('real process kill during writes', () => {
     // Generations never go back; revision numbers were used for more contents than kept (gaps), never twice.
     for (let i = 1; i < generations.length; i++) expect(generations[i]!).toBeGreaterThanOrEqual(generations[i - 1]!);
     expect(contentOf.size).toBeGreaterThan(1);
+  });
+});
+
+describe('random order cache on disk', () => {
+  it('stores, verifies and rebuilds the order under the locked data directory', async () => {
+    const root = await tempRoot();
+    const handle = await open(root);
+    const store = new FileOrderCacheStore(handle.lock);
+    const img = { width: 50, height: 40, pixels: new Uint32Array(2000).map((_, i) => (i % 9 === 0 ? 0xffffffff : i % 5)) };
+    const config = { id: 'random' as const, seed: 5 };
+    const key = { projectId: 'projet-a', templateId: 'modele-x', revision: 2, strategy: 'random' as const, strategyVersion: 1, seed: 5, quantizedImageHash: 'b'.repeat(64), format: 1 as const };
+    const expected = [...random.order(img, config)];
+    expect((await loadRandomOrder(img, config, key, { hasher: nodeSha256Hasher, store })).source).toBe('generated');
+    const file = path.join(root, 'cache', 'orders', 'projet-a', 'modele-x', 'random-r2-v1-s5.order');
+    expect((await readFile(file)).subarray(0, 8).toString()).toBe('GPORDER1');
+    const cached = await loadRandomOrder(img, config, key, { hasher: nodeSha256Hasher, store });
+    expect(cached.source).toBe('cache');
+    expect([...cached.order]).toEqual(expected);
+    // Damaged on disk: rebuilt, same order.
+    const bytes = await readFile(file);
+    bytes[bytes.length - 3]! ^= 0xff;
+    await writeFile(file, bytes);
+    const rebuilt = await loadRandomOrder(img, config, key, { hasher: nodeSha256Hasher, store });
+    expect(rebuilt).toMatchObject({ source: 'generated', problem: expect.stringMatching(/checksum mismatch/) as string });
+    expect([...rebuilt.order]).toEqual(expected);
+    // Deleting the whole cache is safe.
+    await rm(path.join(root, 'cache'), { recursive: true });
+    expect([...(await loadRandomOrder(img, config, key, { hasher: nodeSha256Hasher, store })).order]).toEqual(expected);
+    expect(() => new FileOrderCacheStore({ ...handle.lock, assertHeld: () => { throw new Error('released'); } })).toThrow('released');
+    await expect(store.read({ ...key, templateId: '../x' })).rejects.toThrow(/invalid/);
   });
 });
 

@@ -15,3 +15,4 @@ export { PCG32_ALGORITHM, createPcg32, type Pcg32 } from './pcg32.js';
 export { bottomToTop, leftToRight, rightToLeft, topToBottom } from './directional.js';
 export { DRAWING_STRATEGIES, drawingStrategy, templateOrderCursor } from './registry.js';
 export { prepareOrderKeys, rankTable, type OrderKeys } from './keys.js';
+export { encodeOrderCache, loadRandomOrder, type CachedOrder } from './order-cache.js';
