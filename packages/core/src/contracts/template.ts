@@ -92,7 +92,7 @@ export interface TemplateWarning {
 
 // ───────────────────────── Persisted manifest (schema v1) ─────────────────────────
 
-export const TEMPLATE_MANIFEST_SCHEMA_VERSION = 1;
+export const TEMPLATE_MANIFEST_SCHEMA_VERSION = 2;
 
 /** Why a revision was created (several reasons can apply at once). */
 export type RevisionReason =
@@ -139,14 +139,30 @@ export interface RevisionRecordV1 {
 }
 
 /**
+ * How generation and revision numbers are allocated.
+ * legacy: schema-1 manifest (or migrated from it), numbers derived from the
+ * manifest only; reserved: every number was first reserved by an
+ * immutable, exclusively created record (TemplateStorage.reserve) before
+ * being published, so a number is never given to two contents.
+ */
+export type RevisionNumbering = 'legacy' | 'reserved';
+
+/**
  * One JSON file per template. Mutable settings (name, strategy, priority,
  * status) live at the top level; revisions are append-only records.
- * Forward compatibility: optional data added by future v1 code goes into
+ * Forward compatibility: optional data added by future code goes into
  * `extensions` (manifest or revision), which readers preserve verbatim; any
- * other unknown field is rejected (a newer layout needs schemaVersion 2).
+ * other unknown field is rejected (a newer layout needs a new schema).
+ *
+ * Schema 2 (Phase 1B.6): revision numbers are strictly increasing but may
+ * have gaps (a reserved number that was never published, a revision lost
+ * with a corrupt manifest); revisions are looked up by number. Schema-1
+ * files are migrated in memory (numbering 'legacy') and only rewritten as
+ * schema 2 by the next write.
  */
-export interface TemplateManifestV1 {
-  readonly schemaVersion: 1;
+export interface TemplateManifestV2 {
+  readonly schemaVersion: 2;
+  readonly numbering: RevisionNumbering;
   readonly projectId: ProjectId;
   readonly templateId: TemplateId;
   /** Incremented on every write; checked by the storage (compare-and-swap). */
@@ -165,7 +181,7 @@ export interface TemplateManifestV1 {
 }
 
 /** Union of supported schema versions; the latest is the working shape. */
-export type TemplateManifest = TemplateManifestV1;
+export type TemplateManifest = TemplateManifestV2;
 
 // ───────────────────────── Template manager API ─────────────────────────
 
@@ -225,6 +241,8 @@ export interface TemplateSummary {
   readonly updatedAt: Timestamp;
   /** 'backup' when the current manifest was unreadable and the previous generation was listed instead. */
   readonly manifestSource: 'current' | 'backup';
+  /** 'legacy' until the first write converts the manifest to schema 2 (one-way: older GeoPlacer cannot read it). */
+  readonly numbering: RevisionNumbering;
   readonly warnings: readonly TemplateWarning[];
 }
 
@@ -249,8 +267,31 @@ export interface TemplateListing {
 }
 
 export interface RepairOptions {
-  /** false: diagnosis only, nothing is written. true: performs the repair. */
+  /** false: diagnosis only, nothing is written or reserved. true: performs the repair. */
   readonly apply: boolean;
+  /**
+   * The backup uses reserved numbering but reservations are missing (the
+   * guarantee is lost): repair only with this explicit consent, from the
+   * floor given by the backup and the legacy rule.
+   */
+  readonly allowMissingReservations?: boolean;
+}
+
+/** How the numbers of a repair were chosen: never a silent guess. */
+export interface RepairNumbering {
+  /** Lowest generation the repair may use, and where each bound comes from. */
+  readonly generationFloor: number;
+  readonly bases: readonly ('backup+2' | 'reservations' | 'legacy-rule')[];
+  /** Highest reserved generation and revision found (null: none). */
+  readonly reservedGeneration: number | null;
+  readonly reservedRevision: number | null;
+  /**
+   * Revision numbers skipped for good because the lost manifest may have
+   * used them (legacy rule: the backup's last revision + 1).
+   */
+  readonly burnedRevisions: readonly number[];
+  /** Reserved numbering, but reservations below the backup's generation: some are missing. */
+  readonly reservationsMissing: boolean;
 }
 
 export interface RepairReport {
@@ -268,6 +309,8 @@ export interface RepairReport {
   readonly currentRevision: number;
   /** Storage name of the preserved corrupt manifest (null: nothing to preserve, or not applied). */
   readonly preservedAs: string | null;
+  /** Numbering basis (null when nothing to repair). */
+  readonly numbering: RepairNumbering | null;
 }
 
 export interface LoadOptions {

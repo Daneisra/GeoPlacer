@@ -19,7 +19,7 @@ import type {
   TemplateId,
   RevisionRecordV1,
   TemplateManager,
-  TemplateManifestV1,
+  TemplateManifestV2,
 } from '../src/index.js';
 
 // Type-level stand-ins: never called, only used to build typed values.
@@ -87,9 +87,10 @@ describe('nominal identifiers and colors', () => {
 
 describe('template manifest (PNG blobs + JSON)', () => {
   it('pins the schema version and carries the required metadata', () => {
-    expectTypeOf<TemplateManifestV1['schemaVersion']>().toEqualTypeOf<1>();
+    expectTypeOf<TemplateManifestV2['schemaVersion']>().toEqualTypeOf<2>();
+    expectTypeOf<TemplateManifestV2['numbering']>().toEqualTypeOf<'legacy' | 'reserved'>();
     for (const key of ['templateId', 'projectId', 'name', 'drawingStrategy', 'createdAt', 'updatedAt', 'currentRevision', 'generation', 'extensions'] as const) {
-      expectTypeOf<TemplateManifestV1>().toHaveProperty(key);
+      expectTypeOf<TemplateManifestV2>().toHaveProperty(key);
     }
   });
 

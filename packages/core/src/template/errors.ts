@@ -31,8 +31,10 @@ export type TemplateErrorCode =
   | 'DELETED'
   /** Deletion requested without the exact template name. */
   | 'CONFIRMATION_REQUIRED'
-  /** Another writer changed the manifest (generation mismatch). */
-  | 'CONFLICT';
+  /** Another writer changed the manifest (generation mismatch), or a number is already reserved. */
+  | 'CONFLICT'
+  /** Reserved numbering, but reservations are missing: repair needs explicit consent. */
+  | 'RESERVATIONS_MISSING';
 
 export class TemplateError extends Error {
   readonly code: TemplateErrorCode;

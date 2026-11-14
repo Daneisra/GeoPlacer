@@ -25,11 +25,13 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, open, readdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
-import type { ManifestRead, ProjectId, TemplateId, TemplateStorage } from '@geoplacer/core';
+import type { ManifestRead, ProjectId, ReservationMaxima, TemplateId, TemplateStorage } from '@geoplacer/core';
 import { StorageConflictError, isValidId, manifestGeneration } from '@geoplacer/core';
 import type { DataDirectoryLock } from './lock.js';
 
 const MANIFEST = 'manifest.json';
+const RESERVATIONS = 'reservations';
+const RESERVATION = /^(generation|revision)-(\d{1,16})$/;
 const BACKUP = 'manifest.json.bak';
 const ADDRESS = /^[0-9a-f]{64}$/;
 const RETRYABLE = new Set(['EPERM', 'EBUSY', 'EACCES']);
@@ -195,6 +197,52 @@ export class NodeTemplateStorage implements TemplateStorage {
       await this.writeAtomic(target, json);
       return preserved;
     });
+  }
+
+  /**
+   * Number reservation: `<template>/reservations/<kind>-<15 digits>`,
+   * created exclusively ('wx', atomic create-if-absent on NTFS and POSIX
+   * local filesystems), flushed (fsync), then the directory is flushed
+   * where the platform allows it (not on Windows). The NAME carries the
+   * number: an empty or unreadable content still counts.
+   */
+  async reserve(projectId: ProjectId, templateId: TemplateId, kind: 'generation' | 'revision', value: number): Promise<void> {
+    if (kind !== 'generation' && kind !== 'revision') throw new Error(`invalid reservation kind: ${String(kind)}`);
+    if (!Number.isSafeInteger(value) || value < 1) throw new Error(`invalid ${kind} number: ${String(value)}`);
+    this.lock.assertHeld();
+    const dir = path.join(this.templateDir(projectId, templateId), RESERVATIONS);
+    await mkdir(dir, { recursive: true });
+    const file = path.join(dir, `${kind}-${String(value).padStart(15, '0')}`);
+    let handle;
+    try {
+      handle = await open(file, 'wx');
+    } catch (error) {
+      if (errorCode(error) === 'EEXIST') throw new StorageConflictError(null, null);
+      throw error;
+    }
+    try {
+      await handle.writeFile(JSON.stringify({ kind, value, reservedAt: new Date().toISOString() }) + '\n');
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await this.syncDirectory(dir);
+  }
+
+  /** Highest reserved numbers; no directory = none; names not matching the pattern are ignored; other errors throw. */
+  async reservations(projectId: ProjectId, templateId: TemplateId): Promise<ReservationMaxima> {
+    const dir = path.join(this.templateDir(projectId, templateId), RESERVATIONS);
+    const names = (await readOrNull(() => readdir(dir))) ?? [];
+    let generation: number | null = null;
+    let revision: number | null = null;
+    for (const name of names) {
+      const match = RESERVATION.exec(name);
+      if (match === null) continue;
+      const value = Number(match[2]);
+      if (match[1] === 'generation') generation = Math.max(generation ?? 0, value);
+      else revision = Math.max(revision ?? 0, value);
+    }
+    return { generation, revision };
   }
 
   /** Valid template ids whose directory holds a manifest (or its backup); anything else is ignored. */

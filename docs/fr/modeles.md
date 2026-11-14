@@ -76,6 +76,7 @@ entières…).
 ```
 <racine>/projects/<projectId>/templates/<templateId>/manifest.json
 <racine>/projects/<projectId>/templates/<templateId>/manifest.json.bak
+<racine>/projects/<projectId>/templates/<templateId>/reservations/<generation|revision>-<numéro>
 <racine>/projects/<projectId>/blobs/<sha256>.png
 ```
 
@@ -90,9 +91,9 @@ entières…).
   L'adaptateur revérifie chaque identifiant et chaque adresse, et refuse
   tout chemin qui sortirait de la racine.
 
-### Manifeste (schéma 1)
+### Manifeste (schéma 2 depuis la Phase 1B.6 ; schéma 1 relu et migré)
 
-Champs principaux : `schemaVersion`, `projectId`, `templateId`,
+Champs principaux : `schemaVersion`, `numbering`, `projectId`, `templateId`,
 `generation`, `name`, `drawingStrategy`, `priority`, `status`, `createdAt`,
 `updatedAt`, `deletedAt`, `currentRevision`, `revisions`, `extensions`.
 
@@ -282,108 +283,108 @@ en-tête et limites, décodage, forme canonique des pixels,
   un manifeste valide se contourne par `restoreRevision` vers une révision
   qui se vérifie.
 
-**Pourquoi « génération de la sauvegarde + 2 »** (vérifié en Phase 1B.4) :
+**Numérotation durable des révisions** (Phase 1B.6, implémentée) :
 
-- Toute publication normale copie le manifeste courant en sauvegarde, puis
-  publie la génération suivante : courant = sauvegarde + 1.
-- Un manifeste corrompu issu d'une publication normale portait donc
-  sauvegarde + 1. Réparer en sauvegarde + 1 donnerait le même numéro à deux
-  contenus différents : le manifeste perdu et le manifeste réparé.
-- Sauvegarde + 2 évite cette collision et reste supérieur à toutes les
-  générations connues.
-
-| Scénario (tests de non-régression) | Résultat |
-|---|---|
-| Réparation simple | génération = sauvegarde + 2, supérieure à celle du manifeste perdu |
-| Réparation, écriture, corruption, réparation | générations 2 → 4 → 5 → 6 : toujours croissantes |
-| Réparation interrompue puis relancée | même résultat que sans interruption ; l'état reste corrompu, sauvegarde intacte, jusqu'à la réussite |
-| **Limite** : manifeste réparé corrompu de nouveau avant toute écriture | même génération (sauvegarde + 2) pour deux manifestes qui ne diffèrent que par `updatedAt` |
-| **Limite** : la révision perdue (présente seulement dans le manifeste corrompu) | son numéro est réutilisé par la révision suivante, avec un autre contenu |
-
-Ce que la règle garantit :
-- **Comparaison-échange** : aucun écrivain ne peut publier sur la base
-  d'un manifeste perdu. Dans le processus, les opérations sur un modèle
-  sont sérialisées et relisent le manifeste ; entre processus, le
-  répertoire est verrouillé.
-- **Historique** : il ne recule jamais au-delà de la sauvegarde.
-
-Ce qu'elle ne garantit pas :
-- **Unicité des générations** après une seconde corruption du manifeste
-  réparé, sans écriture entre les deux. C'est sans effet pratique, car les
-  deux contenus ont les mêmes révisions.
-- **Unicité des numéros de révision** après la perte d'une révision. Le
-  journal des tentatives (Phase 1B.6) identifie les tâches par
-  `(modèle, révision, x, y, couleur)` : une tentative enregistrée sur la
-  révision perdue deviendrait ambiguë.
-
-**Proposition détaillée** (Phase 1B.5, **non implémentée** : elle change
-le stockage et le schéma, elle attend votre validation) :
-
-*Principe : un registre d'allocations immuables, pas un second fichier
-modifiable.* Chaque numéro est **alloué** par la création exclusive d'un
-petit fichier, jamais modifié ni supprimé, **avant** toute publication
-qui l'utilise :
+Chaque numéro de génération et de révision est **réservé** avant d'être
+publié, par un petit fichier immuable créé de façon exclusive :
 
 ```
-<racine>/projects/<p>/templates/<t>/alloc/g000000000012-r000000000005
+<racine>/projects/<p>/templates/<t>/reservations/generation-000000000000012
+<racine>/projects/<p>/templates/<t>/reservations/revision-000000000000005
 ```
 
-1. **Ordre d'écriture** d'une opération qui publie la génération g (et,
-   s'il y en a une, la nouvelle révision r) :
-   1. g = 1 + max(génération du manifeste, plus grande génération allouée) ;
-      r = 1 + max(dernière révision du manifeste, plus grande révision allouée) ;
-   2. création exclusive (`wx`) du fichier d'allocation, `fsync`, `fsync`
-      du dossier (hors Windows). S'il existe déjà : `CONFLICT` ;
-   3. écriture et vérification des blobs (inchangé) ;
+1. **Ordre d'écriture** de toute opération qui publie (création, révision,
+   restauration, réglages, statut, duplication, suppression, réparation) :
+   1. blobs écrits et vérifiés (inchangé) ;
+   2. g = 1 + max(génération du manifeste, plus grande génération
+      réservée) ; r = 1 + max(dernière révision du manifeste, plus grande
+      révision réservée), si une révision est créée ;
+   3. création exclusive (`wx`) de chaque fichier de réservation, `fsync`
+      du fichier, puis du dossier hors Windows. S'il existe déjà :
+      `CONFLICT` ;
    4. publication du manifeste par un seul renommage (inchangé).
 2. **Trous acceptés, jamais de réutilisation** : une interruption après
-   2.1-2 laisse une allocation sans manifeste. C'est un trou, sans danger :
-   l'opération suivante alloue au-dessus.
-3. **Pourquoi ce n'est pas le « second fichier modifiable »** : aucun
-   fichier n'est jamais réécrit. L'ensemble des allocations ne peut être
-   qu'en avance sur le manifeste, jamais en retard, puisqu'on alloue
-   toujours avant de publier. Il n'y a donc pas d'état incohérent à
-   réconcilier.
-4. **Réparation** : génération et révisions repartent au-dessus de la
-   plus grande allocation, non plus de la sauvegarde + 2. Plusieurs
-   réparations consécutives donnent des numéros toujours croissants.
-5. **Amorçage des modèles existants** : un modèle créé avant ce mécanisme
-   n'a pas de dossier `alloc/`. Sa première écriture crée d'abord une
-   allocation d'amorçage, au-dessus du maximum du manifeste, de sa
-   sauvegarde et des manifestes corrompus conservés, puis marque le
-   manifeste (schéma 2, champ `allocation: 'registered'`). Seul un modèle
-   **marqué** dont le dossier `alloc/` a disparu est en garantie perdue.
-6. **Allocations corrompues ou absentes** : le **nom** du fichier porte les
-   numéros, son contenu est facultatif. Un contenu illisible ne gêne
-   donc pas. Si le dossier `alloc/` d'un modèle marqué disparaît, la
-   garantie est perdue : la réparation le signale et exige une
-   confirmation explicite, avec le même plancher que l'amorçage.
-7. **Effet sur le schéma** : les numéros de révision cessent d'être
-   contigus. Schéma 2 du manifeste :
-   - révisions strictement croissantes au lieu de contiguës ;
-   - recherche d'une révision par son numéro, et non plus par sa position
-     (`revisionOf`) ;
-   - une migration 1 → 2 sans transformation (un manifeste 1 valide est
-     un manifeste 2 valide).
-8. **Port de stockage** : `allocate(projet, modèle, g, r | null)` et
-   `maxAllocations(projet, modèle)`, dans les deux stockages (mémoire et
-   fichiers), avec la suite de conformité et l'injection de panne étendues
-   à l'étape d'allocation.
-9. **Limites** :
-   - un fichier par écriture, donc beaucoup de petits fichiers à la longue.
-     Une compaction, qui remplacerait une série par un point de contrôle
-     créé de façon exclusive, est possible plus tard ;
-   - ne protège pas un répertoire partagé entre machines (déjà exclu par
-     le verrou).
+   l'étape 3 laisse un numéro réservé jamais publié. L'opération suivante
+   numérote au-dessus.
+3. **Pas de second fichier modifiable** : aucun fichier de réservation
+   n'est réécrit ni supprimé. L'ensemble des réservations ne peut être
+   qu'en avance sur le manifeste, puisqu'on réserve toujours avant de
+   publier.
+4. **Le nom porte le numéro** : un fichier vide (arrêt pendant son
+   écriture) ou illisible compte quand même ; un nom inconnu dans le
+   dossier est ignoré ; une erreur de lecture du dossier, autre que son
+   absence, est levée (jamais lue comme « aucune réservation »).
+5. **Schéma 2 du manifeste** :
+   - champ `numbering` : `legacy` (manifeste écrit avant la 1B.6, ou
+     migré) ou `reserved` ;
+   - révisions strictement croissantes, trous permis en `reserved`
+     (contiguës exigées en `legacy`) ;
+   - `basedOn` et `currentRevision` doivent désigner une révision présente ;
+   - recherche par numéro : une révision perdue donne `REVISION_NOT_FOUND`
+     (chargement, restauration) ; les autres restent consultables.
+6. **Migration explicite et visible** : un manifeste au schéma 1 est
+   migré **en mémoire** (`numbering: 'legacy'`, visible dans le résumé de
+   `list`). Une lecture (`load`, `list`, `verify`, `manifest`) ne le
+   réécrit jamais. La **première écriture** le convertit au schéma 2 :
+   c'est **sans retour**, une version antérieure de GeoPlacer ne le lira
+   plus. La sauvegarde au schéma 1 reste lisible.
+7. **Réparation** : la génération est le maximum de toutes les sources,
+   quelle que soit la numérotation de la sauvegarde :
+   - sauvegarde + 2 (règle des modèles `legacy`) ;
+   - plus grande génération réservée + 1 ;
+   - **règle legacy** : la révision « peut-être perdue » (dernière de la
+     sauvegarde + 1) est réservée pour toujours, sauf si elle l'est déjà.
+     Une seconde réparation ne bute pas sur ce numéro déjà réservé.
 
-Tests prévus, **non livrés dans cette phase** :
-- panne à chaque étape (allocation, blobs, publication) ;
-- plusieurs réparations consécutives ;
-- allocations corrompues ou supprimées ;
-- reprise après arrêt brutal.
+   Le rapport (`numbering`) donne les bases utilisées, les maxima trouvés
+   et les numéros sautés, **y compris en diagnostic**, qui ne réserve
+   rien. Si la sauvegarde est en numérotation `reserved` mais que les
+   réservations sont absentes ou inférieures à sa génération, la garantie
+   est perdue : la réparation est refusée (`RESERVATIONS_MISSING`), sauf
+   consentement explicite (`allowMissingReservations`), avec la règle
+   legacy comme plancher.
+8. **Création et duplication** numérotent aussi au-dessus des
+   réservations : une création interrompue puis reprise sous le même
+   identifiant ne bute pas.
 
-Le mécanisme actuel (sauvegarde + 2) reste en place, avec ses tests de
-non-régression.
+| Ancien comportement (Phase 1B.5) | Phase 1B.6 |
+|---|---|
+| Manifeste réparé, corrompu de nouveau avant toute écriture : même génération | génération strictement supérieure |
+| Révision perdue : son numéro réutilisé avec un autre contenu | numéro jamais réutilisé (trou) |
+| Réparation interrompue puis relancée : même génération | génération strictement supérieure (la première était réservée) |
+
+**Tests** :
+- suite de conformité commune aux deux stockages : contrat de `reserve`
+  et `reservations`, panne injectée à **chaque** appel (réservations
+  comprises) pendant création, révisions, restauration, réglages,
+  suppression, duplication et réparation ;
+- cycle de corruptions et réparations répétées : générations strictement
+  croissantes, aucun numéro donné à deux contenus ;
+- fichiers de schéma 1 figés (texte), relus sans réécriture, convertis à
+  la première écriture ;
+- **vrais processus** : écritures tuées, manifeste corrompu, réparation
+  dans un processus tué à un instant variable, six tours : aucun numéro de
+  révision associé à deux contenus ;
+- mutation : numéroter depuis le manifeste seul fait échouer le cycle de
+  réparations (mémoire) **et** le test à vrais processus.
+
+**Coût** (`npm run bench:reservations`, NTFS) : lister 10 000
+réservations prend 14 ms ; une réservation (`fsync` compris) 4 ms ; une
+écriture de réglages passe de 24 ms (100 réservations) à 38 ms (10 000).
+
+**Ce qui n'est pas garanti** :
+- **coupure d'alimentation** : non testée. Sous Windows, le dossier ne
+  peut pas être `fsync` ; la création exclusive et le renommage reposent
+  sur la journalisation de NTFS ;
+- **systèmes de fichiers réseau** : la création exclusive n'y est pas
+  garantie ; seul un répertoire local est pris en charge (le verrou
+  l'exige déjà) ;
+- **suppression partielle** des réservations : seule une disparition
+  qui fait passer la plus grande génération réservée sous celle de la
+  sauvegarde est détectée ; la perte d'anciens fichiers de révision ne
+  l'est pas ;
+- le dossier grandit d'un ou deux fichiers par écriture : une compaction
+  sera utile plus tard.
 
 **Listage isolé** (correction A) : `list` renvoie les modèles lisibles dans
 `templates`, et les autres dans `failures`, avec l'identifiant, un code et

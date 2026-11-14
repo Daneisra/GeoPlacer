@@ -73,7 +73,7 @@ describe('TemplateManager: creation and import', () => {
     expect(t.sourceImageHash).toMatch(/^[0-9a-f]{64}$/);
 
     const m = await s.manager.manifest(refOf(t));
-    expect(m).toMatchObject({ schemaVersion: 1, generation: 1, currentRevision: 1, deletedAt: null, extensions: {} });
+    expect(m).toMatchObject({ schemaVersion: 2, numbering: 'reserved', generation: 1, currentRevision: 1, deletedAt: null, extensions: {} });
     expect(m.revisions[0]).toMatchObject({ revision: 1, reasons: ['created'], basedOn: null, width: 4, height: 2, alphaThreshold: 128 });
     expect(m.revisions[0]?.stats).toEqual({ pixels: 8, transparent: 1, exact: 2, approximated: 5 });
     // Exactly three objects: manifest, source blob, quantized blob.
@@ -333,7 +333,7 @@ describe('TemplateManager: integrity and recovery', () => {
     await expectCode(s.manager.revise(ref, { placement: at(6, 6) }), 'INVALID_MANIFEST');
 
     // A newer schema is never replaced by the older backup, even when recovering.
-    entry.current = (entry.backup ?? '').replace('"schemaVersion": 1', '"schemaVersion": 9');
+    entry.current = (entry.backup ?? '').replace('"schemaVersion": 2', '"schemaVersion": 9');
     await expectCode(s.manager.load(ref), 'UNSUPPORTED_SCHEMA');
     await expectCode(s.manager.load(ref, { recover: true }), 'UNSUPPORTED_SCHEMA');
     await expectCode(s.manager.verify(ref), 'UNSUPPORTED_SCHEMA');
@@ -404,7 +404,7 @@ describe('TemplateManager: listing isolation', () => {
     entryOf(corrupt.id).current = '{"name":"Corrompu secret", broken';
     entryOf(corrupt.id).backup = '{"also": "broken"}';
     const futur = entryOf(newer.id);
-    futur.current = (futur.current ?? '').replace('"schemaVersion": 1', '"schemaVersion": 9');
+    futur.current = (futur.current ?? '').replace('"schemaVersion": 2', '"schemaVersion": 9');
     const failing: TemplateStorage = {
       ...s.storage,
       readManifest: async (projectId, templateId) => {
@@ -442,7 +442,7 @@ describe('TemplateManager: explicit repair', () => {
     const s = setup();
     const t = await create(s);
     expect(await s.manager.repair(refOf(t), { apply: true })).toEqual({
-      action: 'none', applied: false, problem: null, generation: 1, currentRevision: 1, preservedAs: null,
+      action: 'none', applied: false, problem: null, generation: 1, currentRevision: 1, preservedAs: null, numbering: null,
     });
   });
 
@@ -450,7 +450,18 @@ describe('TemplateManager: explicit repair', () => {
     const s = setup();
     const { ref, backup, stored } = await corrupted(s);
     const dry = await s.manager.repair(ref, { apply: false });
-    expect(dry).toEqual({ action: 'restore-backup', applied: false, problem: 'the current manifest is malformed', generation: 4, currentRevision: 2, preservedAs: null });
+    expect(dry).toEqual({
+      action: 'restore-backup',
+      applied: false,
+      problem: 'the current manifest is malformed',
+      generation: 4,
+      currentRevision: 2,
+      preservedAs: null,
+      // The lost generation 3 and revision 3 were reserved: nothing to guess, nothing to burn.
+      numbering: { generationFloor: 4, bases: ['backup+2', 'reservations'], reservedGeneration: 3, reservedRevision: 3, burnedRevisions: [], reservationsMissing: false },
+    });
+    // The dry run reserved nothing.
+    expect(await s.storage.reservations(P1, ref.templateId)).toEqual({ generation: 3, revision: 3 });
     expect(stored()?.current).toBe('{"schemaVersion":1,"truncated');
     expect(s.storage.state.preserved.size).toBe(0);
 
@@ -466,7 +477,7 @@ describe('TemplateManager: explicit repair', () => {
     // History up to the backup is intact and writable again.
     expect((await s.manager.verify(ref)).revisions.map((r) => r.ok)).toEqual([true, true]);
     const next = await s.manager.revise(ref, { placement: at(8, 8) });
-    expect(next.template.revision).toBe(3);
+    expect(next.template.revision).toBe(4); // 3 was the lost revision: never reused
     expect((await s.manager.manifest(ref)).generation).toBe(5);
     expect(await s.manager.repair(ref, { apply: true })).toMatchObject({ action: 'none' });
   });
@@ -489,7 +500,7 @@ describe('TemplateManager: explicit repair', () => {
       expect({ current: stored()?.current, backup: stored()?.backup }).toEqual(before);
       expect(s.storage.state.preserved.size).toBe(0);
     };
-    entry.current = (backup ?? '').replace('"schemaVersion": 1', '"schemaVersion": 9');
+    entry.current = (backup ?? '').replace('"schemaVersion": 2', '"schemaVersion": 9');
     await untouched('UNSUPPORTED_SCHEMA');
 
     entry.current = 'garbage';
@@ -578,7 +589,7 @@ describe('TemplateManager: repair generation rule (backup + 2)', () => {
     expect(seen).toEqual([2, 4, 5, 6]);
   });
 
-  it('retrying an interrupted repair gives the same result', async () => {
+  it('retrying an interrupted repair gives a strictly higher generation (the first one was reserved)', async () => {
     const { s, ref, entryOf } = await setupCorrupt();
     const failing: TemplateStorage = {
       ...s.storage,
@@ -588,31 +599,86 @@ describe('TemplateManager: repair generation rule (backup + 2)', () => {
     };
     await expect(s.reopen(failing).repair(ref, { apply: true })).rejects.toThrow('interrupted');
     expect(entryOf().current).toBe('garbage');
-    expect(await s.manager.repair(ref, { apply: true })).toMatchObject({ action: 'restore-backup', applied: true, generation: 4 });
+    expect(await s.manager.repair(ref, { apply: true })).toMatchObject({ action: 'restore-backup', applied: true, generation: 5 });
   });
 
-  it('KNOWN LIMIT: a repaired manifest corrupted again before any write is repaired to the same generation', async () => {
+  it('a repaired manifest corrupted again before any write gets a NEW generation (fixed in Phase 1B.6)', async () => {
     const { s, ref, corrupt } = await setupCorrupt();
     const first = await s.manager.repair(ref, { apply: true });
     corrupt('corrupted again');
     s.clock.tick(1000);
     const second = await s.manager.repair(ref, { apply: true });
     expect([first.action, second.action]).toEqual(['restore-backup', 'restore-backup']);
-    // Same generation for two manifests that differ only by updatedAt (same
-    // revisions). Harmless for compare-and-swap (writers are serialized per
-    // template and the data directory is locked), but the generation is not
-    // a unique version id in this case.
-    expect(second.generation).toBe(first.generation);
+    // Phase 1B.5 gave the same generation twice here; every generation is now reserved once.
+    expect(second.generation).toBeGreaterThan(first.generation);
   });
 
-  it('KNOWN LIMIT: the revision number of the lost manifest is reused with other content', async () => {
+  it('never reuses the revision number of the lost manifest (fixed in Phase 1B.6)', async () => {
     const { s, ref } = await setupCorrupt(); // revision 3 (placement 6,6) is lost
     expect((await s.manager.repair(ref, { apply: true })).currentRevision).toBe(2);
     const next = await s.manager.revise(ref, { placement: at(9, 9) });
-    // Revision 3 now means placement (9, 9). Anything recorded against the
-    // lost revision 3 (future attempt journal, TaskId) would be ambiguous:
-    // to decide before Phase 1B.6 (docs/fr/modeles.md).
-    expect(next.template.revision).toBe(3);
+    // Revision 3 (placement 6, 6) is gone with the corrupt manifest, but its number stays taken.
+    expect(next.template.revision).toBe(4);
     expect(next.template.placement).toEqual(at(9, 9));
+    expect((await s.manager.manifest(ref)).revisions.map((r) => r.revision)).toEqual([1, 2, 4]);
+    await expectCode(s.manager.load(ref, { revision: 3 }), 'REVISION_NOT_FOUND');
+    await expectCode(s.manager.restoreRevision(ref, 3), 'REVISION_NOT_FOUND');
+    expect((await s.manager.load(ref, { revision: 2 })).template.placement).toEqual(at(5, 5)); // older ones stay readable
+  });
+
+  it('burns the possibly lost revision of a legacy template, and refuses missing reservations without consent', async () => {
+    const { s, ref, entryOf, corrupt } = await setupCorrupt();
+    // Simulate a template written before Phase 1B.6: schema-1 backup, no reservation records.
+    s.storage.state.reservations.delete(`${P1}/${ref.templateId}`);
+    const legacy = (entryOf().backup ?? '').replace('"schemaVersion": 2,\n  "numbering": "reserved"', '"schemaVersion": 1');
+    expect(legacy).toContain('"schemaVersion": 1');
+    entryOf().backup = legacy;
+    const dry = await s.manager.repair(ref, { apply: false });
+    expect(dry.numbering).toEqual({ generationFloor: 4, bases: ['backup+2', 'legacy-rule'], reservedGeneration: null, reservedRevision: null, burnedRevisions: [3], reservationsMissing: false });
+    const done = await s.manager.repair(ref, { apply: true });
+    expect(done.numbering?.burnedRevisions).toEqual([3]);
+    expect((await s.manager.revise(ref, { placement: at(9, 9) })).template.revision).toBe(4);
+    // A second repair from the same legacy backup does not fail on the already burned number.
+    corrupt('again');
+    entryOf().backup = legacy;
+    expect((await s.manager.repair(ref, { apply: true })).generation).toBeGreaterThan(done.generation);
+
+    // Reserved numbering whose records disappeared: the guarantee is lost.
+    const { s: s2, ref: ref2 } = await setupCorrupt();
+    s2.storage.state.reservations.delete(`${P1}/${ref2.templateId}`);
+    expect((await s2.manager.repair(ref2, { apply: false })).numbering?.reservationsMissing).toBe(true);
+    await expectCode(s2.manager.repair(ref2, { apply: true }), 'RESERVATIONS_MISSING');
+    const consented = await s2.manager.repair(ref2, { apply: true, allowMissingReservations: true });
+    expect(consented.numbering).toMatchObject({ reservationsMissing: true, burnedRevisions: [3] });
+  });
+});
+
+describe('TemplateManager: schema-1 manifests (migration)', () => {
+  it('never rewrites a schema-1 file on read; the first write converts it, the schema-1 backup stays readable', async () => {
+    const s = setup();
+    const t = await create(s);
+    const ref = refOf(t);
+    const key = `${P1}/${t.id}`;
+    const entry = s.storage.state.manifests.get(key)!;
+    // As written by Phase 1B.2-1B.5: schema 1, no numbering field, no reservation records.
+    const schema1 = (entry.current ?? '').replace('"schemaVersion": 2,\n  "numbering": "reserved"', '"schemaVersion": 1');
+    expect(schema1).toContain('"schemaVersion": 1');
+    s.storage.state.manifests.set(key, { current: schema1, backup: null });
+    s.storage.state.reservations.delete(key);
+
+    await s.manager.load(ref);
+    expect((await s.manager.list(P1)).templates[0]?.numbering).toBe('legacy');
+    await s.manager.verify(ref);
+    expect((await s.manager.manifest(ref)).numbering).toBe('legacy');
+    expect(s.storage.state.manifests.get(key)).toEqual({ current: schema1, backup: null }); // untouched by reads
+
+    await s.manager.updateSettings(ref, { name: 'Converti' });
+    const after = s.storage.state.manifests.get(key)!;
+    expect(JSON.parse(after.current ?? '')).toMatchObject({ schemaVersion: 2, numbering: 'reserved', generation: 2 });
+    expect(after.backup).toBe(schema1);
+    expect(await s.storage.reservations(P1, t.id)).toEqual({ generation: 2, revision: null });
+    // Recovery from the schema-1 backup still works.
+    s.storage.state.manifests.set(key, { current: 'broken', backup: schema1 });
+    expect((await s.manager.load(ref, { recover: true })).report.manifestSource).toBe('backup');
   });
 });

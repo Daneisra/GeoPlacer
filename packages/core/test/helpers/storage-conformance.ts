@@ -85,6 +85,23 @@ export function storageConformance(target: ConformanceTarget): void {
       expect((await s.readManifest(P1, T2)).current).toBe(manifestJson(1));
     });
 
+    it('reserves each number once, exclusively, and reports the highest ones', async () => {
+      const s = await target.make();
+      expect(await s.reservations(P1, T1)).toEqual({ generation: null, revision: null });
+      await s.reserve(P1, T1, 'generation', 1);
+      await s.reserve(P1, T1, 'generation', 7);
+      await s.reserve(P1, T1, 'revision', 3);
+      await expect(s.reserve(P1, T1, 'generation', 7)).rejects.toBeInstanceOf(StorageConflictError);
+      await expect(s.reserve(P1, T1, 'revision', 3)).rejects.toBeInstanceOf(StorageConflictError);
+      expect(await s.reservations(P1, T1)).toEqual({ generation: 7, revision: 3 });
+      // Per template and per project.
+      expect(await s.reservations(P2, T1)).toEqual({ generation: null, revision: null });
+      await s.reserve(P2, T1, 'generation', 7);
+      await expect(s.reserve(P1, T1, 'generation', 0)).rejects.toThrow();
+      // A reservation alone does not make a template appear.
+      expect(await s.listTemplates(P1)).toEqual([]);
+    });
+
     describe('interrupted manager operations', () => {
       const manager = (storage: TemplateStorage, ids = sequentialIds()): TemplateManager =>
         createTemplateManager({ storage, hasher: target.hasher, codec: target.codec, ids, clock: manualClock() });
@@ -108,6 +125,8 @@ export function storageConformance(target: ConformanceTarget): void {
             readManifest: wrap(storage.readManifest.bind(storage)),
             writeManifest: wrap(storage.writeManifest.bind(storage)),
             replaceManifest: wrap(storage.replaceManifest.bind(storage)),
+            reserve: wrap(storage.reserve.bind(storage)),
+            reservations: wrap(storage.reservations.bind(storage)),
             listTemplates: wrap(storage.listTemplates.bind(storage)),
             readBlob: wrap(storage.readBlob.bind(storage)),
             writeBlob: wrap(storage.writeBlob.bind(storage)),
@@ -126,6 +145,7 @@ export function storageConformance(target: ConformanceTarget): void {
         ['new source', (m, ref) => m.revise(ref, { sourcePng: rgbaPng(2, 1, () => [1, 2, 3, 255]) }), false],
         ['restore', (m, ref) => m.restoreRevision(ref, 1), true],
         ['settings', (m, ref) => m.updateSettings(ref, { name: 'Renommé' }), false],
+        ['delete', (m, ref) => m.delete(ref, { confirmName: 'Fresque' }), false],
       ];
 
       for (const [label, op, needsSecondRevision] of ops) {
@@ -150,11 +170,17 @@ export function storageConformance(target: ConformanceTarget): void {
               const where = `${label} k=${k} after=${String(after)}`;
               expect([before.generation, before.generation + 1], where).toContain(now.generation);
               if (ok) expect(now.generation, where).toBe(before.generation + 1);
-              const loaded = await reopened.load(ref);
-              expect(loaded.report.problems, where).toEqual([]);
-              expect(loaded.template.revision, where).toBe(now.currentRevision);
+              if (now.deletedAt === null) {
+                const loaded = await reopened.load(ref);
+                expect(loaded.report.problems, where).toEqual([]);
+                expect(loaded.template.revision, where).toBe(now.currentRevision);
+              }
               expect((await reopened.verify(ref)).revisions.every((r) => r.ok), where).toBe(true);
               expect(now.revisions.slice(0, before.revisions.length), where).toEqual(before.revisions);
+              // Every published number was reserved first.
+              const reserved = await storage.reservations(P1, t.id);
+              expect(reserved.generation ?? 0, where).toBeGreaterThanOrEqual(now.generation);
+              expect(reserved.revision ?? 0, where).toBeGreaterThanOrEqual(now.revisions[now.revisions.length - 1]!.revision);
               scenarios++;
             }
             if (!reachedAny) break; // the operation completed before call k: every call index is covered
@@ -195,6 +221,70 @@ export function storageConformance(target: ConformanceTarget): void {
           }
           if (!reachedAny) break;
         }
+      });
+
+      it('leaves no copy or a complete one after a failure during duplication', async () => {
+        for (let k = 0; ; k++) {
+          let reachedAny = false;
+          for (const after of [false, true]) {
+            const storage = await target.make();
+            const t = await create(manager(storage));
+            const ids = sequentialIds('copie');
+            const f = faulty(storage, k, after);
+            const ok = await manager(f.storage, ids)
+              .duplicate({ projectId: P1, templateId: t.id }, { name: 'Copie', projectId: P2 })
+              .then(
+                () => true,
+                () => false
+              );
+            reachedAny ||= f.reached();
+            const { templates, failures } = await manager(storage).list(P2);
+            expect(failures).toEqual([]);
+            if (ok) expect(templates.length).toBe(1);
+            expect(templates.length).toBeLessThanOrEqual(1);
+            for (const summary of templates) expect((await manager(storage).verify({ projectId: P2, templateId: summary.templateId })).revisions[0]?.ok).toBe(true);
+          }
+          if (!reachedAny) break;
+        }
+      });
+
+      it('never gives a revision number to two contents across repeated corruption and repair', async () => {
+        const storage = await target.make();
+        const m = manager(storage);
+        const t = await create(m);
+        const ref = { projectId: t.projectId, templateId: t.id };
+        const contentOf = new Map<number, string>();
+        const record = async (): Promise<void> => {
+          const manifest = await manager(storage).manifest(ref);
+          for (const r of manifest.revisions) {
+            const key = JSON.stringify([r.quantizedImageHash, r.placement]);
+            const seen = contentOf.get(r.revision);
+            if (seen !== undefined) expect(seen, `revision ${r.revision}`).toBe(key);
+            contentOf.set(r.revision, key);
+          }
+        };
+        const generations: number[] = [];
+        for (let round = 0; round < 6; round++) {
+          await manager(storage).revise(ref, { placement: at(round, 2 * round + 1) });
+          await record();
+          // Lose the current manifest (the latest revision lives only there): corrupt it, repair.
+          const current = (await storage.readManifest(P1, t.id)).current ?? '';
+          await storage.writeManifest(P1, t.id, '{"broken', JSON.parse(current).generation as number);
+          const report = await manager(storage).repair(ref, { apply: true });
+          generations.push(report.generation);
+          // A second corruption before any write: still a new generation.
+          if (round % 2 === 0) {
+            const again = (await storage.readManifest(P1, t.id)).current ?? '';
+            await storage.writeManifest(P1, t.id, '{"broken again', JSON.parse(again).generation as number);
+            generations.push((await manager(storage).repair(ref, { apply: true })).generation);
+          }
+          await record();
+        }
+        for (let i = 1; i < generations.length; i++) expect(generations[i]!).toBeGreaterThan(generations[i - 1]!);
+        // Lost revisions left gaps: more numbers used than revisions kept.
+        const kept = (await manager(storage).manifest(ref)).revisions.map((r) => r.revision);
+        expect(new Set(kept).size).toBe(kept.length);
+        expect(Math.max(...contentOf.keys())).toBeGreaterThan(kept.length);
       });
 
       it('leaves no template or a complete one after a failure during creation', async () => {

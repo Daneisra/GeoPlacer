@@ -5,7 +5,7 @@
  */
 
 /** Version of the core contracts; bumped on breaking interface changes. */
-export const CORE_CONTRACT_VERSION = 5 as const;
+export const CORE_CONTRACT_VERSION = 6 as const;
 
 export * from './contracts/index.js';
 export * from './geometry/index.js';

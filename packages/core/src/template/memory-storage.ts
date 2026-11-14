@@ -5,7 +5,7 @@
  * in and out so callers cannot alter stored data.
  */
 
-import type { ManifestRead, ProjectId, TemplateId, TemplateStorage } from '../contracts/index.js';
+import type { ManifestRead, ProjectId, ReservationMaxima, TemplateId, TemplateStorage } from '../contracts/index.js';
 import { StorageConflictError } from './errors.js';
 import { manifestGeneration } from './manifest.js';
 
@@ -16,6 +16,8 @@ export interface MemoryTemplateStorage extends TemplateStorage {
     readonly blobs: Map<string, Uint8Array>;
     /** Corrupt manifests preserved by replaceManifest (repair), by name. */
     readonly preserved: Map<string, string>;
+    /** Reservation records by template key: 'generation:<n>' / 'revision:<n>'. */
+    readonly reservations: Map<string, Set<string>>;
   };
 }
 
@@ -23,10 +25,11 @@ export function createMemoryTemplateStorage(): MemoryTemplateStorage {
   const manifests = new Map<string, { current: string | null; backup: string | null }>();
   const blobs = new Map<string, Uint8Array>();
   const preserved = new Map<string, string>();
+  const reservations = new Map<string, Set<string>>();
   const key = (projectId: ProjectId, id: string): string => `${projectId}/${id}`;
 
   return {
-    state: { manifests, blobs, preserved },
+    state: { manifests, blobs, preserved, reservations },
 
     async readManifest(projectId: ProjectId, templateId: TemplateId): Promise<ManifestRead> {
       const entry = manifests.get(key(projectId, templateId));
@@ -56,6 +59,28 @@ export function createMemoryTemplateStorage(): MemoryTemplateStorage {
       }
       manifests.set(k, { current: json, backup: entry?.backup ?? null });
       return name;
+    },
+
+    async reserve(projectId: ProjectId, templateId: TemplateId, kind: 'generation' | 'revision', value: number): Promise<void> {
+      if (!Number.isSafeInteger(value) || value < 1) throw new Error(`invalid ${kind} number: ${String(value)}`);
+      const k = key(projectId, templateId);
+      const set = reservations.get(k) ?? new Set<string>();
+      const name = `${kind}:${value}`;
+      if (set.has(name)) throw new StorageConflictError(null, null);
+      set.add(name);
+      reservations.set(k, set);
+    },
+
+    async reservations(projectId: ProjectId, templateId: TemplateId): Promise<ReservationMaxima> {
+      let generation: number | null = null;
+      let revision: number | null = null;
+      for (const name of reservations.get(key(projectId, templateId)) ?? []) {
+        const [kind, raw] = name.split(':');
+        const value = Number(raw);
+        if (kind === 'generation') generation = Math.max(generation ?? 0, value);
+        else revision = Math.max(revision ?? 0, value);
+      }
+      return { generation, revision };
     },
 
     async listTemplates(projectId: ProjectId): Promise<readonly TemplateId[]> {

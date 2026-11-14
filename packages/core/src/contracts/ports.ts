@@ -66,10 +66,27 @@ export interface TemplateStorage {
    * preserved copy (null when there was no current file).
    */
   replaceManifest(projectId: ProjectId, templateId: TemplateId, json: string, expectedCurrent: string | null): Promise<string | null>;
+  /**
+   * Reserves a generation or revision number of a template by creating an
+   * immutable record, exclusively (create-if-absent, durable before
+   * returning). Throws StorageConflictError when it already exists. Never
+   * modified or deleted afterwards.
+   */
+  reserve(projectId: ProjectId, templateId: TemplateId, kind: 'generation' | 'revision', value: number): Promise<void>;
+  /**
+   * Highest reserved generation and revision (null: none). A missing record
+   * store means none; any other read failure throws (never read as "none").
+   */
+  reservations(projectId: ProjectId, templateId: TemplateId): Promise<ReservationMaxima>;
   listTemplates(projectId: ProjectId): Promise<readonly TemplateId[]>;
   readBlob(projectId: ProjectId, address: string): Promise<Uint8Array | null>;
   /** Atomic write of a blob addressed by the SHA-256 of its bytes. */
   writeBlob(projectId: ProjectId, address: string, bytes: Uint8Array): Promise<void>;
+}
+
+export interface ReservationMaxima {
+  readonly generation: number | null;
+  readonly revision: number | null;
 }
 
 /** Time source of the template manager. */

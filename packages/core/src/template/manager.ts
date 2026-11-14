@@ -6,7 +6,11 @@
  *   1. content-addressed blobs (SHA-256 of their bytes) are written first;
  *      an existing blob is re-hashed, a corrupt one is replaced;
  *   2. every blob the new manifest references is read back and re-hashed;
- *   3. the manifest is published by ONE storage call (atomic replace,
+ *   3. the new generation (and revision) numbers are RESERVED: immutable
+ *      records created exclusively, above every number already published or
+ *      reserved (Phase 1B.6). An interruption after this step leaves a gap,
+ *      never a reused number;
+ *   4. the manifest is published by ONE storage call (atomic replace,
  *      compare-and-swap on `generation`): the single commit point.
  * An interruption before 3 leaves the previous manifest untouched (orphan
  * blobs at worst); after 3 the new revision is complete. Blobs and published
@@ -30,6 +34,7 @@ import type {
   QuantizationMethod,
   RevisionChange,
   RevisionCheck,
+  RepairNumbering,
   RepairOptions,
   RepairReport,
   RevisionReason,
@@ -120,8 +125,9 @@ function contentOf(record: RevisionRecordV1): RevisionContent {
   };
 }
 
+/** Revision by number (schema 2: numbers may have gaps, never by position). */
 function revisionOf(manifest: TemplateManifest, revision: number): RevisionRecordV1 {
-  const record = manifest.revisions[revision - 1];
+  const record = manifest.revisions.find((r) => r.revision === revision);
   if (record === undefined) {
     throw new TemplateError('REVISION_NOT_FOUND', `template ${manifest.templateId} has no revision ${revision}`);
   }
@@ -187,6 +193,7 @@ function toSummary(manifest: TemplateManifest, source: 'current' | 'backup'): Te
     createdAt: manifest.createdAt,
     updatedAt: manifest.updatedAt,
     manifestSource: source,
+    numbering: manifest.numbering,
     warnings: placementWarnings(current),
   };
 }
@@ -407,6 +414,30 @@ export function createTemplateManager(deps: TemplateManagerDeps): TemplateManage
     }
   }
 
+  // ───────────── numbering (reservations) ─────────────
+
+  const lastRevisionOf = (manifest: TemplateManifest): number => manifest.revisions[manifest.revisions.length - 1]?.revision ?? 0;
+
+  /**
+   * Reserves the next generation (and revision) of a template: one above
+   * every number published (manifest) or reserved (records), so a number is
+   * never given to two contents. Reserved before the publication that uses
+   * it; an interruption in between leaves a gap.
+   */
+  async function reserveNext(projectId: ProjectId, templateId: TemplateId, manifest: TemplateManifest | null, withRevision: boolean): Promise<{ generation: number; revision: number | null }> {
+    const reserved = await storage.reservations(projectId, templateId);
+    const generation = Math.max(manifest?.generation ?? 0, reserved.generation ?? 0) + 1;
+    const revision = withRevision ? Math.max(manifest === null ? 0 : lastRevisionOf(manifest), reserved.revision ?? 0) + 1 : null;
+    try {
+      await storage.reserve(projectId, templateId, 'generation', generation);
+      if (revision !== null) await storage.reserve(projectId, templateId, 'revision', revision);
+    } catch (error) {
+      if (error instanceof StorageConflictError) throw new TemplateError('CONFLICT', `template ${templateId}: number already reserved by another writer`);
+      throw error;
+    }
+    return { generation, revision };
+  }
+
   // ───────────── revisions ─────────────
 
   async function appendRevision(
@@ -415,9 +446,10 @@ export function createTemplateManager(deps: TemplateManagerDeps): TemplateManage
     reasons: readonly RevisionReason[],
     basedOn: number
   ): Promise<TemplateManifest> {
+    const numbers = await reserveNext(manifest.projectId, manifest.templateId, manifest, true);
     const now = clock.now();
     const record: RevisionRecordV1 = {
-      revision: manifest.revisions.length + 1,
+      revision: numbers.revision as number,
       createdAt: now,
       reasons,
       basedOn,
@@ -427,7 +459,8 @@ export function createTemplateManager(deps: TemplateManagerDeps): TemplateManage
     return publish(
       {
         ...manifest,
-        generation: manifest.generation + 1,
+        numbering: 'reserved',
+        generation: numbers.generation,
         updatedAt: now,
         currentRevision: record.revision,
         revisions: [...manifest.revisions, record],
@@ -441,7 +474,8 @@ export function createTemplateManager(deps: TemplateManagerDeps): TemplateManage
       const manifest = await writable(ref);
       const changes = edit(manifest);
       if (changes === null) return toSummary(manifest, 'current');
-      const published = await publish({ ...manifest, ...changes, generation: manifest.generation + 1, updatedAt: clock.now() }, manifest.generation);
+      const { generation } = await reserveNext(manifest.projectId, manifest.templateId, manifest, false);
+      const published = await publish({ ...manifest, ...changes, numbering: 'reserved', generation, updatedAt: clock.now() }, manifest.generation);
       return toSummary(published, 'current');
     });
   }
@@ -463,13 +497,17 @@ export function createTemplateManager(deps: TemplateManagerDeps): TemplateManage
       const templateId = asTemplateId(ids.newTemplateId());
       const imported = await importSource(input.sourcePng, input.palette, alphaThreshold, method, input.placement, input.coordinateSystem);
       await storeImported(projectId, imported);
+      // Above any reservation left by an interrupted creation under this id.
+      const numbers = await reserveNext(projectId, templateId, null, true);
+      const first = numbers.revision as number;
       const now = clock.now();
       const published = await publish(
         {
-          schemaVersion: 1,
+          schemaVersion: 2,
+          numbering: 'reserved',
           projectId,
           templateId,
-          generation: 1,
+          generation: numbers.generation,
           name,
           drawingStrategy: input.strategy ?? DEFAULT_STRATEGY,
           priority,
@@ -477,13 +515,13 @@ export function createTemplateManager(deps: TemplateManagerDeps): TemplateManage
           createdAt: now,
           updatedAt: now,
           deletedAt: null,
-          currentRevision: 1,
-          revisions: [{ revision: 1, createdAt: now, reasons: ['created'], basedOn: null, ...imported.content, extensions: {} }],
+          currentRevision: first,
+          revisions: [{ revision: first, createdAt: now, reasons: ['created'], basedOn: null, ...imported.content, extensions: {} }],
           extensions: {},
         },
         null
       );
-      return toTemplate(published, revisionOf(published, 1), imported.image);
+      return toTemplate(published, revisionOf(published, first), imported.image);
     },
 
     async load(rawRef, options: LoadOptions = {}): Promise<LoadedTemplate> {
@@ -641,13 +679,16 @@ export function createTemplateManager(deps: TemplateManagerDeps): TemplateManage
         await putBlob(projectId, address, await readVerified(source.projectId, address, what), what);
       }
       const templateId: TemplateId = asTemplateId(ids.newTemplateId());
+      const numbers = await reserveNext(projectId, templateId, null, true);
+      const first = numbers.revision as number;
       const now = clock.now();
       const published = await publish(
         {
-          schemaVersion: 1,
+          schemaVersion: 2,
+          numbering: 'reserved',
           projectId,
           templateId,
-          generation: 1,
+          generation: numbers.generation,
           name,
           drawingStrategy: source.drawingStrategy,
           priority: source.priority,
@@ -656,13 +697,13 @@ export function createTemplateManager(deps: TemplateManagerDeps): TemplateManage
           createdAt: now,
           updatedAt: now,
           deletedAt: null,
-          currentRevision: 1,
-          revisions: [{ revision: 1, createdAt: now, reasons: ['duplicated'], basedOn: null, ...contentOf(record), extensions: {} }],
+          currentRevision: first,
+          revisions: [{ revision: first, createdAt: now, reasons: ['duplicated'], basedOn: null, ...contentOf(record), extensions: {} }],
           extensions: {},
         },
         null
       );
-      return toTemplate(published, revisionOf(published, 1), image);
+      return toTemplate(published, revisionOf(published, first), image);
     },
 
     async delete(rawRef, options): Promise<void> {
@@ -672,8 +713,9 @@ export function createTemplateManager(deps: TemplateManagerDeps): TemplateManage
         if (options.confirmName !== manifest.name) {
           throw new TemplateError('CONFIRMATION_REQUIRED', 'deleting a template requires its exact name as confirmation');
         }
+        const { generation } = await reserveNext(manifest.projectId, manifest.templateId, manifest, false);
         const now = clock.now();
-        await publish({ ...manifest, generation: manifest.generation + 1, updatedAt: now, deletedAt: now }, manifest.generation);
+        await publish({ ...manifest, numbering: 'reserved', generation, updatedAt: now, deletedAt: now }, manifest.generation);
       });
     },
 
@@ -704,7 +746,7 @@ export function createTemplateManager(deps: TemplateManagerDeps): TemplateManage
         if (read.current !== null) {
           try {
             const current = parseFor(ref, read.current);
-            return { action: 'none', applied: false, problem: null, generation: current.generation, currentRevision: current.currentRevision, preservedAs: null };
+            return { action: 'none', applied: false, problem: null, generation: current.generation, currentRevision: current.currentRevision, preservedAs: null, numbering: null };
           } catch (error) {
             // A newer schema is never replaced by an older backup; any other
             // failure than a malformed manifest is not a repair case either.
@@ -726,12 +768,52 @@ export function createTemplateManager(deps: TemplateManagerDeps): TemplateManage
         } catch (error) {
           throw new TemplateError('INTEGRITY_ERROR', `${problem}; the backup's current revision does not verify (${message(error)})`);
         }
-        // +2: strictly above the lost generation (backup + 1) a stale writer may remember.
-        const repaired: TemplateManifest = { ...backup, generation: backup.generation + 2, updatedAt: clock.now() };
-        const report = { action: 'restore-backup', problem, generation: repaired.generation, currentRevision: repaired.currentRevision } as const;
+        // Numbering: the max of every source, whatever the backup's numbering says.
+        const reserved = await storage.reservations(ref.projectId, ref.templateId);
+        const bases: RepairNumbering['bases'][number][] = ['backup+2'];
+        // +2: strictly above the lost generation (backup + 1), for legacy templates.
+        let generation = backup.generation + 2;
+        if (reserved.generation !== null) {
+          bases.push('reservations');
+          generation = Math.max(generation, reserved.generation + 1);
+        }
+        // Reserved numbering keeps a record of every published generation:
+        // fewer than the backup's means records are missing.
+        const reservationsMissing = backup.numbering === 'reserved' && (reserved.generation === null || reserved.generation < backup.generation);
+        // Legacy rule: the lost manifest (one publish after the backup) may have
+        // created revision last + 1; skip it for good unless already reserved.
+        const possiblyLost = lastRevisionOf(backup) + 1;
+        const burned = (reserved.revision ?? 0) >= possiblyLost ? [] : [possiblyLost];
+        if (burned.length > 0) bases.push('legacy-rule');
+        const numbering: RepairNumbering = {
+          generationFloor: generation,
+          bases,
+          reservedGeneration: reserved.generation,
+          reservedRevision: reserved.revision,
+          burnedRevisions: burned,
+          reservationsMissing,
+        };
+        const repaired: TemplateManifest = { ...backup, numbering: 'reserved', generation, updatedAt: clock.now() };
+        const report = { action: 'restore-backup', problem, generation: repaired.generation, currentRevision: repaired.currentRevision, numbering } as const;
         if (!options.apply) return { ...report, applied: false, preservedAs: null };
+        if (reservationsMissing && options.allowMissingReservations !== true) {
+          throw new TemplateError('RESERVATIONS_MISSING', 'numbering reservations are missing for this template: repair only with allowMissingReservations (see report.numbering)');
+        }
         const json = serializeManifest(repaired);
         parseFor(ref, json);
+        try {
+          await storage.reserve(ref.projectId, ref.templateId, 'generation', generation);
+          for (const revision of burned) {
+            try {
+              await storage.reserve(ref.projectId, ref.templateId, 'revision', revision);
+            } catch (error) {
+              if (!(error instanceof StorageConflictError)) throw error; // already burned by an interrupted repair
+            }
+          }
+        } catch (error) {
+          if (error instanceof StorageConflictError) throw new TemplateError('CONFLICT', `template ${ref.templateId}: generation ${generation} already reserved`);
+          throw error;
+        }
         let preservedAs: string | null;
         try {
           preservedAs = await storage.replaceManifest(ref.projectId, ref.templateId, json, read.current);

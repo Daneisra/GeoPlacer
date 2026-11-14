@@ -1,14 +1,15 @@
 /**
- * Template manifest (schema v1): strict validation, stable serialization,
- * migration registry.
+ * Template manifest (schema 2, reads schema 1): strict validation, stable
+ * serialization, migration registry.
  *
  * Compatibility rules:
- * - New optional data written by future v1 code goes into `extensions`
+ * - New optional data written by future code goes into `extensions`
  *   (top level), which is preserved verbatim on every rewrite.
  * - Any other unknown key is rejected: the manifest is the integrity anchor,
  *   so it is never half-understood.
- * - An incompatible change requires schemaVersion 2 and a migration from 1;
- *   a manifest newer than this code is rejected (UNSUPPORTED_SCHEMA).
+ * - An incompatible change requires a new schema and a migration; a
+ *   manifest newer than this code is rejected (UNSUPPORTED_SCHEMA).
+ * - Schema 1 -> 2 (Phase 1B.6): explicit revision numbering, gaps allowed.
  */
 
 import type {
@@ -30,8 +31,17 @@ import { asProjectId, asTemplateId, MAX_NAME_LENGTH } from './ids.js';
 
 type Json = Record<string, unknown>;
 
-/** Migrations from an older schema version to the next one (none yet). */
-const MIGRATIONS: Readonly<Record<number, (manifest: Json) => Json>> = {};
+/**
+ * Migrations from an older schema version to the next one, in memory only:
+ * a stored file is rewritten in the new schema by the next write, never by
+ * a read.
+ * 1 -> 2: revision numbering becomes explicit; a schema-1 manifest was
+ * numbered from the manifest alone ('legacy'). A valid schema-1 revision
+ * list (contiguous from 1) is a valid schema-2 list.
+ */
+const MIGRATIONS: Readonly<Record<number, (manifest: Json) => Json>> = {
+  1: (manifest) => ({ ...manifest, schemaVersion: 2, numbering: 'legacy' }),
+};
 
 const STATUSES: readonly TemplateStatus[] = ['active', 'paused', 'completed', 'archived'];
 const STRATEGIES: readonly StrategyConfig['id'][] = [
@@ -288,22 +298,30 @@ function revisionOf(value: unknown, path: string): RevisionRecordV1 {
 }
 
 const MANIFEST_KEYS = [
-  'schemaVersion', 'projectId', 'templateId', 'generation', 'name', 'drawingStrategy', 'priority', 'status',
+  'schemaVersion', 'numbering', 'projectId', 'templateId', 'generation', 'name', 'drawingStrategy', 'priority', 'status',
   'createdAt', 'updatedAt', 'deletedAt', 'currentRevision', 'revisions', 'extensions',
 ] as const;
 
-/** Validates a parsed v1 manifest object. */
+/** Validates a parsed schema-2 manifest object (schema-1 objects go through parseManifest's migration). */
 export function validateManifest(value: unknown): TemplateManifest {
   const m = object(value, 'manifest', MANIFEST_KEYS);
-  if (m.schemaVersion !== 1) bad('manifest.schemaVersion', 'expected 1');
+  if (m.schemaVersion !== 2) bad('manifest.schemaVersion', 'expected 2');
+  const numbering = oneOf(m.numbering, 'manifest.numbering', ['legacy', 'reserved'] as const);
   if (!Array.isArray(m.revisions) || m.revisions.length === 0) bad('manifest.revisions', 'expected a non-empty array');
   const revisions = m.revisions.map((r, i) => revisionOf(r, `manifest.revisions[${i}]`));
+  // Strictly increasing numbers; gaps are allowed (reserved but unpublished, or lost and never reused).
+  const numbers = new Set<number>();
   revisions.forEach((r, i) => {
-    if (r.revision !== i + 1) bad(`manifest.revisions[${i}].revision`, `expected ${i + 1} (revisions are contiguous from 1)`);
-    if (r.basedOn !== null && r.basedOn >= r.revision) bad(`manifest.revisions[${i}].basedOn`, 'must refer to an earlier revision');
+    const previous = revisions[i - 1];
+    if (previous !== undefined && r.revision <= previous.revision) bad(`manifest.revisions[${i}].revision`, 'revision numbers must strictly increase');
+    if (numbering === 'legacy' && r.revision !== i + 1) bad(`manifest.revisions[${i}].revision`, `expected ${i + 1} (legacy numbering is contiguous from 1)`);
+    if (r.basedOn !== null && (r.basedOn >= r.revision || !numbers.has(r.basedOn))) {
+      bad(`manifest.revisions[${i}].basedOn`, 'must refer to an earlier revision of this manifest');
+    }
+    numbers.add(r.revision);
   });
   const currentRevision = int(m.currentRevision, 'manifest.currentRevision', 1);
-  if (currentRevision > revisions.length) bad('manifest.currentRevision', 'refers to a missing revision');
+  if (!numbers.has(currentRevision)) bad('manifest.currentRevision', 'refers to a missing revision');
   const extensions = extensionsOf(m.extensions, 'manifest.extensions');
   let projectId;
   let templateId;
@@ -314,7 +332,8 @@ export function validateManifest(value: unknown): TemplateManifest {
     bad('manifest.projectId/templateId', (error as Error).message);
   }
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    numbering,
     projectId,
     templateId,
     generation: int(m.generation, 'manifest.generation', 1),
@@ -359,6 +378,7 @@ export function parseManifest(json: string): TemplateManifest {
 export function serializeManifest(manifest: TemplateManifest): string {
   const ordered = {
     schemaVersion: manifest.schemaVersion,
+    numbering: manifest.numbering,
     projectId: manifest.projectId,
     templateId: manifest.templateId,
     generation: manifest.generation,

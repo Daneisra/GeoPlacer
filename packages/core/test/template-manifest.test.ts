@@ -39,7 +39,8 @@ function revision(n: number, extra: Partial<RevisionRecordV1> = {}): RevisionRec
 
 function manifest(extra: Partial<TemplateManifest> = {}): TemplateManifest {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    numbering: 'legacy',
     projectId: asProjectId('projet-a'),
     templateId: asTemplateId('modele-1'),
     generation: 2,
@@ -56,6 +57,38 @@ function manifest(extra: Partial<TemplateManifest> = {}): TemplateManifest {
     ...extra,
   };
 }
+
+/** A schema-1 manifest exactly as Phase 1B.2-1B.5 wrote it (frozen text). */
+const SCHEMA_1_FILE = `{
+  "schemaVersion": 1,
+  "projectId": "projet-a",
+  "templateId": "modele-1",
+  "generation": 2,
+  "name": "Ancien",
+  "drawingStrategy": { "id": "top-to-bottom" },
+  "priority": 0,
+  "status": "active",
+  "createdAt": 1001,
+  "updatedAt": 1002,
+  "deletedAt": null,
+  "currentRevision": 2,
+  "revisions": [
+    { "revision": 1, "createdAt": 1001, "reasons": ["created"], "basedOn": null, "width": 2, "height": 1,
+      "placement": { "topLeft": { "x": 10, "y": -5 } }, "coordinateSystem": { "yAxis": "down" },
+      "palette": { "id": "p", "colors": [{ "rgb": 0 }, { "rgb": 16777215 }] }, "alphaThreshold": 128,
+      "quantizationMethod": { "algorithm": "nearest-color", "distance": "oklab", "version": 1 },
+      "sourceImageHash": "${'a'.repeat(64)}", "quantizedImageHash": "${'b'.repeat(64)}", "quantizedFileHash": "${'c'.repeat(64)}",
+      "stats": { "pixels": 2, "transparent": 1, "exact": 1, "approximated": 0 }, "extensions": {} },
+    { "revision": 2, "createdAt": 1002, "reasons": ["placement"], "basedOn": 1, "width": 2, "height": 1,
+      "placement": { "topLeft": { "x": 11, "y": -5 } }, "coordinateSystem": { "yAxis": "down" },
+      "palette": { "id": "p", "colors": [{ "rgb": 0 }, { "rgb": 16777215 }] }, "alphaThreshold": 128,
+      "quantizationMethod": { "algorithm": "nearest-color", "distance": "oklab", "version": 1 },
+      "sourceImageHash": "${'a'.repeat(64)}", "quantizedImageHash": "${'b'.repeat(64)}", "quantizedFileHash": "${'c'.repeat(64)}",
+      "stats": { "pixels": 2, "transparent": 1, "exact": 1, "approximated": 0 }, "extensions": {} }
+  ],
+  "extensions": {}
+}
+`;
 
 function expectCode(fn: () => unknown, code: string): void {
   try {
@@ -120,7 +153,30 @@ describe('template manifest v1', () => {
   });
 
   it('rejects newer schemas explicitly', () => {
-    expectCode(() => parseManifest(mutate((m) => (m.schemaVersion = 2))), 'UNSUPPORTED_SCHEMA');
+    expectCode(() => parseManifest(mutate((m) => (m.schemaVersion = 3))), 'UNSUPPORTED_SCHEMA');
+  });
+
+  it('migrates a frozen schema-1 file in memory, as legacy numbering', () => {
+    const migrated = parseManifest(SCHEMA_1_FILE);
+    expect(migrated).toMatchObject({ schemaVersion: 2, numbering: 'legacy', generation: 2, currentRevision: 2 });
+    expect(migrated.revisions.map((r) => r.revision)).toEqual([1, 2]);
+    // Serializing writes schema 2 (only the next WRITE does this to a stored file).
+    expect(JSON.parse(serializeManifest(migrated))).toMatchObject({ schemaVersion: 2, numbering: 'legacy' });
+    // A schema-1 file with a gap was never valid.
+    expectCode(() => parseManifest(SCHEMA_1_FILE.replace('"revision": 2', '"revision": 3').replace('"currentRevision": 2', '"currentRevision": 3')), 'INVALID_MANIFEST');
+  });
+
+  it('accepts gaps in reserved numbering, never in legacy numbering', () => {
+    const gapped = manifest({ numbering: 'reserved', currentRevision: 5, revisions: [revision(1), revision(5, { basedOn: 1 })] });
+    expect(parseManifest(serializeManifest(gapped)).revisions.map((r) => r.revision)).toEqual([1, 5]);
+    expectCode(() => parseManifest(serializeManifest({ ...gapped, numbering: 'legacy' })), 'INVALID_MANIFEST');
+    // basedOn must name a revision of this manifest (not a lost one).
+    expectCode(() => parseManifest(serializeManifest(manifest({ numbering: 'reserved', currentRevision: 5, revisions: [revision(1), revision(5, { basedOn: 3 })] }))), 'INVALID_MANIFEST');
+    // currentRevision must exist.
+    expectCode(() => parseManifest(serializeManifest({ ...gapped, currentRevision: 3 })), 'INVALID_MANIFEST');
+    // Strictly increasing.
+    expectCode(() => parseManifest(serializeManifest(manifest({ numbering: 'reserved', currentRevision: 5, revisions: [revision(5), revision(5)] }))), 'INVALID_MANIFEST');
+    expectCode(() => parseManifest(serializeManifest(manifest({ numbering: 'guessed' as never }))), 'INVALID_MANIFEST');
   });
 
   it('rejects malformed manifests', () => {

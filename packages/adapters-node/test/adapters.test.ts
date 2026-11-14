@@ -275,6 +275,85 @@ describe('real process kill during writes', () => {
     // The children really wrote (not timing-sensitive: one write over the 8 runs is enough).
     expect(final.generation).toBeGreaterThan(1);
   });
+
+  /** Runs repair-child and kills it after `delayMs` (it may finish first). */
+  function repairAndKill(root: string, templateId: string, delayMs: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const proc = spawn(process.execPath, ['--import', 'tsx', path.join(here, 'fixtures', 'repair-child.ts'), root, templateId], {
+        cwd: repoRoot,
+        env: { ...process.env, TSX_TSCONFIG_PATH: path.join(here, 'fixtures', 'tsconfig.child.json') },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let err = '';
+      proc.stdout.on('data', (chunk: Buffer) => {
+        if (chunk.toString().includes('ready')) setTimeout(() => proc.kill('SIGKILL'), delayMs);
+      });
+      proc.stderr.on('data', (chunk: Buffer) => (err += chunk.toString()));
+      proc.on('exit', (code, signal) => (signal === null && code !== 0 ? reject(new Error(`repair child failed (${String(code)}): ${err}`)) : resolve()));
+    });
+  }
+
+  it('never gives a revision number to two contents across kills, corruption and repairs killed midway', { timeout: 240_000 }, async () => {
+    const root = await tempRoot();
+    const P_KILL = asProjectId('projet-kill');
+    const contentOf = new Map<number, string>();
+    const generations: number[] = [];
+    let id: string | undefined;
+    const record = async (manager: TemplateManager, ref: { projectId: ProjectId; templateId: TemplateId }): Promise<void> => {
+      const manifest = await manager.manifest(ref);
+      generations.push(manifest.generation);
+      for (const r of manifest.revisions) {
+        const key = JSON.stringify([r.quantizedImageHash, r.placement, r.alphaThreshold]);
+        const seen = contentOf.get(r.revision);
+        if (seen !== undefined) expect(seen, `revision ${r.revision} reused`).toBe(key);
+        contentOf.set(r.revision, key);
+      }
+    };
+    const delays = [60, 140, 35, 220, 90, 170];
+    for (const [round, delayMs] of delays.entries()) {
+      id = await runAndKill(root, id, delayMs); // writes revisions until killed
+      const ref = { projectId: P_KILL, templateId: id as TemplateId };
+      let handle = await openNodeTemplateManager(root);
+      await record(handle.manager, ref);
+      await handle.close();
+      // Lose the current manifest (and the revision that may live only there).
+      const manifestPath = path.join(root, 'projects', 'projet-kill', 'templates', id, 'manifest.json');
+      await writeFile(manifestPath, '{"corrupt');
+      await repairAndKill(root, id, [0, 2, 5, 10, 20, 50][round % 6]!); // repair, possibly killed midway
+      handle = await openNodeTemplateManager(root);
+      if ((await readFile(manifestPath, 'utf8')) === '{"corrupt') await handle.manager.repair(ref, { apply: true }); // finish it
+      const loaded = await handle.manager.load(ref);
+      expect(loaded.report.problems).toEqual([]);
+      await record(handle.manager, ref);
+      await handle.close();
+    }
+    // Generations never go back; revision numbers were used for more contents than kept (gaps), never twice.
+    for (let i = 1; i < generations.length; i++) expect(generations[i]!).toBeGreaterThanOrEqual(generations[i - 1]!);
+    expect(contentOf.size).toBeGreaterThan(1);
+  });
+});
+
+describe('number reservations on disk', () => {
+  it('counts a reservation by its name, whatever its content; ignores unknown names; never reads an error as none', async () => {
+    const root = await tempRoot();
+    const t = await create(root);
+    const dir = path.join(root, 'projects', 'projet-a', 'templates', t.id, 'reservations');
+    expect((await readdir(dir)).sort()).toEqual(['generation-000000000000001', 'revision-000000000000001']);
+    const storage = new NodeTemplateStorage((await open(root)).lock);
+    await writeFile(path.join(dir, 'generation-000000000000009'), ''); // empty (crash before writing the content)
+    await writeFile(path.join(dir, 'revision-000000000000004'), 'garbage');
+    await writeFile(path.join(dir, 'notes.txt'), 'unknown names are ignored');
+    await writeFile(path.join(dir, 'generation-abc'), '');
+    expect(await storage.reservations(P, t.id)).toEqual({ generation: 9, revision: 4 });
+    const revised = await (await managerOf(root)).revise({ projectId: P, templateId: t.id }, { placement: { topLeft: { x: 3, y: 3 } } });
+    expect(revised.template.revision).toBe(5);
+    expect((await (await managerOf(root)).manifest({ projectId: P, templateId: t.id })).generation).toBe(10);
+    await expect(storage.reserve(P, t.id, 'revision', 5)).rejects.toThrow();
+    // A reservation store that cannot be listed is an error, not "no reservation".
+    await rm(dir, { recursive: true });
+    await writeFile(dir, 'not a directory');
+    await expect(storage.reservations(P, t.id)).rejects.toThrow();
+  });
 });
 
 const MECHANISMS: LockMechanism[] = process.platform === 'win32' ? ['windows-share-lock', 'pid-file'] : ['pid-file'];
