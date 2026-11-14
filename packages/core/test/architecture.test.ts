@@ -68,6 +68,50 @@ describe('@geoplacer/core architecture', () => {
     }
   });
 
+  it('implementation modules only depend on the modules they are allowed to', () => {
+    // Folder -> folders it may import. Contracts stay at the bottom.
+    const allowed: Readonly<Record<string, readonly string[]>> = {
+      contracts: ['contracts'],
+      geometry: ['contracts', 'geometry'],
+      color: ['contracts', 'color'],
+      palette: ['contracts', 'color', 'palette'],
+    };
+    for (const file of sourceFiles(srcDir)) {
+      const folder = path.relative(srcDir, file).split(path.sep)[0] ?? '';
+      if (folder.endsWith('.ts')) continue; // src/index.ts re-exports everything
+      const rules = allowed[folder];
+      expect({ folder, known: rules !== undefined }).toEqual({ folder, known: true });
+      for (const spec of importSpecifiers(file)) {
+        const target = path.relative(srcDir, path.resolve(path.dirname(file), spec)).split(path.sep)[0] ?? '';
+        expect({ from: path.relative(srcDir, file), to: target, ok: rules?.includes(target) ?? false }).toMatchObject({ ok: true });
+      }
+    }
+  });
+
+  it('has no import cycle anywhere in src', () => {
+    const graph = new Map<string, string[]>();
+    for (const file of sourceFiles(srcDir)) {
+      graph.set(
+        file,
+        importSpecifiers(file).map((spec) => path.resolve(path.dirname(file), spec).replace(/\.js$/, '.ts'))
+      );
+    }
+    const state = new Map<string, 'visiting' | 'done'>();
+    const cycles: string[] = [];
+    const visit = (node: string, trail: string[]): void => {
+      if (state.get(node) === 'done') return;
+      if (state.get(node) === 'visiting') {
+        cycles.push([...trail, node].map((f) => path.relative(srcDir, f)).join(' -> '));
+        return;
+      }
+      state.set(node, 'visiting');
+      for (const next of graph.get(node) ?? []) visit(next, [...trail, node]);
+      state.set(node, 'done');
+    };
+    for (const node of graph.keys()) visit(node, []);
+    expect(cycles).toEqual([]);
+  });
+
   it('contracts contain no algorithm', () => {
     for (const file of sourceFiles(contractsDir)) {
       const text = readFileSync(file, 'utf8');
