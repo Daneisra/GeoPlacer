@@ -197,6 +197,44 @@ démarrage du détenteur), avant toute écriture. Le stockage refuse toute
 Le propriétaire (pid, heure de démarrage) est écrit dans
 `.geoplacer.lock.owner`, uniquement pour le message d'erreur.
 
+**Proposition de verrou multiplateforme** (Phase 1B.4, non appliquée) :
+
+Le verrou actuel a deux faiblesses, qui restent des problèmes ouverts :
+- **Windows** : il dépend d'un indicateur interne de libuv que Node.js
+  n'expose pas ;
+- **Linux** : la reprise d'un fichier pid périmé n'est pas atomique.
+
+La proposition repose sur une interface documentée de Node.js,
+`net.Server.listen({ path, exclusive: true })` :
+
+| Système | Point d'écoute | Libération à la mort du processus |
+|---|---|---|
+| Windows | canal nommé `\\.\pipe\geoplacer-<SHA-256 du chemin réel du répertoire, en minuscules>` | par le noyau |
+| Linux | socket de l'espace de noms abstrait (`\0geoplacer-<empreinte>`), documentée par Node.js pour Linux | par le noyau ; aucun fichier ne reste |
+| macOS et autres | socket dans le répertoire de données | le fichier reste : il faut détecter qu'il est périmé (connexion refusée), avec la même course que le fichier pid. Pas une cible de la V1 |
+
+Essai réel sous Windows (Node 22.23.2, processus indépendants) :
+- un second processus est refusé (`EADDRINUSE`) pendant que le premier
+  tient le canal ;
+- le même chemin écrit en majuscules est refusé lui aussi, un autre
+  chemin est accepté ;
+- le canal est libéré après une sortie normale et après un arrêt brutal
+  (5 essais sur 5) ;
+- sur quatre processus lancés en même temps, un seul entre (10 essais sur
+  10).
+
+La socket abstraite Linux n'a pas pu être essayée sur cette machine.
+
+Points à trancher avant de remplacer le verrou :
+- le chemin réel, liens symboliques et casse compris, doit être
+  normalisé de la même façon par toutes les instances ;
+- un répertoire réseau partagé entre machines n'est pas protégé, le canal
+  étant local ;
+- le serveur de canal doit rester ouvert toute la vie de l'instance
+  (`unref()` pour ne pas empêcher l'arrêt) ;
+- le remplacement se ferait avec les tests entre processus existants,
+  adaptés.
+
 **Vérification au chargement** : présence et SHA-256 des deux blobs,
 en-tête et limites, décodage, forme canonique des pixels,
 `quantizedImageHash`, cohérence avec les statistiques. Tout écart donne

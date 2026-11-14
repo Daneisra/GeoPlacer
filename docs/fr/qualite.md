@@ -18,7 +18,7 @@ npm run check                 # tsc, lint, lint:packages, puis test:all (contrô
 cd frontend; npx eslint .; npm run build
 ```
 
-## Tests des paquets (Phase 1B.3 : Vitest, 17 fichiers, 221 tests + 1 exhaustif optionnel)
+## Tests des paquets (Phase 1B.4 : Vitest, 19 fichiers, 258 tests + 1 exhaustif optionnel)
 
 | Paquet | Fichier | Objet |
 |---|---|---|
@@ -36,6 +36,8 @@ cd frontend; npx eslint .; npm run build
 | core | `strategy-directional.test.ts` | Ordres exacts des 4 stratégies directionnelles, 1 × 1, images transparentes, taille des lots, région éligible (y descendant ou ascendant), placement et Y inversé, entrées invalides |
 | core | `strategy-center-random.test.ts` | PCG32 : vecteurs de référence et implémentation BigInt indépendante ; centre (côtés pairs et impairs, trous, tri exact sur images aléatoires, centre de l'image et non de la région) ; aléatoire (permutation, graine, ordre figé de la version 1, répartition) |
 | core | `strategy-color-outline.test.ts` | Couleur par couleur (fréquences, égalités, `colorOrder`, couleurs absentes, comptage sur l'image entière) ; contours (carré plein, trou, autre couleur, formes fines, définition vérifiée sur images aléatoires) |
+| core | `progress.test.ts` | Progression : modèle entièrement correct, incorrect (autre couleur, vide), partiel, pixels inconnus, valeurs invalides, aucun pixel éligible, 1 × 1, non carré, axe y montant, repère différent refusé, placement partiel, coordonnées proches de 2^53, provenance et fraîcheur, entrées invalides ; propriétés contre une implémentation naïve (150 cas) ; indépendance de la stratégie |
+| core | `eta.test.ts` | ETA : 0 pour un modèle terminé (même sans agent), absence d'agent, couleur indisponible, énergie insuffisante, observation incomplète ou ancienne, paramètres invalides, dépassement ; énergie nulle, régénération, cadence, disponibilité, pauses, plusieurs agents ; borne contre une simulation milliseconde par milliseconde ; monotonie |
 | core | `strategy-properties.test.ts` | Propriétés des 8 stratégies sur images aléatoires : chaque pixel peignable exactement une fois, jamais un transparent, déterminisme, taille des lots, région = ordre filtré, placement et sens de l'axe y ; intégration avec le gestionnaire de modèles |
 | adapters-node | `adapters.test.ts` | Même suite de conformité sur le stockage fichiers ; décodage pngjs (palette + tRNS, gris 1/16 bits, entrelacé…) ; disposition des fichiers ; fichiers modifiés sur disque ; réparation sur disque (octets corrompus conservés) ; chemins refusés ; arrêt brutal d'un processus réel ; verrou du répertoire (un processus ; deux processus indépendants ; quatre lancés en même temps ; les deux mécanismes) ; dépendances du paquet |
 | simulator | `package.test.ts` | Résolution de `@geoplacer/core` (valeurs et types) |
@@ -47,7 +49,14 @@ Benchmarks :
 - `npm run bench:core` : résultats dans
   [geometrie-couleurs.md](geometrie-couleurs.md) § 4 ;
 - `npm run bench:templates` : résultats dans [modeles.md](modeles.md) § 6 ;
-- `npm run bench:strategies` : résultats dans [strategies.md](strategies.md) § 3.
+- `npm run bench:strategies` : résultats dans [strategies.md](strategies.md) § 3 ;
+- `npm run bench:color-by-color` : avant et après l'optimisation de la 1B.4,
+  avec vérification de l'ordre ([strategies.md](strategies.md) § 3) ;
+- `npm run bench:progress` : progression et ETA
+  ([progression.md](progression.md) § 4).
+
+Simulation de l'ETA sur d'autres graines :
+`$env:GEOPLACER_ETA_SEED="5"; npx vitest run --root packages/core test/eta.test.ts`.
 
 Mutation vérifiée en 1B.2 : publier le manifeste **avant** d'écrire les
 blobs fait échouer la suite de conformité (scénario « nouvelle source »).
@@ -58,8 +67,22 @@ propriétés (région = ordre filtré, placement).
 
 Délais : trois calculs purs de 1 à 3 s ont un délai explicite de 30 s. Un
 passage complet avait échoué une fois sur 2 fichiers, sans détail
-conservé ; trois passages suivants ont réussi. Cause la plus probable : le
-délai par défaut de 5 s sous charge, non confirmée.
+conservé ; les passages suivants ont réussi. **La cause n'est pas
+établie** : le dépassement du délai de 5 s sous charge reste une
+hypothèse, et l'augmentation du délai n'en est pas une preuve.
+
+**Journaux complets** (Phase 1B.4) : `npm run check:logged` et
+`npm run test:packages:logged` enregistrent toute la sortie (avec la date,
+le commit et la version de Node) dans `test-logs/<date>-<script>.log`,
+réussite comme échec, en conservant le code de sortie
+(`scripts/run-logged.mjs`). Le dossier est ignoré par Git. À utiliser pour
+les contrôles complets, afin qu'un échec intermittent puisse être examiné.
+
+Mutation vérifiée en 1B.4 : compter un pixel `UNKNOWN` comme correct fait
+échouer deux tests de progression. Écraser la sauvegarde lors d'une
+réparation fait échouer quatre tests. Deux assertions de la 1B.3 étaient
+vides (elles lisaient une entrée détachée du stockage mémoire) : elles ont
+été corrigées.
 
 Les garanties de types sont vérifiées par `npm run typecheck:packages` : un
 `@ts-expect-error` devenu inutile fait échouer la vérification. Deux

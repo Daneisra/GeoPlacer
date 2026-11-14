@@ -6,7 +6,16 @@ GeoPlacer est un fork de
 pour GeoPixels, avec un moteur développé et testé **uniquement sur simulateur
 local** (voir l'ADR 0001).
 
-## État actuel : Phase 1B.3, stratégies de dessin
+## État actuel : Phase 1B.4, progression et temps restant
+
+Réalisé en Phase 1B.4 (voir [progression.md](progression.md)) :
+- calcul de progression : pixels corrects, incorrects et inconnus, par
+  couleur, avec la provenance et la fraîcheur de l'instantané ;
+- estimation théorique du temps restant, ou absence d'estimation avec ses
+  raisons ;
+- instantané de toile en mémoire ;
+- color-by-color environ deux fois plus rapide sur les images bruitées ;
+- journaux de tests complets (`npm run check:logged`).
 
 Réalisé en Phase 1B.3 :
 - les huit stratégies de dessin, déterministes et paresseuses (voir

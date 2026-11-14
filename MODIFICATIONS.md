@@ -27,6 +27,23 @@ licence. L'historique Git complet du projet d'origine est conservé.
 - `start.bat` : installation des deux projets par le chemin vérifié.
 - Documentation française (`docs/fr/`, `docs/decisions/`).
 
+## 2026-11-14 — Phase 1B.4 : progression et temps restant
+
+- `packages/core/src/progress` : calcul de progression (correct,
+  incorrect, inconnu, par couleur, provenance et fraîcheur de
+  l'instantané) et estimation théorique du temps restant (durée ou
+  raisons de son absence, hypothèses explicites).
+- `packages/core/src/canvas` : instantané de toile en mémoire.
+- color-by-color : table de couleurs en tableaux typés (même ordre,
+  environ deux fois plus rapide sur le bruit).
+- Tests de non-régression de la règle de génération des réparations ;
+  correction de deux assertions vides de la 1B.3.
+- `scripts/run-logged.mjs`, `npm run check:logged` : journaux de tests
+  complets.
+- Benchmarks `bench:progress` et `bench:color-by-color` ; documentation
+  `docs/fr/progression.md`, analyse de la reprise des stratégies,
+  proposition de verrou multiplateforme, ADR 0002 § 13.
+
 ## 2026-11-14 — Phase 1B.3 : stratégies de dessin et corrections des modèles
 
 - `packages/core/src/strategy` : les huit stratégies (haut→bas, bas→haut,

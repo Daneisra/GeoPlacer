@@ -28,10 +28,13 @@
     "test:packages": "npm run test --workspaces",
     "test:all": "npm run typecheck:packages && npm run test:legacy && npm run test:packages",
     "check": "tsc --noEmit && npm run lint && npm run lint:packages && npm run test:all",
+    "check:logged": "node scripts/run-logged.mjs check",
+    "test:packages:logged": "node scripts/run-logged.mjs test:packages",
     "bench:core": "node --expose-gc --import tsx packages/core/bench/geometry-colors.bench.ts",
     "bench:templates": "npm run build:packages && node --import tsx packages/adapters-node/bench/templates.bench.ts",
     "bench:strategies": "node --expose-gc --import tsx packages/core/bench/strategies.bench.ts",
     "bench:color-by-color": "node --expose-gc --import tsx packages/core/bench/color-by-color.bench.ts",
+    "bench:progress": "node --expose-gc --import tsx packages/core/bench/progress.bench.ts",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage"
   },

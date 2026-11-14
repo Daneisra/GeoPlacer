@@ -403,3 +403,22 @@ Précisions sur les stratégies (§ 4) :
 
 Détails : [strategies.md](../fr/strategies.md) et
 [modeles.md](../fr/modeles.md).
+
+## 13. Mise en œuvre de la Phase 1B.4 : contrats v4, progression et ETA
+
+`CORE_CONTRACT_VERSION` passe à **4**. Les contrats de progression et
+d'ETA n'avaient encore aucune implémentation, et rien n'est persisté :
+aucune migration n'est nécessaire.
+
+| Élément | Changement | Raison |
+|---|---|---|
+| `CanvasSnapshot.coordinateSystem` | Nouveau champ obligatoire | Repère explicite : un instantané dans un autre repère que le modèle est refusé |
+| `ProgressSnapshot` | `wrongColor`, `missing`, `unknown` complétés par `incorrect`, `invalidObservations`, `excluded`, `conformityPercent` et `coveragePercent` (null si aucun pixel éligible), `completion`, `byColor` en tableau trié, `basis` avec nature et fraîcheur | Distinguer l'incorrect connu de l'inconnu ; aucune division par zéro ; provenance et ancienneté |
+| `ProgressCalculator.compute` | Prend un `ProgressTemplate` (image, placement, repère), sans stratégie | La progression ne dépend pas de l'ordre de dessin |
+| `FreshnessPolicy` | Par source d'instantané, sans valeur par défaut | Pas de seuil arbitraire commun |
+| `EtaEstimator.estimate` | Remplacé : `(progression, agents, paramètres, now) → EtaResult` (durée ou `null` avec raisons, hypothèses, répartition) | L'ancienne signature dépendait de `ResourceManager`, prévu en 1B.5, et ne donnait aucune raison |
+| `createArraySnapshot` | Nouveau (`src/canvas`) | Aucun instantané n'était encore implémenté |
+
+Détails : [progression.md](../fr/progression.md). L'analyse de la reprise
+des stratégies, à trancher avant la 1B.6, est dans
+[strategies.md](../fr/strategies.md) § 4.

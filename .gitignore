@@ -29,3 +29,5 @@ dist/
 *.js.map
 # TypeScript incremental build info
 *.tsbuildinfo
+# Complete test logs (scripts/run-logged.mjs)
+test-logs/

@@ -102,6 +102,11 @@ Tri par dénombrement : une passe de comptage, puis une passe de placement
 dans un seul `Uint32Array`. Seules les couleurs distinctes, quelques
 dizaines au plus, sont triées.
 
+Depuis la Phase 1B.4, chaque couleur trouve son identifiant dans une petite
+table de hachage en tableaux typés (`strategy/color-table.ts`) au lieu
+d'un `Map`. Quand la région est l'image entière, il n'y a que deux passes
+au lieu de trois. L'ordre produit est identique (version 1).
+
 ### Contours d'abord
 
 Un pixel peignable est un **contour** si au moins un de ses quatre voisins
@@ -163,16 +168,20 @@ Images de 32 couleurs :
 | Couleur par couleur | 631 / 3,1 s | 646 / 3,2 s | 585 / 2,9 s | 67,0 / 63,0 |
 | Contours d'abord | 0,9 / 1,2 | 610 / 542 | 553 / 482 | 0,3 / 0,8 |
 
+Les lignes « Couleur par couleur » ci-dessus sont celles de la Phase 1B.3,
+avant l'optimisation (voir plus bas).
+
 **Objectif de 200 ms pour le premier lot sur 2000 × 2000** :
-- **Atteint** par sept stratégies sur huit :
+- **Atteint** par sept stratégies sur huit en Phase 1B.3 :
   - moins de 10 ms pour les quatre directionnelles, le centre et les
     contours ;
   - 56 à 97 ms pour l'aléatoire.
-- **Non atteint par couleur par couleur sur le bruit** : 531 à 549 ms. Sur
-  le pixel art, 146 à 179 ms, juste sous l'objectif.
+- Couleur par couleur sur le bruit : 531 à 549 ms en Phase 1B.3. Après
+  l'optimisation de la Phase 1B.4, deux fois plus rapide, mais la durée
+  absolue dépend fortement de la charge de la machine (voir ci-dessous).
 
-**Pourquoi couleur par couleur est lent sur le bruit** (mesuré, non
-optimisé à ce stade) :
+**Pourquoi couleur par couleur était lent sur le bruit** (mesuré en
+Phase 1B.3) :
 - **Ordre complet requis avant le premier lot** :
   - le rang des couleurs dépend des fréquences sur **toute** l'image ;
   - les pixels de la première couleur sont dispersés partout.
@@ -186,11 +195,34 @@ optimisé à ce stade) :
 - Mesure isolée sur 2000 × 2000 bruit : le comptage seul prend 180 à
   250 ms, une passe de recherche dans le `Map` 117 à 140 ms.
 
-Pistes possibles, à valider, sans changer l'ordre produit :
-1. Remplacer le `Map` par une petite table de hachage en tableaux typés.
-   L'image quantifiée a au plus quelques dizaines de couleurs.
-2. Fusionner les deux passes de comptage quand la région est l'image
-   entière (cas le plus courant).
+**Optimisation de la Phase 1B.4** (`npm run bench:color-by-color`) :
+- **Méthode** : l'ancienne implémentation est conservée dans le benchmark
+  comme référence. Avant toute mesure, l'ordre des deux versions est
+  comparé sur les images complètes, avec une région et avec un
+  `colorOrder` : il est identique dans tous les cas. Les deux versions
+  s'exécutent ensuite en alternance dans le même processus (médiane de 7),
+  de sorte que la charge de la machine les touche également.
+- **Résultat**, premier lot (curseur créé et 1 000 premiers index), sur
+  deux sessions comparant l'ancienne version à la version retenue :
+
+| Image | Avant / après (2000²) | Gain | Avant / après (4096²) | Gain |
+|---|---|---|---|---|
+| Uniforme | 60–108 / 64–116 ms | ×0,93 (neutre) | 257–493 / 238–473 ms | ×1,04 à ×1,08 |
+| Pixel art | 83–156 / 80–137 ms | ×1,04 à ×1,14 | 337–608 / 268–524 ms | ×1,16 à ×1,26 |
+| Bruit | 303–532 / 149–257 ms | **×2,03 à ×2,07** | 1,3–3,3 / 0,58–1,64 s | **×2,02 à ×2,31** |
+
+- **Mémoire supplémentaire** : quelques Ko pour la table. Les écarts
+  mesurés (jusqu'à 4 Mo) varient d'une exécution à l'autre sans dépendre
+  de la taille de l'image : c'est l'activité du tas JS.
+- **Les durées absolues varient presque du simple au double** selon la
+  charge de la machine. Le bruit en 2000 × 2000 passe de 303 à **149 ms**
+  dans la session la moins chargée, sous l'objectif de 200 ms, et de 532 à
+  257 ms dans l'autre. Le rapport de gain, lui, reste stable.
+- **Variante écartée** : mémoriser l'identifiant de couleur de chaque
+  pixel (1 octet par pixel) pour éviter la seconde recherche. Comparée
+  directement, elle n'apportait rien sur le bruit (352 contre 363 ms) et
+  ralentissait l'uniforme (168 contre 112 ms) et le pixel art (244 contre
+  121 ms).
 
 **Autres constats** :
 - **Centre vers l'extérieur** : premier lot immédiat, mais l'ordre complet
@@ -215,14 +247,55 @@ Pistes possibles, à valider, sans changer l'ordre produit :
   de 2 Mo, quelle que soit la taille.
 - Le déterminisme n'a été dégradé nulle part pour gagner du temps.
 
-## 4. Limites connues
+## 4. Reprise d'un ordre : analyse (à décider avant la Phase 1B.6)
 
-- **Couleur par couleur** dépasse l'objectif de 200 ms pour le premier
-  lot sur une image bruitée de 2000 × 2000 (voir § 3). Optimisation
-  possible, non faite, à valider.
-- **Identifiant** `outline-first` : la demande de la Phase 1B.3 écrit
-  `outlines-first`. L'identifiant du contrat et des manifestes est
-  conservé ; à confirmer.
+**Le problème** : un curseur ne fait qu'avancer. Pour reprendre un modèle
+presque terminé, ou repeindre des pixels abîmés en début d'ordre, il faut
+savoir où se situe chaque pixel restant dans l'ordre. L'objectif de
+l'ADR 0002 pour le `WorkPlanner` est un `nextBatch` sous 200 ms sur
+2000 × 2000 fait à 99 %. Or l'ordre complet coûte en 4096 × 4096 :
+7 à 13 s pour le centre, 5 à 6,5 s pour l'aléatoire.
+
+**Constat qui simplifie tout** : `nextBatch` n'a pas besoin de l'ordre
+complet. Il doit choisir, parmi les pixels restant à peindre (connus par
+une comparaison avec la toile, comme la progression : 0,1 à 0,2 s en
+2000²), les k premiers selon l'ordre. Il suffit donc d'une **clé de
+comparaison par pixel**, pas de la position de chaque pixel dans l'ordre.
+
+| Stratégie | Clé calculable en O(1), sans mémoire |
+|---|---|
+| Directionnelles | (ligne, colonne) ou (colonne, ligne), selon le sens |
+| Centre | (d², index) |
+| Couleur par couleur | (rang de la couleur, index) ; rangs calculés une fois par révision |
+| Contours | (contour ? 0 : 1, index) ; test du contour sur 4 voisins |
+| Aléatoire (Fisher-Yates, version 1) | **aucune** : la position d'un pixel dépend de tout le mélange |
+
+| Solution | Mémoire | Temps de reprise | Déterminisme | Remarques |
+|---|---|---|---|---|
+| **1. Ordre mis en cache** (calculé une fois par révision, stratégie et graine) | 4 o par pixel éligible (64 Mo en 4096²), plus le même volume sur disque s'il est persistant | O(1) pour retrouver une position, mais le premier calcul reste à payer (jusqu'à 13 s) | Oui, avec une clé de cache (révision, stratégie, version, graine) | Le plus simple ; mémoire importante pour plusieurs modèles |
+| **2. Curseur persistant** (état du curseur enregistré) | Directionnelles et contours : quelques octets. Centre : 2 entiers par ligne (32 Ko en 4096²). Aléatoire : toute la liste mélangée (64 Mo) | Immédiat | Oui | Ne voit pas les pixels **déjà dépassés** qui ont été abîmés depuis : il faut quand même repasser sur tout l'ordre |
+| **3. Génération recalculable par morceaux** (clé de tri par pixel) | Aucune, sauf la sélection des k meilleurs (O(k)) | Une comparaison avec la toile, O(n) linéaire ; chaque pixel restant est classé par sa clé | Oui | Exige une clé en O(1) : impossible pour l'aléatoire de la version 1, possible avec un aléatoire « version 2 » qui trie par clé pseudo-aléatoire (hachage de la graine et de l'index, ou permutation de Feistel). Cette version 2 changerait l'ordre produit |
+| **4. Index ou points de reprise** (état du curseur tous les N pixels) | Centre : un état (32 Ko) par point de reprise. Aléatoire : impossible sans la liste complète | Avancer au plus N pixels depuis le point le plus proche | Oui | Complexe ; résout l'avance rapide, pas les pixels abîmés en amont |
+
+**Recommandation à valider** :
+- solution 3 pour sept stratégies : aucune mémoire, aucune génération
+  complète, et elle traite naturellement les pixels abîmés n'importe où
+  dans l'ordre ;
+- pour l'aléatoire, deux voies :
+  - une **version 2** à clé de hachage, qui change l'ordre des modèles
+    existants ;
+  - ou garder la version 1 avec la solution 1 (cache de 4 octets par
+    pixel), limitée à l'aléatoire.
+- Le choix entre les deux est à faire avant la Phase 1B.6. Un prototype
+  de mesure du `nextBatch` (comparaison avec la toile puis sélection des
+  k meilleurs) peut confirmer les 200 ms avant de décider.
+
+## 5. Limites connues
+
+- **Couleur par couleur** sur une image bruitée de 2000 × 2000 : 149 ms
+  sur une machine peu chargée après l'optimisation de la 1B.4, mais 257 ms
+  quand elle est chargée ; l'objectif de 200 ms n'est donc pas garanti.
+- **Identifiant** `outline-first` : conservé (décision du 14/11/2026).
 - **Ordre complet coûteux** pour le centre et l'aléatoire en 4096 × 4096
   (§ 3) : la reprise d'un modèle presque terminé n'est pas encore résolue.
 - **Ordre de génération seulement** : aucune comparaison avec la toile

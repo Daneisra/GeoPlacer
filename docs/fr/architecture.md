@@ -1,10 +1,12 @@
 # Architecture de GeoPlacer
 
-État : **Phase 1B.3**. Les contrats existent depuis la 1B.0 ; la géométrie,
+État : **Phase 1B.4**. Les contrats existent depuis la 1B.0 ; la géométrie,
 les couleurs et les palettes sont implémentées en 1B.1 (voir
 [geometrie-couleurs.md](geometrie-couleurs.md)) ; le gestionnaire de
 modèles et sa persistance en 1B.2 (voir [modeles.md](modeles.md)) ; les
-huit stratégies de dessin en 1B.3 (voir [strategies.md](strategies.md)).
+huit stratégies de dessin en 1B.3 (voir [strategies.md](strategies.md)) ;
+la progression et le temps restant en 1B.4 (voir
+[progression.md](progression.md)).
 Le serveur et l'interface hérités de Wplacer fonctionnent comme avant.
 
 ## Arborescence
@@ -20,7 +22,9 @@ GeoPlacer/
 │   │   │   ├── color/            RVB, OKLab, distances (1B.1)
 │   │   │   ├── palette/          palettes par agent, plus proche couleur, quantification (1B.1)
 │   │   │   ├── template/         gestionnaire de modèles, manifeste, révisions, stockage mémoire (1B.2)
-│   │   │   └── strategy/         8 stratégies de dessin, région éligible, PCG32 (1B.3)
+│   │   │   ├── strategy/         8 stratégies de dessin, région éligible, PCG32 (1B.3)
+│   │   │   ├── canvas/           instantané de toile en mémoire (1B.4)
+│   │   │   └── progress/         progression et estimation du temps restant (1B.4)
 │   │   ├── bench/                benchmarks (npm run bench:core, npm run bench:strategies)
 │   │   ├── test/                 Vitest (dont la suite de conformité des stockages)
 │   │   ├── tsconfig.json         compilation (sans types Node ni DOM)
@@ -30,6 +34,7 @@ GeoPlacer/
 │   │                             de données (1B.3), codec PNG (pngjs), SHA-256, UUID, horloge ;
 │   │                             benchmark npm run bench:templates (1B.2)
 │   └── simulator/                @geoplacer/simulator (squelette, dépend de core)
+├── scripts/run-logged.mjs        contrôles avec journal complet dans test-logs/ (1B.4)
 ├── src/                          serveur hérité (Express, Jest) — inchangé
 ├── frontend/                     interface React héritée — inchangée
 ├── tsconfig.base.json            configuration stricte commune aux paquets
