@@ -6,6 +6,7 @@ export {
   checkEnergy,
   derivedKind,
   operationCost,
+  paintingCapacity,
   timeUntilEnergy,
   type EnergyCheck,
   type ResourceOperation,

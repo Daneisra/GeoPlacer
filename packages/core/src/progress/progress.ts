@@ -62,12 +62,12 @@ function assertPolicies(options: ProgressOptions): void {
   }
 }
 
-/** Age of a snapshot against the policy of its source (no policy: unchecked). */
+/** Age of a snapshot against the policy of its source (no policy: not evaluated). */
 export function snapshotFreshness(snapshot: Pick<CanvasSnapshot, 'source' | 'observedAt'>, now: Timestamp, options: ProgressOptions = {}): SnapshotFreshness {
   const ageMs = now - snapshot.observedAt;
   const maxAgeMs = options.freshness?.[snapshot.source]?.maxAgeMs ?? null;
   if (ageMs < 0) return { status: 'future', ageMs, maxAgeMs };
-  if (maxAgeMs === null) return { status: 'unchecked', ageMs, maxAgeMs };
+  if (maxAgeMs === null) return { status: 'not-evaluated', ageMs, maxAgeMs };
   return { status: ageMs > maxAgeMs ? 'stale' : 'fresh', ageMs, maxAgeMs };
 }
 

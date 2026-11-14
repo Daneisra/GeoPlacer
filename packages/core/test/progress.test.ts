@@ -168,7 +168,7 @@ describe('ProgressCalculator: provenance and freshness', () => {
 
   it('keeps the source and date; an imported image is an observation, never a live reading', () => {
     const imported = computeProgress(t, snapshot(big, down, painted(t), { source: 'imported-snapshot', observedAt: 5000 }), 9000);
-    expect(imported.basis).toEqual({ source: 'imported-snapshot', kind: 'imported-observation', observedAt: 5000, freshness: { status: 'unchecked', ageMs: 4000, maxAgeMs: null } });
+    expect(imported.basis).toEqual({ source: 'imported-snapshot', kind: 'imported-observation', observedAt: 5000, freshness: { status: 'not-evaluated', ageMs: 4000, maxAgeMs: null } });
     expect(imported.computedAt).toBe(9000);
     const simulated = computeProgress(t, snapshot(big, down, painted(t)), 1000);
     expect(simulated.basis.kind).toBe('simulation');
@@ -180,7 +180,7 @@ describe('ProgressCalculator: provenance and freshness', () => {
     expect(at(50_000, 'imported-snapshot')).toEqual({ status: 'fresh', ageMs: 50_000, maxAgeMs: 60_000 });
     expect(at(40_000, 'imported-snapshot')).toEqual({ status: 'fresh', ageMs: 60_000, maxAgeMs: 60_000 });
     expect(at(39_999, 'imported-snapshot')).toEqual({ status: 'stale', ageMs: 60_001, maxAgeMs: 60_000 });
-    expect(at(0, 'simulated').status).toBe('unchecked');
+    expect(at(0, 'simulated').status).toBe('not-evaluated');
     expect(snapshotFreshness({ source: 'simulated', observedAt: 200 }, 100)).toEqual({ status: 'future', ageMs: -100, maxAgeMs: null });
   });
 

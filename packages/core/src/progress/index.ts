@@ -5,4 +5,4 @@ export {
   snapshotFreshness,
   type ProgressErrorCode,
 } from './progress.js';
-export { ETA_ASSUMPTIONS, createEtaEstimator, estimateEta } from './eta.js';
+export { ETA_ASSUMPTIONS, createEtaEstimator, estimateEta, etaAgentsFrom } from './eta.js';

@@ -189,3 +189,61 @@ export function applyOperation(
   const kind: ResourceStateKind = mode === 'simulated' ? 'simulated' : derivedKind(before.kind, op.at, now);
   return { ...next, kind };
 }
+
+// ───────────────────────── Painting capacity (shared with the ETA) ─────────────────────────
+
+const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+
+/**
+ * Pixels an agent can finish within `activeMs` of painting time from
+ * `state` (energy already regenerated to the start), painting one pixel at
+ * a time, at most one every `msPerPixel` (C), each costing the rules'
+ * costPerPixel (k). Pessimistic schedule, the one of the ETA:
+ * - first B = floor(energy / k) pixels from the current energy: pixel j
+ *   (1..B) finishes at j x C;
+ * - then the regeneration phase is taken as unknown and the leftover
+ *   energy as zero: i more pixels need ceil(i x k / A) ticks of the
+ *   interval R, counted from the end of the burst, where A = min(regenAmount,
+ *   capacity - k + 1) is the energy a tick surely adds while the agent waits
+ *   (energy is capped at the capacity); pixel
+ *   j after the burst starts at max over i <= j of (ceil(i k / A) R +
+ *   (j - i) C) and finishes C later;
+ * - an agent whose capacity is below k never regenerates enough: burst only.
+ * With A = 1 this is exactly the Phase 1B.4 bound j x max(C, k R) +
+ * min(C, k R). Regeneration during the burst is ignored (pessimistic).
+ */
+export function paintingCapacity(rules: ResourceRules, state: AgentResourceState, activeMs: number, msPerPixel: number): number {
+  checkRules(rules, state);
+  const k = rules.energy.costPerPixel;
+  const C = msPerPixel;
+  const burst = Math.floor(state.energy / k);
+  const burstTime = burst * C;
+  if (C > 0 && activeMs < burstTime) return Math.floor(activeMs / C);
+  const capacity = capacityOf(rules, state.upgrades);
+  if (capacity < k) return burst;
+  const tau = activeMs - burstTime;
+  const R = regenIntervalOf(rules, state.upgrades);
+  // Usable energy per tick: energy is capped at the capacity, so an agent
+  // waiting with up to k - 1 left gains at least min(A, capacity - k + 1).
+  const A = Math.min(rules.energy.regenAmount, capacity - k + 1);
+  // f(i) = ceil(i k / A) R - i C is periodic up to a drift: f(i + p) = f(i) + delta.
+  const g = gcd(k, A);
+  const p = A / g;
+  const delta = (k / g) * R - p * C;
+  const finish = (j: number): number => {
+    let best = -Infinity;
+    for (let r = 1; r <= Math.min(p, j); r++) {
+      const q = delta >= 0 ? Math.floor((j - r) / p) : 0;
+      best = Math.max(best, Math.ceil((r * k) / A) * R - r * C + q * delta);
+    }
+    return j * C + best + C;
+  };
+  let lo = 0;
+  let hi = Math.min(Number.MAX_SAFE_INTEGER, Math.floor((tau * A) / (k * R)) + 1, C > 0 ? Math.floor(tau / C) + 1 : Number.MAX_SAFE_INTEGER);
+  while (lo < hi) {
+    const mid = lo + Math.ceil((hi - lo) / 2);
+    if (finish(mid) <= tau) lo = mid;
+    else hi = mid - 1;
+  }
+  return burst + lo;
+}

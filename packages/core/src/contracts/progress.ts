@@ -10,6 +10,7 @@
 
 import type { CanvasSnapshot, CanvasSource } from './canvas.js';
 import type { AgentId, Rgb, Timestamp } from './primitives.js';
+import type { AgentResourceState, ResourceRules } from './resources.js';
 import type { Template } from './template.js';
 
 // ───────────────────────── Snapshot provenance and freshness ─────────────────────────
@@ -28,16 +29,17 @@ export interface FreshnessPolicy {
 
 /**
  * fresh / stale: age within / beyond the policy of the snapshot's source;
- * unchecked: no policy for that source; future: observedAt is after `now`
- * (inconsistent clocks).
+ * not-evaluated: no policy for that source, so the age was NOT judged (the
+ * snapshot is never presented as current: ageMs says how old it is);
+ * future: observedAt is after `now` (inconsistent clocks).
  */
-export type FreshnessStatus = 'fresh' | 'stale' | 'unchecked' | 'future';
+export type FreshnessStatus = 'fresh' | 'stale' | 'not-evaluated' | 'future';
 
 export interface SnapshotFreshness {
   readonly status: FreshnessStatus;
   /** now - observedAt (negative when `future`). */
   readonly ageMs: number;
-  /** Policy applied, or null when unchecked. */
+  /** Policy applied, or null when not evaluated. */
   readonly maxAgeMs: number | null;
 }
 
@@ -98,7 +100,7 @@ export interface ProgressSnapshot extends PixelCounts {
 }
 
 export interface ProgressOptions {
-  /** Freshness policy by snapshot source; a source without policy is reported `unchecked`. */
+  /** Freshness policy by snapshot source; a source without policy is reported `not-evaluated`. */
   readonly freshness?: Readonly<Partial<Record<CanvasSource, FreshnessPolicy>>>;
 }
 
@@ -116,19 +118,15 @@ export type ProgressTemplate = Pick<Template, 'id' | 'revision' | 'image' | 'pla
 
 // ───────────────────────── ETA ─────────────────────────
 
-/** Resources of one agent, as observed (agents may differ in everything). */
+/**
+ * One agent for the ETA: its resource state (observed or computed by the
+ * ResourceManager, the single source of energy predictions). Agents differ
+ * by their states (energy, upgrade levels, palette, availability); they
+ * share the rules of the provider.
+ */
 export interface EtaAgent {
   readonly id: AgentId;
-  /** Energy at observedAt. */
-  readonly energy: number;
-  readonly maxEnergy: number;
-  /** Milliseconds to regain one energy point. */
-  readonly regenIntervalMs: number;
-  readonly observedAt: Timestamp;
-  /** The agent's own palette. */
-  readonly unlockedColors: ReadonlySet<Rgb>;
-  /** Theoretical availability: the agent cannot paint before this time (default: now). */
-  readonly availableFrom?: Timestamp;
+  readonly state: AgentResourceState;
 }
 
 /** Configured pause window [start, end): nobody paints. */
@@ -138,8 +136,8 @@ export interface EtaPause {
 }
 
 export interface EtaParameters {
-  /** Energy spent per painted pixel (positive integer). */
-  readonly energyPerPixel: number;
+  /** Rules of the provider: energy cost per pixel, capacity, regeneration (one rule set per estimate). */
+  readonly rules: ResourceRules;
   /** Cadence: minimum milliseconds between two pixels of the same agent (0 = no limit). */
   readonly msPerPixel: number;
   /** Below this observation coverage of the eligible pixels, no ETA (no default: the caller decides). */
@@ -175,6 +173,15 @@ export interface EtaAssignment {
   readonly pixels: number;
 }
 
+export interface EtaWarning {
+  /**
+   * FRESHNESS_NOT_EVALUATED: no freshness policy for the snapshot's source;
+   * SIMULATED_RESOURCES: computed on simulated resource states (hypothetical).
+   */
+  readonly code: 'FRESHNESS_NOT_EVALUATED' | 'SIMULATED_RESOURCES';
+  readonly message: string;
+}
+
 export interface EtaResult {
   /** Always a theoretical estimate under `assumptions`, never a measured performance. */
   readonly kind: 'theoretical-estimate';
@@ -189,6 +196,8 @@ export interface EtaResult {
   /** Split of the work between agents behind the estimate (empty when unavailable or no work). */
   readonly assignments: readonly EtaAssignment[];
   readonly assumptions: readonly string[];
+  /** Conditions the reader must see; they do not prevent the estimate. */
+  readonly warnings: readonly EtaWarning[];
   readonly basis: ProgressBasis;
   readonly computedAt: Timestamp;
 }

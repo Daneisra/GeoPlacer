@@ -1,14 +1,33 @@
 import { describe, expect, it } from 'vitest';
-import type { AgentId, ColorProgress, EtaAgent, EtaParameters, ProgressSnapshot, Rgb, TemplateId } from '../src/index.js';
-import { ETA_ASSUMPTIONS, estimateEta } from '../src/index.js';
+import type { AgentId, AgentResourceState, ColorProgress, ProgressSnapshot, Rgb, TemplateId } from '../src/index.js';
+import {
+  ETA_ASSUMPTIONS,
+  advance,
+  applyOperation,
+  createResourceManager,
+  estimateEta as estimateEtaV5,
+  etaAgentsFrom,
+  stateFromObservation,
+} from '../src/index.js';
+import { convertLegacy, type LegacyAgent as EtaAgent, type LegacyParameters as EtaParameters } from './helpers/eta-legacy.js';
+import { SIMULATED_RULES, observation } from './helpers/resources.js';
 import { testRandom } from './helpers/strategy.js';
+
+/**
+ * The 1B.4 cases are kept as written: agents with their own energy model,
+ * converted to one rule set + per-agent upgrade levels (helpers/eta-legacy).
+ */
+function estimateEta(p: ProgressSnapshot, agents: readonly EtaAgent[], parameters: EtaParameters, now: number, regenAmount = 1) {
+  const c = convertLegacy(agents, parameters, now, { colors: [RED, BLUE], regenAmount });
+  return estimateEtaV5(p, c.agents, c.parameters, now);
+}
 
 const RED = 0xff0000 as Rgb;
 const BLUE = 0x0000ff as Rgb;
 const NOW = 1_000_000;
 
 /** Progress with, per color, [correct, incorrect, unknown]. */
-function progress(colors: Array<[Rgb, number, number, number]>, freshness: ProgressSnapshot['basis']['freshness'] = { status: 'unchecked', ageMs: 0, maxAgeMs: null }): ProgressSnapshot {
+function progress(colors: Array<[Rgb, number, number, number]>, freshness: ProgressSnapshot['basis']['freshness'] = { status: 'not-evaluated', ageMs: 0, maxAgeMs: null }): ProgressSnapshot {
   const byColor: ColorProgress[] = colors.map(([color, correct, incorrect, unknown]) => ({
     color,
     total: correct + incorrect + unknown,
@@ -96,30 +115,42 @@ describe('EtaEstimator: availability', () => {
     expect(codes(estimateEta(future, [agent('a')], params, NOW))).toEqual(['INVALID_PARAMETERS']);
   });
 
-  it('reports every invalid parameter or resource instead of guessing', () => {
+  it('reports every invalid parameter, rule or resource state instead of guessing', () => {
     const p = progress([[RED, 0, 2, 0]]);
-    const bad: Array<[Partial<EtaParameters>, Partial<EtaAgent>]> = [
-      [{ energyPerPixel: 0 }, {}],
-      [{ energyPerPixel: 1.5 }, {}],
-      [{ msPerPixel: -1 }, {}],
-      [{ minCoveragePercent: 101 }, {}],
-      [{ minCoveragePercent: Number.NaN }, {}],
-      [{ pauses: [{ start: 10, end: 10 }] }, {}],
-      [{}, { energy: -1 }],
-      [{}, { energy: Number.NaN }],
-      [{}, { regenIntervalMs: 0 }],
-      [{}, { maxEnergy: Infinity }],
-      [{}, { observedAt: NOW + 1 }],
-      [{}, { availableFrom: -5 }],
-      [{}, { unlockedColors: [RED] as never }],
-    ];
-    for (const [pp, aa] of bad) {
-      const r = estimateEta(p, [agent('a', aa)], { ...params, ...pp }, NOW);
-      expect(r.durationMs, JSON.stringify([pp, aa])).toBeNull();
-      expect(codes(r)).toContain('INVALID_PARAMETERS');
-    }
-    expect(codes(estimateEta(p, [agent('a'), agent('a')], params, NOW))).toEqual(['INVALID_PARAMETERS']);
-    expect(codes(estimateEta(p, [agent('a')], params, -1))).toContain('INVALID_PARAMETERS');
+    const c = convertLegacy([agent('a')], params, NOW, { colors: [RED, BLUE] });
+    const state = c.agents[0]!.state;
+    const run = (agents: typeof c.agents, parameters = c.parameters, now = NOW) => codes(estimateEtaV5(p, agents, parameters, now));
+    const badStates: Array<Record<string, unknown>> = [{ energy: -1 }, { energy: Number.NaN }, { currency: -3 }, { regenProgressMs: 5000 }, { kind: 'guessed' }, { unlockedColors: [RED, BLUE] }];
+    for (const patch of badStates) expect(run([{ id: state.agent, state: { ...state, ...patch } as AgentResourceState }]), JSON.stringify(patch)).toEqual(['INVALID_PARAMETERS']);
+    expect(run([{ id: 'other' as AgentId, state }])).toEqual(['INVALID_PARAMETERS']); // the state of another agent
+    expect(run([{ id: state.agent, state: { ...state, at: NOW + 1, observedAt: NOW + 1 } }])).toEqual(['INVALID_PARAMETERS']); // dated after now
+    expect(run([{ id: state.agent, state }, { id: state.agent, state }])).toEqual(['INVALID_PARAMETERS']);
+    expect(run(c.agents, { ...c.parameters, rules: { ...c.rules, version: 0 } })).toContain('INVALID_PARAMETERS');
+    expect(run(c.agents, { ...c.parameters, rules: { ...c.rules, version: 2 } })).toEqual(['INVALID_PARAMETERS']); // states made for other rules
+    expect(run(c.agents, { ...c.parameters, msPerPixel: -1 })).toEqual(['INVALID_PARAMETERS']);
+    expect(run(c.agents, { ...c.parameters, minCoveragePercent: 101 })).toEqual(['INVALID_PARAMETERS', 'INSUFFICIENT_OBSERVATION']);
+    expect(run(c.agents, { ...c.parameters, minCoveragePercent: Number.NaN })).toEqual(['INVALID_PARAMETERS']);
+    expect(run(c.agents, { ...c.parameters, pauses: [{ start: 10, end: 10 }] })).toEqual(['INVALID_PARAMETERS']);
+    expect(run(c.agents, c.parameters, -1)).toContain('INVALID_PARAMETERS');
+  });
+
+  it('treats an agent unavailable without end as absent, and one with an end as starting then', () => {
+    const p = progress([[RED, 0, 1, 0]]);
+    const c = convertLegacy([agent('a', { energy: 5 })], params, NOW, { colors: [RED, BLUE] });
+    const s = c.agents[0]!.state;
+    expect(codes(estimateEtaV5(p, [{ id: s.agent, state: { ...s, availability: { status: 'unavailable', until: null } } }], c.parameters, NOW))).toEqual(['NO_AGENT']);
+    expect(estimateEtaV5(p, [{ id: s.agent, state: { ...s, availability: { status: 'unavailable', until: NOW + 700 } } }], c.parameters, NOW).durationMs).toBe(700);
+  });
+
+  it('warns when the snapshot freshness was not evaluated, or the resources are simulated', () => {
+    const c = convertLegacy([agent('a', { energy: 5 })], params, NOW, { colors: [RED, BLUE] });
+    const r = estimateEtaV5(progress([[RED, 0, 1, 0]]), c.agents, c.parameters, NOW);
+    expect(r.durationMs).toBe(0);
+    expect(r.warnings.map((w) => w.code)).toEqual(['FRESHNESS_NOT_EVALUATED']);
+    const fresh = progress([[RED, 0, 1, 0]], { status: 'fresh', ageMs: 10, maxAgeMs: 100 });
+    expect(estimateEtaV5(fresh, c.agents, c.parameters, NOW).warnings).toEqual([]);
+    const simulated = [{ ...c.agents[0]!, state: { ...c.agents[0]!.state, kind: 'simulated' as const } }];
+    expect(estimateEtaV5(fresh, simulated, c.parameters, NOW).warnings.map((w) => w.code)).toEqual(['SIMULATED_RESOURCES']);
   });
 
   it('is null with OUT_OF_RANGE beyond the safe millisecond range', () => {
@@ -172,7 +203,7 @@ describe('EtaEstimator: values', () => {
  * during bursts and pauses): what the estimate's pessimistic model must
  * never undercut.
  */
-function simulate(pixels: number, a: EtaAgent, p: EtaParameters, now: number): number {
+function simulate(pixels: number, a: EtaAgent, p: EtaParameters, now: number, regenAmount = 1): number {
   let energy = a.energy;
   let nextRegen = a.observedAt + a.regenIntervalMs;
   const start = Math.max(now, a.availableFrom ?? now);
@@ -181,7 +212,7 @@ function simulate(pixels: number, a: EtaAgent, p: EtaParameters, now: number): n
   let finish = now;
   for (let t = a.observedAt; done < pixels; t++) {
     while (t >= nextRegen) {
-      if (energy < a.maxEnergy) energy++;
+      if (energy < a.maxEnergy) energy = Math.min(a.maxEnergy, energy + regenAmount);
       nextRegen += a.regenIntervalMs;
     }
     const paused = (p.pauses ?? []).some((w) => t >= w.start && t < w.end);
@@ -196,6 +227,68 @@ function simulate(pixels: number, a: EtaAgent, p: EtaParameters, now: number): n
   return finish - now;
 }
 
+/** Second simulation: paints by stepping the SHARED resource model (advance + recorded spends), millisecond by millisecond. */
+function simulateShared(pixels: number, state: AgentResourceState, msPerPixel: number, now: number): number {
+  const rules = SIMULATED_RULES;
+  let s = advance(rules, state, now, now);
+  let done = 0;
+  let nextFree = now;
+  let finish = now;
+  for (let t = now; done < pixels; t++) {
+    s = advance(rules, s, t, t);
+    while (t >= nextFree && s.energy >= rules.energy.costPerPixel && done < pixels) {
+      s = applyOperation(rules, s, { type: 'spend', id: `p${done}`, at: t, energy: rules.energy.costPerPixel }, t, 'recorded');
+      done++;
+      nextFree = t + msPerPixel;
+      finish = Math.max(finish, t + msPerPixel);
+      if (msPerPixel > 0) break;
+    }
+  }
+  return finish - now;
+}
+
+describe('EtaEstimator: on the ResourceManager and the shared energy model', () => {
+  const p = (n: number) => progress([[0xff0000 as Rgb, 0, n, 0]], { status: 'fresh', ageMs: 0, maxAgeMs: 1000 });
+  const parameters = { rules: SIMULATED_RULES, msPerPixel: 0, minCoveragePercent: 0 };
+
+  it('takes its agents from the ResourceManager and is recomputed after resource changes', () => {
+    const m = createResourceManager(SIMULATED_RULES);
+    m.observe(observation({ agent: 'x' as AgentId, observedAt: NOW, energy: 4, regenProgressMs: 0 }));
+    const before = estimateEtaV5(p(6), etaAgentsFrom(m, NOW), parameters, NOW).durationMs!;
+    expect(before).toBe(2000); // 4 now, then 2 ticks of 1000 ms
+    // A spend at the observation time is reflected by it; one later is applied.
+    expect(m.recordSpend('x' as AgentId, { operationId: 'paint-0', energy: 3, at: NOW }, NOW).status).toBe('absorbed-by-observation');
+    expect(m.recordSpend('x' as AgentId, { operationId: 'paint-1', energy: 3, at: NOW + 1 }, NOW + 1).status).toBe('applied');
+    expect(estimateEtaV5(p(6), etaAgentsFrom(m, NOW + 1), parameters, NOW + 1).durationMs).toBe(5000); // 1 now, 5 ticks
+    m.observe(observation({ agent: 'x' as AgentId, observedAt: NOW + 10, energy: 9 }));
+    expect(estimateEtaV5(p(6), etaAgentsFrom(m, NOW + 10), parameters, NOW + 10).durationMs).toBe(0);
+  });
+
+  it('uses each agent palette and simulated upgrades (faster regeneration never lengthens it)', () => {
+    const base = stateFromObservation(SIMULATED_RULES, observation({ energy: 0, currency: 1000 }));
+    const slow = estimateEtaV5(p(5), [{ id: base.agent, state: base }], parameters, NOW).durationMs!;
+    const faster = applyOperation(SIMULATED_RULES, base, { type: 'upgrade-regen-speed', id: 'u', at: NOW }, NOW);
+    const fast = estimateEtaV5(p(5), [{ id: base.agent, state: faster }], parameters, NOW);
+    expect(fast.durationMs!).toBeLessThan(slow);
+    expect(fast.warnings.map((w) => w.code)).toContain('SIMULATED_RESOURCES');
+    const blue = progress([[0x0000ff as Rgb, 0, 1, 0]], { status: 'fresh', ageMs: 0, maxAgeMs: 1000 });
+    expect(codes(estimateEtaV5(blue, [{ id: base.agent, state: base }], parameters, NOW))).toEqual(['COLORS_UNAVAILABLE']);
+    const unlocked = applyOperation(SIMULATED_RULES, base, { type: 'unlock-color', id: 'c', at: NOW, color: 0x0000ff as Rgb }, NOW);
+    expect(estimateEtaV5(blue, [{ id: base.agent, state: unlocked }], parameters, NOW).durationMs).toBe(1000);
+  });
+
+  it('never undercuts a simulation stepping the shared energy model', () => {
+    const pick = testRandom(Number(process.env.GEOPLACER_ETA_SEED ?? 404));
+    for (let k = 0; k < 150; k++) {
+      const pixels = 1 + pick(15);
+      const state = stateFromObservation(SIMULATED_RULES, observation({ energy: pick(11), observedAt: NOW - pick(3000), ...(pick(2) === 0 ? { regenProgressMs: pick(1000) } : {}) }));
+      const msPerPixel = pick(3) * pick(700);
+      const eta = estimateEtaV5(p(pixels), [{ id: state.agent, state }], { ...parameters, msPerPixel }, NOW).durationMs!;
+      expect(simulateShared(pixels, state, msPerPixel, NOW), JSON.stringify({ pixels, msPerPixel, energy: state.energy })).toBeLessThanOrEqual(eta);
+    }
+  });
+});
+
 describe('EtaEstimator: properties', () => {
   it('never undercuts a millisecond simulation of one agent, and matches it when energy covers the work', () => {
     const pick = testRandom(Number(process.env.GEOPLACER_ETA_SEED ?? 77));
@@ -209,10 +302,11 @@ describe('EtaEstimator: properties', () => {
         pauses: pick(2) === 0 ? [] : [{ start: NOW + pick(200), end: NOW + 200 + pick(300) }],
       };
       if (a.maxEnergy < pp.energyPerPixel) continue;
-      const eta = estimateEta(progress([[RED, 0, pixels, 0]]), [a], pp, NOW).durationMs;
-      const where = JSON.stringify({ pixels, a: { ...a, unlockedColors: 0 }, pp });
+      const amount = 1 + pick(3) * pick(2); // 1 to 3 energy per tick
+      const eta = estimateEta(progress([[RED, 0, pixels, 0]]), [a], pp, NOW, amount).durationMs;
+      const where = JSON.stringify({ pixels, a: { ...a, unlockedColors: 0 }, pp, amount });
       expect(eta, where).not.toBeNull();
-      expect(simulate(pixels, a, pp, NOW), where).toBeLessThanOrEqual(eta!);
+      expect(simulate(pixels, a, pp, NOW, amount), where).toBeLessThanOrEqual(eta!);
     }
     // Energy for the whole work, no pause, start now: the model is exact (pixels x cadence).
     // Otherwise it may exceed the simulation by at most one refill wait (unknown regeneration phase).

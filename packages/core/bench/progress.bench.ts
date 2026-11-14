@@ -14,8 +14,8 @@
 
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import type { AgentId, CanvasSnapshot, ProgressTemplate, Rgb, TemplateId, TemplateImage } from '../src/index.js';
-import { TRANSPARENT, TRANSPARENT_U32, UNKNOWN, computeProgress, createArraySnapshot, estimateEta } from '../src/index.js';
+import type { AgentId, CanvasSnapshot, ProgressTemplate, ResourceRules, Rgb, TemplateId, TemplateImage } from '../src/index.js';
+import { TRANSPARENT, TRANSPARENT_U32, UNKNOWN, computeProgress, createArraySnapshot, estimateEta, stateFromObservation } from '../src/index.js';
 
 type Kind = 'uniform' | 'pixel-art' | 'noise';
 
@@ -102,15 +102,30 @@ function eta(size: number): void {
   const template: ProgressTemplate = { id: 'bench' as TemplateId, revision: 1, image, placement: { topLeft: { x: 0, y: 0 } }, coordinateSystem: { yAxis: 'down' } };
   const progress = computeProgress(template, makeSnapshot(image, size), 1);
   const colors = palette(32) as Rgb[];
+  // SYNTHETIC rules for the benchmark (not a real service): agents differ by upgrade levels and palettes.
+  const rules: ResourceRules = {
+    schemaVersion: 1,
+    id: 'bench-simulated',
+    version: 1,
+    energy: { costPerPixel: 1, baseCapacity: 100, regenAmount: 1, regenIntervalMs: 30_000, aboveCapacity: 'keep' },
+    palette: { initialColors: colors, unlockable: [] },
+    upgrades: { maxEnergy: [{ cost: 0, capacityBonus: 50 }, { cost: 0, capacityBonus: 50 }], regenSpeed: [{ cost: 0, regenIntervalMs: 25_000 }, { cost: 0, regenIntervalMs: 20_000 }] },
+    currency: {},
+  };
   const agents = [0, 1, 2].map((k) => ({
     id: `agent-${k}` as AgentId,
-    energy: 10 * k,
-    maxEnergy: 100 + 50 * k,
-    regenIntervalMs: 30_000 - 5_000 * k,
-    observedAt: 0,
-    unlockedColors: new Set(colors.filter((_, i) => i % (k + 1) === 0)),
+    state: stateFromObservation(rules, {
+      type: 'resource-observation',
+      agent: `agent-${k}` as AgentId,
+      observedAt: 0,
+      energy: 10 * k,
+      currency: 0,
+      unlockedColors: colors.filter((_, i) => i % (k + 1) === 0),
+      upgrades: { maxEnergy: k, regenSpeed: k, energyPacks: 0 },
+      availability: { status: 'available' },
+    }),
   }));
-  const parameters = { energyPerPixel: 1, msPerPixel: 500, minCoveragePercent: 90, pauses: [{ start: 3_600_000, end: 7_200_000 }] };
+  const parameters = { rules, msPerPixel: 500, minCoveragePercent: 90, pauses: [{ start: 3_600_000, end: 7_200_000 }] };
   estimateEta(progress, agents, parameters, 1);
   const times: number[] = [];
   let result = estimateEta(progress, agents, parameters, 1);
