@@ -14,16 +14,19 @@ export interface MemoryTemplateStorage extends TemplateStorage {
   readonly state: {
     readonly manifests: Map<string, { current: string | null; backup: string | null }>;
     readonly blobs: Map<string, Uint8Array>;
+    /** Corrupt manifests preserved by replaceManifest (repair), by name. */
+    readonly preserved: Map<string, string>;
   };
 }
 
 export function createMemoryTemplateStorage(): MemoryTemplateStorage {
   const manifests = new Map<string, { current: string | null; backup: string | null }>();
   const blobs = new Map<string, Uint8Array>();
+  const preserved = new Map<string, string>();
   const key = (projectId: ProjectId, id: string): string => `${projectId}/${id}`;
 
   return {
-    state: { manifests, blobs },
+    state: { manifests, blobs, preserved },
 
     async readManifest(projectId: ProjectId, templateId: TemplateId): Promise<ManifestRead> {
       const entry = manifests.get(key(projectId, templateId));
@@ -39,6 +42,20 @@ export function createMemoryTemplateStorage(): MemoryTemplateStorage {
         throw new StorageConflictError(expectedGeneration, actual);
       }
       manifests.set(k, { current: json, backup: entry?.current ?? null });
+    },
+
+    async replaceManifest(projectId: ProjectId, templateId: TemplateId, json: string, expectedCurrent: string | null): Promise<string | null> {
+      const k = key(projectId, templateId);
+      const entry = manifests.get(k);
+      const current = entry?.current ?? null;
+      if (current !== expectedCurrent) throw new StorageConflictError(null, manifestGeneration(current));
+      let name: string | null = null;
+      if (current !== null) {
+        name = `${k}/manifest.json.corrupt-${preserved.size + 1}`;
+        preserved.set(name, current);
+      }
+      manifests.set(k, { current: json, backup: entry?.backup ?? null });
+      return name;
     },
 
     async listTemplates(projectId: ProjectId): Promise<readonly TemplateId[]> {

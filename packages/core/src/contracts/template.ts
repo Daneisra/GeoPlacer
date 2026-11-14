@@ -74,6 +74,20 @@ export interface Template {
   readonly quantizedImageHash: string;
   readonly createdAt: Timestamp;
   readonly updatedAt: Timestamp;
+  /** Derived on every load (never persisted): e.g. a placement that crosses the canvas bounds. */
+  readonly warnings: readonly TemplateWarning[];
+}
+
+/**
+ * Non-blocking condition the user must see. Derived from the revision, never
+ * stored in the manifest.
+ */
+export interface TemplateWarning {
+  /** The template crosses the canvas bounds: its outside pixels are never painted. */
+  readonly code: 'PLACEMENT_PARTIALLY_OUTSIDE';
+  /** Template pixels (transparent ones included) outside the canvas bounds. */
+  readonly pixelsOutside: number;
+  readonly message: string;
 }
 
 // ───────────────────────── Persisted manifest (schema v1) ─────────────────────────
@@ -130,7 +144,6 @@ export interface RevisionRecordV1 {
  * Forward compatibility: optional data added by future v1 code goes into
  * `extensions` (manifest or revision), which readers preserve verbatim; any
  * other unknown field is rejected (a newer layout needs schemaVersion 2).
- * compatibility.
  */
 export interface TemplateManifestV1 {
   readonly schemaVersion: 1;
@@ -212,6 +225,49 @@ export interface TemplateSummary {
   readonly updatedAt: Timestamp;
   /** 'backup' when the current manifest was unreadable and the previous generation was listed instead. */
   readonly manifestSource: 'current' | 'backup';
+  readonly warnings: readonly TemplateWarning[];
+}
+
+/**
+ * A template that could not be listed. Identifies the template without
+ * exposing its content: fixed message, no file path, no manifest data.
+ */
+export interface TemplateListFailure {
+  readonly templateId: TemplateId;
+  /**
+   * INVALID_MANIFEST: neither the manifest nor its backup is valid;
+   * UNSUPPORTED_SCHEMA: written by a newer GeoPlacer; READ_ERROR: the storage failed.
+   */
+  readonly code: 'INVALID_MANIFEST' | 'UNSUPPORTED_SCHEMA' | 'READ_ERROR';
+  readonly message: string;
+}
+
+/** One unreadable template never hides the others. */
+export interface TemplateListing {
+  readonly templates: readonly TemplateSummary[];
+  readonly failures: readonly TemplateListFailure[];
+}
+
+export interface RepairOptions {
+  /** false: diagnosis only, nothing is written. true: performs the repair. */
+  readonly apply: boolean;
+}
+
+export interface RepairReport {
+  /**
+   * 'none': the current manifest is valid, nothing to repair.
+   * 'restore-backup': the missing or malformed current manifest is (or would
+   * be) replaced by the valid backup.
+   */
+  readonly action: 'none' | 'restore-backup';
+  readonly applied: boolean;
+  /** Fixed description of the problem found (no manifest content). */
+  readonly problem: string | null;
+  /** Generation and current revision of the repaired (or proposed) manifest. */
+  readonly generation: number;
+  readonly currentRevision: number;
+  /** Storage name of the preserved corrupt manifest (null: nothing to preserve, or not applied). */
+  readonly preservedAs: string | null;
 }
 
 export interface LoadOptions {
@@ -261,8 +317,8 @@ export interface TemplateManager {
   load(ref: TemplateRef, options?: LoadOptions): Promise<LoadedTemplate>;
   /** Validated metadata of a template (no image decoding). */
   manifest(ref: TemplateRef): Promise<TemplateManifest>;
-  /** Templates of one project (deleted ones excluded). */
-  list(projectId: ProjectId): Promise<readonly TemplateSummary[]>;
+  /** Templates of one project (deleted ones excluded); unreadable ones are reported apart. */
+  list(projectId: ProjectId): Promise<TemplateListing>;
   /** New revision for content changes; a no-op change creates nothing. */
   revise(ref: TemplateRef, change: RevisionChange): Promise<RevisionResult>;
   /** New revision whose content copies an older one (history is never rewritten). */
@@ -276,4 +332,11 @@ export interface TemplateManager {
   delete(ref: TemplateRef, options: { readonly confirmName: string }): Promise<void>;
   /** Re-reads and re-hashes every blob of every revision (read-only). */
   verify(ref: TemplateRef): Promise<VerifyReport>;
+  /**
+   * Explicit repair of a missing or malformed current manifest from its valid
+   * backup. Never touches a manifest of a newer schema; preserves the corrupt
+   * file for diagnosis; leaves the backup untouched. `apply: false` only
+   * reports what would be done.
+   */
+  repair(ref: TemplateRef, options: RepairOptions): Promise<RepairReport>;
 }

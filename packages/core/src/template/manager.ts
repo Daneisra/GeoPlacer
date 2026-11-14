@@ -30,6 +30,8 @@ import type {
   QuantizationMethod,
   RevisionChange,
   RevisionCheck,
+  RepairOptions,
+  RepairReport,
   RevisionReason,
   RevisionRecordV1,
   RevisionResult,
@@ -38,6 +40,8 @@ import type {
   Template,
   TemplateId,
   TemplateImage,
+  TemplateListFailure,
+  TemplateListing,
   TemplateManager,
   TemplateManifest,
   TemplatePlacement,
@@ -46,10 +50,11 @@ import type {
   TemplateStatus,
   TemplateStorage,
   TemplateSummary,
+  TemplateWarning,
   TimeSource,
   VerifyReport,
 } from '../contracts/index.js';
-import { assertPlacement, type PlacementPolicy } from '../geometry/projection.js';
+import { assertPlacement, checkPlacement, type PlacementPolicy } from '../geometry/projection.js';
 import { StorageConflictError, TemplateError } from './errors.js';
 import { asProjectId, asTemplateId, normalizeName } from './ids.js';
 import { assertValidLimits, assertWithinLimits, DEFAULT_TEMPLATE_LIMITS, type TemplateLimits } from './limits.js';
@@ -123,6 +128,25 @@ function revisionOf(manifest: TemplateManifest, revision: number): RevisionRecor
   return record;
 }
 
+/** Derived, never stored: the user must see that part of the template cannot be painted. */
+export function placementWarnings(record: Pick<RevisionRecordV1, 'width' | 'height' | 'placement' | 'coordinateSystem'>): TemplateWarning[] {
+  const check = checkPlacement(record, record.placement, record.coordinateSystem);
+  if (check.status !== 'partially-outside') return [];
+  return [
+    {
+      code: 'PLACEMENT_PARTIALLY_OUTSIDE',
+      pixelsOutside: check.pixelsOutside,
+      message: `${check.pixelsOutside} of ${record.width * record.height} template pixels lie outside the canvas bounds and will never be painted`,
+    },
+  ];
+}
+
+const LIST_FAILURE_MESSAGES: Readonly<Record<TemplateListFailure['code'], string>> = {
+  INVALID_MANIFEST: 'the manifest and its backup are missing or invalid',
+  UNSUPPORTED_SCHEMA: 'the manifest was written by a newer version of GeoPlacer',
+  READ_ERROR: 'the storage could not read the manifest',
+};
+
 function toTemplate(manifest: TemplateManifest, record: RevisionRecordV1, image: TemplateImage): Template {
   return {
     id: manifest.templateId,
@@ -142,6 +166,7 @@ function toTemplate(manifest: TemplateManifest, record: RevisionRecordV1, image:
     quantizedImageHash: record.quantizedImageHash,
     createdAt: manifest.createdAt,
     updatedAt: manifest.updatedAt,
+    warnings: placementWarnings(record),
   };
 }
 
@@ -162,6 +187,7 @@ function toSummary(manifest: TemplateManifest, source: 'current' | 'backup'): Te
     createdAt: manifest.createdAt,
     updatedAt: manifest.updatedAt,
     manifestSource: source,
+    warnings: placementWarnings(current),
   };
 }
 
@@ -499,14 +525,25 @@ export function createTemplateManager(deps: TemplateManagerDeps): TemplateManage
       return (await readState(checkRef(rawRef), false)).manifest;
     },
 
-    async list(rawProjectId): Promise<readonly TemplateSummary[]> {
+    async list(rawProjectId): Promise<TemplateListing> {
       const projectId = asProjectId(rawProjectId);
-      const summaries: TemplateSummary[] = [];
+      const templates: TemplateSummary[] = [];
+      const failures: TemplateListFailure[] = [];
       for (const templateId of await storage.listTemplates(projectId)) {
-        const state = await readState({ projectId, templateId: asTemplateId(templateId) }, true);
-        if (state.manifest.deletedAt === null) summaries.push(toSummary(state.manifest, state.source));
+        try {
+          const state = await readState({ projectId, templateId: asTemplateId(templateId) }, true);
+          if (state.manifest.deletedAt === null) templates.push(toSummary(state.manifest, state.source));
+        } catch (error) {
+          // Isolated: one unreadable template never hides the others. Fixed
+          // messages only (no manifest content, no storage path).
+          const code = error instanceof TemplateError ? error.code : 'READ_ERROR';
+          if (code === 'NOT_FOUND') continue; // removed while listing
+          const failureCode: TemplateListFailure['code'] = code === 'UNSUPPORTED_SCHEMA' || code === 'INVALID_MANIFEST' ? code : 'READ_ERROR';
+          failures.push({ templateId, code: failureCode, message: LIST_FAILURE_MESSAGES[failureCode] });
+        }
       }
-      return summaries.sort((a, b) => b.priority - a.priority || a.createdAt - b.createdAt || (a.templateId < b.templateId ? -1 : 1));
+      templates.sort((a, b) => b.priority - a.priority || a.createdAt - b.createdAt || (a.templateId < b.templateId ? -1 : 1));
+      return { templates, failures };
     },
 
     revise(rawRef, change: RevisionChange): Promise<RevisionResult> {
@@ -654,6 +691,58 @@ export function createTemplateManager(deps: TemplateManagerDeps): TemplateManage
         revisions.push({ revision: record.revision, ok: problems.length === 0, problems });
       }
       return { manifestSource: state.source, currentRevision: state.manifest.currentRevision, revisions };
+    },
+
+    repair(rawRef, options: RepairOptions): Promise<RepairReport> {
+      const ref = checkRef(rawRef);
+      return exclusive(ref, async () => {
+        const read = await storage.readManifest(ref.projectId, ref.templateId);
+        if (read.current === null && read.backup === null) {
+          throw new TemplateError('NOT_FOUND', `template ${ref.projectId}/${ref.templateId} does not exist`);
+        }
+        let problem = 'the current manifest is missing';
+        if (read.current !== null) {
+          try {
+            const current = parseFor(ref, read.current);
+            return { action: 'none', applied: false, problem: null, generation: current.generation, currentRevision: current.currentRevision, preservedAs: null };
+          } catch (error) {
+            // A newer schema is never replaced by an older backup; any other
+            // failure than a malformed manifest is not a repair case either.
+            if (!(error instanceof TemplateError) || error.code !== 'INVALID_MANIFEST') throw error;
+            problem = 'the current manifest is malformed';
+          }
+        }
+        if (read.backup === null) throw new TemplateError('INVALID_MANIFEST', `${problem} and there is no backup to repair from`);
+        let backup: TemplateManifest;
+        try {
+          backup = parseFor(ref, read.backup);
+        } catch (error) {
+          if (error instanceof TemplateError && error.code === 'UNSUPPORTED_SCHEMA') throw error;
+          throw new TemplateError('INVALID_MANIFEST', `${problem} and the backup is invalid too`);
+        }
+        // The state we go back to must be usable: its current revision must verify.
+        try {
+          await loadRevisionStrict(backup, backup.currentRevision);
+        } catch (error) {
+          throw new TemplateError('INTEGRITY_ERROR', `${problem}; the backup's current revision does not verify (${message(error)})`);
+        }
+        // +2: strictly above the lost generation (backup + 1) a stale writer may remember.
+        const repaired: TemplateManifest = { ...backup, generation: backup.generation + 2, updatedAt: clock.now() };
+        const report = { action: 'restore-backup', problem, generation: repaired.generation, currentRevision: repaired.currentRevision } as const;
+        if (!options.apply) return { ...report, applied: false, preservedAs: null };
+        const json = serializeManifest(repaired);
+        parseFor(ref, json);
+        let preservedAs: string | null;
+        try {
+          preservedAs = await storage.replaceManifest(ref.projectId, ref.templateId, json, read.current);
+        } catch (error) {
+          if (error instanceof StorageConflictError) {
+            throw new TemplateError('CONFLICT', `template ${ref.templateId} changed during the repair; nothing was written`);
+          }
+          throw error;
+        }
+        return { ...report, applied: true, preservedAs };
+      });
     },
   };
   return manager;

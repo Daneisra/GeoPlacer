@@ -9,6 +9,8 @@ import {
   parseManifest,
   rgb,
   serializeManifest,
+  validateExtensions,
+  validateStrategyConfig,
 } from '../src/index.js';
 
 const H = (c: string): string => c.repeat(64);
@@ -99,6 +101,24 @@ describe('template manifest v1', () => {
     expect(parseManifest(json).revisions[0]?.extensions).toEqual({ ajout: true });
   });
 
+  it('accepts extensions at the limits (depth 8, 64 entries, 10 000-character strings)', () => {
+    const deep = JSON.parse('['.repeat(8) + ']'.repeat(8)) as unknown;
+    const many = Object.fromEntries(Array.from({ length: 64 }, (_, i) => [`k${i}`, i]));
+    for (const extensions of [{ futur: deep }, many, { 'a.b_c-d': 'x'.repeat(10_000), n: null, b: false, f: -1.5 }]) {
+      expect(parseManifest(serializeManifest(manifest({ extensions }))).extensions).toEqual(extensions);
+    }
+    expect(validateExtensions({ ok: { nested: [1, 'deux', { trois: null }] } })).toEqual({ ok: { nested: [1, 'deux', { trois: null }] } });
+    expectCode(() => validateExtensions(Object.create(null) as unknown), 'INVALID_MANIFEST');
+    expectCode(() => validateExtensions({ futur: new Date(0) }), 'INVALID_MANIFEST');
+    expectCode(() => validateExtensions({ futur: Number.NaN }), 'INVALID_MANIFEST');
+  });
+
+  it('validates strategy settings: unsigned 32-bit seed, distinct colorOrder', () => {
+    expect(validateStrategyConfig({ id: 'random', seed: 0xffffffff })).toEqual({ id: 'random', seed: 0xffffffff });
+    expect(validateStrategyConfig({ id: 'color-by-color', colorOrder: [3, 1, 2] })).toEqual({ id: 'color-by-color', colorOrder: [3, 1, 2] });
+    expectCode(() => validateStrategyConfig({ id: 'random', seed: 2 ** 32 }), 'INVALID_MANIFEST');
+  });
+
   it('rejects newer schemas explicitly', () => {
     expectCode(() => parseManifest(mutate((m) => (m.schemaVersion = 2))), 'UNSUPPORTED_SCHEMA');
   });
@@ -133,6 +153,19 @@ describe('template manifest v1', () => {
       ['extensions not an object', (m) => (m.extensions = [])],
       ['revision extensions missing', (m) => delete m.revisions[0].extensions],
       ['quantization version 2', (m) => (m.revisions[0].quantizationMethod.version = 2)],
+      ['negative seed', (m) => (m.drawingStrategy = { id: 'random', seed: -1 })],
+      ['seed above 32 bits', (m) => (m.drawingStrategy = { id: 'random', seed: 2 ** 32 })],
+      ['fractional seed', (m) => (m.drawingStrategy = { id: 'random', seed: 1.5 })],
+      ['duplicate colorOrder', (m) => (m.drawingStrategy = { id: 'color-by-color', colorOrder: [1, 2, 1] })],
+      ['extension name with a space', (m) => (m.extensions = { 'a b': 1 })],
+      ['extension name starting with a digit', (m) => (m.extensions = { '1x': 1 })],
+      ['extension name too long', (m) => (m.extensions = { ['x'.repeat(65)]: 1 })],
+      ['nested __proto__ key', (m) => (m.extensions = JSON.parse('{"futur":{"__proto__":{"admin":true}}}'))],
+      ['top-level constructor key', (m) => (m.revisions[0].extensions = { constructor: 1 })],
+      ['extensions too deep', (m) => (m.extensions = { futur: JSON.parse('['.repeat(9) + ']'.repeat(9)) })],
+      ['extensions too large', (m) => (m.extensions = { futur: 'é'.repeat(9000).repeat(4).slice(0, 10_000), autre: 'é'.repeat(10_000), troisieme: 'é'.repeat(10_000), quatrieme: 'é'.repeat(10_000) })],
+      ['extension string too long', (m) => (m.extensions = { futur: 'x'.repeat(10_001) })],
+      ['too many extensions', (m) => (m.extensions = Object.fromEntries(Array.from({ length: 65 }, (_, i) => [`k${i}`, i])))],
     ];
     for (const [label, edit] of cases) {
       try {

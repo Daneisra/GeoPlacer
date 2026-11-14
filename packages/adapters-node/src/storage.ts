@@ -13,8 +13,13 @@
  * leaves a readable manifest.json.
  *
  * Compare-and-swap on `generation` is serialized per template inside this
- * process. Two PROCESSES writing the same template at the same time are not
- * supported (GeoPlacer V1 runs a single local server).
+ * process. Across processes, the storage requires the data directory lock
+ * (lock.ts): a second instance on the same directory is refused at startup,
+ * and every write checks that the lock is still held.
+ *
+ * Repair (replaceManifest) copies the corrupt manifest's raw bytes to
+ * `manifest.json.corrupt-<time>-<id>` before replacing it; the backup is
+ * left untouched.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -22,6 +27,7 @@ import { mkdir, open, readdir, readFile, rename, rm, stat } from 'node:fs/promis
 import path from 'node:path';
 import type { ManifestRead, ProjectId, TemplateId, TemplateStorage } from '@geoplacer/core';
 import { StorageConflictError, isValidId, manifestGeneration } from '@geoplacer/core';
+import type { DataDirectoryLock } from './lock.js';
 
 const MANIFEST = 'manifest.json';
 const BACKUP = 'manifest.json.bak';
@@ -50,11 +56,15 @@ const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 
 export class NodeTemplateStorage implements TemplateStorage {
   readonly root: string;
+  private readonly lock: DataDirectoryLock;
   private readonly renameAttempts: number;
   private readonly locks = new Map<string, Promise<unknown>>();
 
-  constructor(root: string, options: NodeTemplateStorageOptions = {}) {
-    this.root = path.resolve(root);
+  /** The storage writes only under a held data directory lock (acquireDataDirectoryLock). */
+  constructor(lock: DataDirectoryLock, options: NodeTemplateStorageOptions = {}) {
+    lock.assertHeld();
+    this.lock = lock;
+    this.root = lock.root;
     this.renameAttempts = options.renameAttempts ?? 8;
   }
 
@@ -100,6 +110,7 @@ export class NodeTemplateStorage implements TemplateStorage {
 
   /** Unique temp file + fsync + rename over the target. */
   private async writeAtomic(target: string, data: Uint8Array | string): Promise<void> {
+    this.lock.assertHeld();
     await mkdir(path.dirname(target), { recursive: true });
     const temp = `${target}.${randomUUID()}.tmp`;
     try {
@@ -164,6 +175,25 @@ export class NodeTemplateStorage implements TemplateStorage {
       }
       if (current !== null) await this.writeAtomic(path.join(dir, BACKUP), current);
       await this.writeAtomic(target, json);
+    });
+  }
+
+  replaceManifest(projectId: ProjectId, templateId: TemplateId, json: string, expectedCurrent: string | null): Promise<string | null> {
+    const dir = this.templateDir(projectId, templateId);
+    return this.exclusive(dir, async () => {
+      this.lock.assertHeld();
+      const target = path.join(dir, MANIFEST);
+      const raw = await readOrNull(() => readFile(target));
+      const current = raw === null ? null : raw.toString('utf8');
+      if (current !== expectedCurrent) throw new StorageConflictError(null, manifestGeneration(current));
+      let preserved: string | null = null;
+      if (raw !== null) {
+        // Raw bytes, not the decoded text: the evidence is kept exactly as found.
+        preserved = `${MANIFEST}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID().slice(0, 8)}`;
+        await this.writeAtomic(path.join(dir, preserved), raw);
+      }
+      await this.writeAtomic(target, json);
+      return preserved;
     });
   }
 

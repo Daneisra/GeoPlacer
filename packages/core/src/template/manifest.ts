@@ -127,20 +127,33 @@ function paletteOf(value: unknown, path: string): Palette {
   };
 }
 
+/** Validates a strategy configuration (seed: unsigned 32-bit; colorOrder: distinct colors). */
+export function validateStrategyConfig(value: unknown, path = 'strategy'): StrategyConfig {
+  return strategyOf(value, path);
+}
+
 function strategyOf(value: unknown, path: string): StrategyConfig {
   const s = object(value, path, ['id', 'seed', 'colorOrder']);
   const id = oneOf(s.id, `${path}.id`, STRATEGIES);
   let colorOrder: StrategyConfig['colorOrder'];
   if (s.colorOrder !== undefined) {
     if (!Array.isArray(s.colorOrder)) bad(`${path}.colorOrder`, 'expected an array');
+    const seen = new Set<number>();
     colorOrder = s.colorOrder.map((c, i) => {
       if (typeof c !== 'number' || !isRgb(c)) bad(`${path}.colorOrder[${i}]`, 'expected a 24-bit RGB integer');
+      if (seen.has(c)) bad(`${path}.colorOrder[${i}]`, 'duplicate color');
+      seen.add(c);
       return c;
     });
   }
+  let seed: number | undefined;
+  if (s.seed !== undefined) {
+    seed = int(s.seed, `${path}.seed`, 0);
+    if (seed > 0xffffffff) bad(`${path}.seed`, 'expected an unsigned 32-bit integer');
+  }
   return {
     id,
-    ...(s.seed === undefined ? {} : { seed: int(s.seed, `${path}.seed`) }),
+    ...(seed === undefined ? {} : { seed }),
     ...(colorOrder === undefined ? {} : { colorOrder }),
   };
 }
@@ -171,9 +184,79 @@ const REVISION_KEYS = [
   'alphaThreshold', 'quantizationMethod', 'sourceImageHash', 'quantizedImageHash', 'quantizedFileHash', 'stats', 'extensions',
 ] as const;
 
-function extensionsOf(value: unknown, path: string): Record<string, unknown> {
-  return { ...object(value, path, Object.keys((value as Json | null) ?? {})) };
+/** Bounds of an `extensions` object (manifest or revision). */
+export const EXTENSIONS_LIMITS = {
+  /** Serialized JSON size. */
+  maxBytes: 64 * 1024,
+  /** Nesting depth below the extensions object itself. */
+  maxDepth: 8,
+  maxKeys: 64,
+  maxStringLength: 10_000,
+} as const;
+/** Top-level extension names: a letter, then letters, digits, '.', '_' or '-' (64 max). */
+const EXTENSION_KEY = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
+const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/** UTF-8 byte length (the core has no TextEncoder). Lone surrogates count as 3 bytes, like U+FFFD. */
+function utf8Length(text: string): number {
+  let bytes = 0;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff && i + 1 < text.length && (text.charCodeAt(i + 1) & 0xfc00) === 0xdc00) {
+      bytes += 4;
+      i++;
+    } else bytes += 3;
+  }
+  return bytes;
 }
+
+/** Plain JSON data only: no prototype keys, bounded depth, size and strings. */
+function jsonValue(value: unknown, path: string, depth: number): void {
+  if (value === null || typeof value === 'boolean') return;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) bad(path, 'expected a finite number');
+    return;
+  }
+  if (typeof value === 'string') {
+    if (value.length > EXTENSIONS_LIMITS.maxStringLength) bad(path, `string longer than ${EXTENSIONS_LIMITS.maxStringLength}`);
+    return;
+  }
+  if (depth >= EXTENSIONS_LIMITS.maxDepth) bad(path, `nested deeper than ${EXTENSIONS_LIMITS.maxDepth}`);
+  if (Array.isArray(value)) {
+    value.forEach((item, i) => jsonValue(item, `${path}[${i}]`, depth + 1));
+    return;
+  }
+  if (typeof value !== 'object' || Object.getPrototypeOf(value) !== Object.prototype) bad(path, 'expected JSON data');
+  for (const [key, item] of Object.entries(value as Json)) {
+    if (FORBIDDEN_KEYS.has(key) || key.length > 200) bad(`${path}.${key.slice(0, 40)}`, 'forbidden or too long key');
+    jsonValue(item, `${path}.${key}`, depth + 1);
+  }
+}
+
+/**
+ * Forward-compatible data, preserved verbatim, but validated: named entries,
+ * plain JSON values, bounded size and depth.
+ */
+export function validateExtensions(value: unknown, path = 'extensions'): Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
+    bad(path, 'expected an object');
+  }
+  const record = value as Json;
+  const keys = Object.keys(record);
+  if (keys.length > EXTENSIONS_LIMITS.maxKeys) bad(path, `more than ${EXTENSIONS_LIMITS.maxKeys} entries`);
+  for (const key of keys) {
+    if (!EXTENSION_KEY.test(key) || FORBIDDEN_KEYS.has(key)) bad(`${path}.${key.slice(0, 40)}`, 'invalid extension name');
+    jsonValue(record[key], `${path}.${key}`, 0);
+  }
+  if (utf8Length(JSON.stringify(record)) > EXTENSIONS_LIMITS.maxBytes) {
+    bad(path, `larger than ${EXTENSIONS_LIMITS.maxBytes} bytes`);
+  }
+  return { ...record };
+}
+
+const extensionsOf = validateExtensions;
 
 function revisionOf(value: unknown, path: string): RevisionRecordV1 {
   const r = object(value, path, REVISION_KEYS);

@@ -13,7 +13,15 @@ export {
   supportedDistances,
   type QuantizedSource,
 } from './quantization.js';
-export { manifestGeneration, parseManifest, serializeManifest, validateManifest } from './manifest.js';
+export {
+  EXTENSIONS_LIMITS,
+  manifestGeneration,
+  parseManifest,
+  serializeManifest,
+  validateExtensions,
+  validateManifest,
+  validateStrategyConfig,
+} from './manifest.js';
 export { canonicalJson, deepEqual, diffRevision, samePaletteColors, type RevisionDiff } from './revisions.js';
-export { createTemplateManager, type TemplateManagerDeps } from './manager.js';
+export { createTemplateManager, placementWarnings, type TemplateManagerDeps } from './manager.js';
 export { createMemoryTemplateStorage, type MemoryTemplateStorage } from './memory-storage.js';

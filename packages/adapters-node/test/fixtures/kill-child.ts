@@ -5,11 +5,11 @@
  */
 
 import { asProjectId, rgb, type TemplateId } from '@geoplacer/core';
-import { createNodeTemplateManager } from '../../src/index.js';
+import { openNodeTemplateManager } from '../../src/index.js';
 
 const [root, existing] = process.argv.slice(2);
 if (root === undefined) throw new Error('usage: kill-child <root> [templateId]');
-const manager = createNodeTemplateManager(root);
+const { manager } = await openNodeTemplateManager(root);
 const projectId = asProjectId('projet-kill');
 
 async function main(): Promise<void> {

@@ -26,6 +26,6 @@ describe('core constants', () => {
   it('versions the template manifest schema and the contracts', () => {
     expect(TEMPLATE_MANIFEST_SCHEMA_VERSION).toBe(1);
     // Contract v2 (Phase 1B.2): asynchronous TemplateManager, manifest with revision records.
-    expect(CORE_CONTRACT_VERSION).toBe(2);
+    expect(CORE_CONTRACT_VERSION).toBe(3);
   });
 });

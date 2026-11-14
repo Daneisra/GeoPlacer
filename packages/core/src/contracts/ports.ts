@@ -57,6 +57,15 @@ export interface TemplateStorage {
    * manifest must not exist yet).
    */
   writeManifest(projectId: ProjectId, templateId: TemplateId, json: string, expectedGeneration: number | null): Promise<void>;
+  /**
+   * Repair path only. Compare-and-swap on the raw text: throws
+   * StorageConflictError unless the stored current manifest is exactly
+   * `expectedCurrent` (null = absent). Preserves a copy of that file (when
+   * present) under a new name for diagnosis, then atomically replaces the
+   * current manifest. The backup is left untouched. Returns the name of the
+   * preserved copy (null when there was no current file).
+   */
+  replaceManifest(projectId: ProjectId, templateId: TemplateId, json: string, expectedCurrent: string | null): Promise<string | null>;
   listTemplates(projectId: ProjectId): Promise<readonly TemplateId[]>;
   readBlob(projectId: ProjectId, address: string): Promise<Uint8Array | null>;
   /** Atomic write of a blob addressed by the SHA-256 of its bytes. */

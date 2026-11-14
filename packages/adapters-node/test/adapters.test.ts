@@ -4,28 +4,65 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
-import type { ProjectId, TemplateId } from '@geoplacer/core';
+import type { ProjectId, TemplateId, TemplateManager } from '@geoplacer/core';
 import { TemplateError, asProjectId, createTemplateManager, rgb } from '@geoplacer/core';
-import { NodeTemplateStorage, createNodeTemplateManager, nodeSha256Hasher, pngjsCodec, randomIdSource, systemClock } from '../src/index.js';
+import {
+  DataDirectoryLockedError,
+  NodeTemplateStorage,
+  acquireDataDirectoryLock,
+  nodeSha256Hasher,
+  openNodeTemplateManager,
+  pngjsCodec,
+  randomIdSource,
+  systemClock,
+  type DataDirectoryLock,
+  type LockMechanism,
+  type NodeTemplateManagerHandle,
+} from '../src/index.js';
 import { rgbaPng, writePng } from '../../core/test/helpers/png.js';
 import { storageConformance } from '../../core/test/helpers/storage-conformance.js';
 
 const temps: string[] = [];
+const locks: DataDirectoryLock[] = [];
+/** One instance per data directory, as in production (the lock forbids a second one). */
+const handles = new Map<string, NodeTemplateManagerHandle>();
+
 async function tempRoot(): Promise<string> {
   const dir = await mkdtemp(path.join(tmpdir(), 'geoplacer-test-'));
   temps.push(dir);
   return dir;
 }
+async function lockedStorage(root?: string): Promise<NodeTemplateStorage> {
+  const lock = await acquireDataDirectoryLock(root ?? (await tempRoot()));
+  locks.push(lock);
+  return new NodeTemplateStorage(lock);
+}
+async function open(root: string): Promise<NodeTemplateManagerHandle> {
+  let handle = handles.get(root);
+  if (handle === undefined) {
+    handle = await openNodeTemplateManager(root);
+    handles.set(root, handle);
+  }
+  return handle;
+}
+const managerOf = async (root: string): Promise<TemplateManager> => (await open(root)).manager;
+async function closeAll(): Promise<void> {
+  await Promise.all([...handles.values()].map((h) => h.close()));
+  handles.clear();
+  await Promise.all(locks.splice(0).map((l) => l.release()));
+}
 afterAll(async () => {
+  // The lock file is held open (Windows share lock): release before removing.
+  await closeAll();
   await Promise.all(temps.map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
-storageConformance({ name: 'filesystem', make: async () => new NodeTemplateStorage(await tempRoot()), codec: pngjsCodec, hasher: nodeSha256Hasher });
+storageConformance({ name: 'filesystem', make: () => lockedStorage(), codec: pngjsCodec, hasher: nodeSha256Hasher });
 
 const P = asProjectId('projet-a');
 const palette = { id: 'p', colors: [{ rgb: rgb(0, 0, 0) }, { rgb: rgb(255, 255, 255) }, { rgb: rgb(255, 0, 0) }] };
-const create = (root: string, extra: { sourcePng?: Uint8Array; projectId?: ProjectId } = {}) =>
-  createNodeTemplateManager(root).create({
+const create = async (root: string, extra: { sourcePng?: Uint8Array; projectId?: ProjectId } = {}) =>
+  (await managerOf(root)).create({
     projectId: extra.projectId ?? P,
     name: 'Fresque',
     sourcePng: extra.sourcePng ?? rgbaPng(5, 3, (x, y) => [x * 50, y * 100, 0, x === 0 ? 0 : 255]),
@@ -69,7 +106,7 @@ describe('pngjs codec', () => {
   it('round-trips a quantized image exactly (strict canonical check in the manager)', async () => {
     const root = await tempRoot();
     const t = await create(root, { sourcePng: rgbaPng(64, 64, (x, y) => [(x * 7) % 256, (y * 11) % 256, (x * y) % 256, (x + y) % 3 === 0 ? 0 : 255]) });
-    const loaded = await createNodeTemplateManager(root).load({ projectId: P, templateId: t.id });
+    const loaded = await (await managerOf(root)).load({ projectId: P, templateId: t.id });
     expect([...loaded.template.image.pixels]).toEqual([...t.image.pixels]);
   });
 
@@ -86,7 +123,7 @@ describe('NodeTemplateStorage', () => {
     const root = await tempRoot();
     const t = await create(root);
     // New pixels (no red any more): a third blob. Same pixels would reuse the same address.
-    await createNodeTemplateManager(root).revise({ projectId: P, templateId: t.id }, { palette: { id: 'p2', colors: [{ rgb: rgb(0, 0, 0) }, { rgb: rgb(255, 255, 255) }] } });
+    await (await managerOf(root)).revise({ projectId: P, templateId: t.id }, { palette: { id: 'p2', colors: [{ rgb: rgb(0, 0, 0) }, { rgb: rgb(255, 255, 255) }] } });
     const files = await filesUnder(root);
     expect(files.filter((f) => f.endsWith('.tmp'))).toEqual([]);
     expect(files).toContain(`projects/projet-a/templates/${t.id}/manifest.json`);
@@ -103,12 +140,13 @@ describe('NodeTemplateStorage', () => {
     await mkdir(path.join(templates, 'nul'));
     await writeFile(path.join(templates, 'fichier'), 'x');
     await writeFile(path.join(templates, t.id, 'manifest.json.1234.tmp'), 'partial');
-    expect(await new NodeTemplateStorage(root).listTemplates(P)).toEqual([t.id]);
-    expect((await createNodeTemplateManager(root).list(P)).map((s) => s.templateId)).toEqual([t.id]);
+    const handle = await open(root);
+    expect(await new NodeTemplateStorage(handle.lock).listTemplates(P)).toEqual([t.id]);
+    expect((await handle.manager.list(P)).templates.map((s) => s.templateId)).toEqual([t.id]);
   });
 
   it('rejects invalid ids, addresses and paths escaping the root', async () => {
-    const storage = new NodeTemplateStorage(await tempRoot());
+    const storage = await lockedStorage();
     await expect(storage.readManifest('..' as ProjectId, 'x' as TemplateId)).rejects.toThrow(/invalid project id/);
     await expect(storage.readManifest(P, '../../etc' as TemplateId)).rejects.toThrow(/invalid template id/);
     await expect(storage.readManifest(P, 'com1' as TemplateId)).rejects.toThrow(/invalid template id/);
@@ -119,7 +157,7 @@ describe('NodeTemplateStorage', () => {
   it('detects files altered on disk and recovers from the backup manifest (read-only)', async () => {
     const root = await tempRoot();
     const t = await create(root);
-    const m = createNodeTemplateManager(root);
+    const m = (await managerOf(root));
     const ref = { projectId: P, templateId: t.id };
     await m.revise(ref, { placement: { topLeft: { x: 4, y: 4 } } });
     const dir = path.join(root, 'projects', 'projet-a');
@@ -140,17 +178,41 @@ describe('NodeTemplateStorage', () => {
     expect((await m.verify(ref)).revisions.map((r) => r.ok)).toEqual([false, false]);
   });
 
+  it('repairs a corrupt manifest from the backup on disk, keeping the raw corrupt bytes', async () => {
+    const root = await tempRoot();
+    const t = await create(root);
+    const m = await managerOf(root);
+    const ref = { projectId: P, templateId: t.id };
+    await m.revise(ref, { placement: { topLeft: { x: 4, y: 4 } } });
+    await m.revise(ref, { placement: { topLeft: { x: 5, y: 5 } } });
+    const dir = path.join(root, 'projects', 'projet-a', 'templates', t.id);
+    const backupBefore = await readFile(path.join(dir, 'manifest.json.bak'));
+    // Not even valid UTF-8: the evidence must be the exact bytes.
+    const corrupt = Buffer.from([0x7b, 0x22, 0xff, 0xfe, 0x00, 0x41]);
+    await writeFile(path.join(dir, 'manifest.json'), corrupt);
+    expect((await m.list(P)).templates[0]?.manifestSource).toBe('backup');
+    expect(await m.repair(ref, { apply: false })).toMatchObject({ action: 'restore-backup', applied: false });
+    expect(await readFile(path.join(dir, 'manifest.json'))).toEqual(corrupt);
+    const report = await m.repair(ref, { apply: true });
+    expect(report).toMatchObject({ action: 'restore-backup', applied: true, currentRevision: 2 });
+    expect(report.preservedAs).toMatch(/^manifest\.json\.corrupt-[0-9TZ-]+-[0-9a-f]{8}$/);
+    expect(await readFile(path.join(dir, report.preservedAs ?? ''))).toEqual(corrupt);
+    expect(await readFile(path.join(dir, 'manifest.json.bak'))).toEqual(backupBefore);
+    expect((await m.load(ref)).report).toMatchObject({ manifestSource: 'current', loadedRevision: 2, problems: [] });
+    expect((await filesUnder(root)).filter((f) => f.endsWith('.tmp'))).toEqual([]);
+  });
+
   it('isolates projects on disk', async () => {
     const root = await tempRoot();
     const a = await create(root);
     await create(root, { projectId: asProjectId('projet-b') });
     await rm(path.join(root, 'projects', 'projet-b'), { recursive: true });
-    expect((await createNodeTemplateManager(root).load({ projectId: P, templateId: a.id })).template.revision).toBe(1);
-    expect(await createNodeTemplateManager(root).list(asProjectId('projet-b'))).toEqual([]);
+    expect((await (await managerOf(root)).load({ projectId: P, templateId: a.id })).template.revision).toBe(1);
+    expect(await (await managerOf(root)).list(asProjectId('projet-b'))).toEqual({ templates: [], failures: [] });
   });
 
   it('uses random UUID ids and the system clock by default', async () => {
-    const manager = createTemplateManager({ storage: new NodeTemplateStorage(await tempRoot()), hasher: nodeSha256Hasher, codec: pngjsCodec, ids: randomIdSource, clock: systemClock });
+    const manager = createTemplateManager({ storage: await lockedStorage(), hasher: nodeSha256Hasher, codec: pngjsCodec, ids: randomIdSource, clock: systemClock });
     const t = await manager.create({ projectId: P, name: 'x', sourcePng: rgbaPng(1, 1, () => [0, 0, 0, 255]), palette, placement: { topLeft: { x: 0, y: 0 } }, coordinateSystem: { yAxis: 'down' } });
     expect(t.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(Math.abs(t.createdAt - Date.now())).toBeLessThan(60_000);
@@ -193,19 +255,140 @@ describe('real process kill during writes', () => {
     let id: string | undefined;
     const delays = [40, 75, 120, 180, 260, 33, 90, 150];
     for (const delayMs of delays) {
+      // runAndKill resolves on the child's exit: the kernel has released its lock.
       id = await runAndKill(root, id, delayMs);
-      const manager = createNodeTemplateManager(root);
-      const ref = { projectId: asProjectId('projet-kill'), templateId: id as TemplateId };
-      const loaded = await manager.load(ref);
-      expect(loaded.report.problems).toEqual([]);
-      const report = await manager.verify(ref);
-      expect(report.manifestSource).toBe('current');
-      expect(report.revisions.every((r) => r.ok)).toBe(true);
+      const handle = await openNodeTemplateManager(root);
+      try {
+        const ref = { projectId: asProjectId('projet-kill'), templateId: id as TemplateId };
+        const loaded = await handle.manager.load(ref);
+        expect(loaded.report.problems).toEqual([]);
+        const report = await handle.manager.verify(ref);
+        expect(report.manifestSource).toBe('current');
+        expect(report.revisions.every((r) => r.ok)).toBe(true);
+      } finally {
+        await handle.close();
+      }
     }
-    const final = await createNodeTemplateManager(root).manifest({ projectId: asProjectId('projet-kill'), templateId: id as TemplateId });
+    const last = await openNodeTemplateManager(root);
+    const final = await last.manager.manifest({ projectId: asProjectId('projet-kill'), templateId: id as TemplateId });
+    await last.close();
     // The children really wrote (not timing-sensitive: one write over the 8 runs is enough).
     expect(final.generation).toBeGreaterThan(1);
   });
+});
+
+const MECHANISMS: LockMechanism[] = process.platform === 'win32' ? ['windows-share-lock', 'pid-file'] : ['pid-file'];
+
+describe('data directory lock (one process)', () => {
+  for (const mechanism of MECHANISMS) {
+    it(`refuses a second holder and every write after release: ${mechanism}`, async () => {
+      const root = await tempRoot();
+      const first = await acquireDataDirectoryLock(root, { mechanism });
+      const refused = await acquireDataDirectoryLock(root, { mechanism }).then(
+        () => null,
+        (e: unknown) => e
+      );
+      expect(refused).toBeInstanceOf(DataDirectoryLockedError);
+      expect((refused as DataDirectoryLockedError).owner?.pid).toBe(process.pid);
+      const storage = new NodeTemplateStorage(first);
+      await storage.writeBlob(P, 'a'.repeat(64), new Uint8Array([1]));
+      await first.release();
+      await first.release(); // idempotent
+      expect(first.held).toBe(false);
+      await expect(storage.writeBlob(P, 'b'.repeat(64), new Uint8Array([1]))).rejects.toThrow(/released/);
+      await expect(storage.writeManifest(P, 'x' as TemplateId, '{}', null)).rejects.toThrow(/released/);
+      expect(() => new NodeTemplateStorage(first)).toThrow(/released/);
+      const second = await acquireDataDirectoryLock(root, { mechanism });
+      expect(second.held).toBe(true);
+      await second.release();
+    });
+  }
+
+  it('takes over a pid-file lock left by a dead process, but not one of a live process', async () => {
+    const root = await tempRoot();
+    const dead = { pid: 2 ** 30, host: (await import('node:os')).hostname(), startedAt: 'x', token: 'old' };
+    await writeFile(path.join(root, '.geoplacer.lock'), JSON.stringify(dead));
+    const lock = await acquireDataDirectoryLock(root, { mechanism: 'pid-file' });
+    expect(JSON.parse(await readFile(path.join(root, '.geoplacer.lock'), 'utf8'))).toMatchObject({ pid: process.pid });
+    await lock.release();
+    await writeFile(path.join(root, '.geoplacer.lock'), JSON.stringify({ ...dead, pid: process.pid }));
+    await expect(acquireDataDirectoryLock(root, { mechanism: 'pid-file' })).rejects.toBeInstanceOf(DataDirectoryLockedError);
+    // Another host's lock is never judged stale from here.
+    await writeFile(path.join(root, '.geoplacer.lock'), JSON.stringify({ ...dead, host: 'autre-machine' }));
+    await expect(acquireDataDirectoryLock(root, { mechanism: 'pid-file' })).rejects.toBeInstanceOf(DataDirectoryLockedError);
+  });
+});
+
+describe('data directory lock (independent processes)', () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const child = path.join(here, 'fixtures', 'lock-child.ts');
+  const repoRoot = path.resolve(here, '..', '..', '..');
+
+  interface Child {
+    readonly pid: number;
+    readonly line: Promise<string>;
+    readonly exit: Promise<number | null>;
+    kill(): void;
+  }
+
+  function start(root: string, mechanism: LockMechanism, holdMs: number): Child {
+    const proc = spawn(process.execPath, ['--import', 'tsx', child, root, mechanism, String(holdMs)], {
+      cwd: repoRoot,
+      env: { ...process.env, TSX_TSCONFIG_PATH: path.join(here, 'fixtures', 'tsconfig.child.json') },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    let err = '';
+    const exit = new Promise<number | null>((resolve) => proc.on('exit', (code) => resolve(code)));
+    const line = new Promise<string>((resolve, reject) => {
+      proc.stdout.on('data', (chunk: Buffer) => {
+        out += chunk.toString();
+        if (out.includes('\n')) resolve(out.trim());
+      });
+      proc.stderr.on('data', (chunk: Buffer) => (err += chunk.toString()));
+      void exit.then((code) => reject(new Error(`child exited (${String(code)}) without a status line: ${err}`)));
+    });
+    return { pid: proc.pid ?? -1, line, exit, kill: () => proc.kill('SIGKILL') };
+  }
+
+  for (const mechanism of MECHANISMS) {
+    it(`refuses a second process, then hands over after a clean exit and after a kill: ${mechanism}`, { timeout: 60_000 }, async () => {
+      const root = await tempRoot();
+      const a = start(root, mechanism, 60_000);
+      expect(await a.line).toMatch(/^acquired \d+ /);
+      const b = start(root, mechanism, 0);
+      expect(await b.line).toBe(`refused DATA_DIRECTORY_LOCKED ${a.pid}`);
+      expect(await b.exit).toBe(3);
+      a.kill();
+      await a.exit;
+      const c = start(root, mechanism, 300);
+      expect(await c.line).toMatch(/^acquired \d+ /);
+      expect(await c.exit).toBe(0); // clean exit releases the lock
+      const d = start(root, mechanism, 0);
+      expect(await d.line).toMatch(/^acquired \d+ /);
+      expect(await d.exit).toBe(0);
+      // Every accepted process wrote a complete template; nothing else was written.
+      const handle = await openNodeTemplateManager(root);
+      const listing = await handle.manager.list(asProjectId('projet-lock'));
+      await handle.close();
+      expect(listing.failures).toEqual([]);
+      expect(listing.templates.length).toBe(3);
+    });
+
+    it(`lets exactly one of several simultaneous processes in: ${mechanism}`, { timeout: 90_000 }, async () => {
+      for (let round = 0; round < 3; round++) {
+        const root = await tempRoot();
+        const children = Array.from({ length: 4 }, () => start(root, mechanism, 1500));
+        const lines = await Promise.all(children.map((c) => c.line));
+        await Promise.all(children.map((c) => c.exit));
+        expect(lines.filter((l) => l.startsWith('acquired')).length, lines.join(' | ')).toBe(1);
+        expect(lines.filter((l) => l.startsWith('refused DATA_DIRECTORY_LOCKED')).length).toBe(3);
+        const handle = await openNodeTemplateManager(root);
+        expect((await handle.manager.list(asProjectId('projet-lock'))).templates.length).toBe(1);
+        await handle.close();
+      }
+    });
+  }
 });
 
 describe('package boundaries', () => {

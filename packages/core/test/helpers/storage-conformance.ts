@@ -68,6 +68,23 @@ export function storageConformance(target: ConformanceTarget): void {
       expect(await s.listTemplates(P2)).toEqual(['mm']);
     });
 
+    it('replaces a manifest by compare-and-swap on its raw text, preserving it and keeping the backup', async () => {
+      const s = await target.make();
+      await s.writeManifest(P1, T1, manifestJson(1), null);
+      await s.writeManifest(P1, T1, '{"generation":2,"broken', 1);
+      await expect(s.replaceManifest(P1, T1, manifestJson(4), manifestJson(1))).rejects.toBeInstanceOf(StorageConflictError);
+      await expect(s.replaceManifest(P1, T1, manifestJson(4), null)).rejects.toBeInstanceOf(StorageConflictError);
+      const preserved = await s.replaceManifest(P1, T1, manifestJson(4), '{"generation":2,"broken');
+      expect(preserved).toMatch(/corrupt/);
+      expect(await s.readManifest(P1, T1)).toEqual({ current: manifestJson(4), backup: manifestJson(1) });
+      expect(await s.listTemplates(P1)).toEqual([T1]);
+      // Absent current manifest: nothing to preserve.
+      const T2 = 'modele-2' as TemplateId;
+      await expect(s.replaceManifest(P1, T2, manifestJson(1), 'x')).rejects.toBeInstanceOf(StorageConflictError);
+      expect(await s.replaceManifest(P1, T2, manifestJson(1), null)).toBeNull();
+      expect((await s.readManifest(P1, T2)).current).toBe(manifestJson(1));
+    });
+
     describe('interrupted manager operations', () => {
       const manager = (storage: TemplateStorage, ids = sequentialIds()): TemplateManager =>
         createTemplateManager({ storage, hasher: target.hasher, codec: target.codec, ids, clock: manualClock() });
@@ -90,6 +107,7 @@ export function storageConformance(target: ConformanceTarget): void {
           storage: {
             readManifest: wrap(storage.readManifest.bind(storage)),
             writeManifest: wrap(storage.writeManifest.bind(storage)),
+            replaceManifest: wrap(storage.replaceManifest.bind(storage)),
             listTemplates: wrap(storage.listTemplates.bind(storage)),
             readBlob: wrap(storage.readBlob.bind(storage)),
             writeBlob: wrap(storage.writeBlob.bind(storage)),
@@ -145,6 +163,40 @@ export function storageConformance(target: ConformanceTarget): void {
         });
       }
 
+      it('leaves the corrupt state (backup intact) or the repaired one after a failure during repair', async () => {
+        for (let k = 0; ; k++) {
+          let reachedAny = false;
+          for (const after of [false, true]) {
+            const storage = await target.make();
+            const t = await create(manager(storage));
+            const ref = { projectId: t.projectId, templateId: t.id };
+            await manager(storage).revise(ref, { placement: at(9, 9) });
+            const good = (await storage.readManifest(P1, t.id)).current;
+            await storage.writeManifest(P1, t.id, '{"generation":3,"broken', 2); // good one becomes the backup
+            const f = faulty(storage, k, after);
+            const ok = await manager(f.storage).repair(ref, { apply: true }).then(
+              () => true,
+              () => false
+            );
+            reachedAny ||= f.reached();
+            const where = `repair k=${k} after=${String(after)}`;
+            const read = await storage.readManifest(P1, t.id);
+            expect(read.backup, where).toBe(good);
+            const reopened = manager(storage);
+            if (read.current === '{"generation":3,"broken') {
+              expect(ok, where).toBe(false);
+              expect((await reopened.load(ref, { recover: true })).template.revision, where).toBe(2);
+            } else {
+              const loaded = await reopened.load(ref);
+              expect(loaded.report.problems, where).toEqual([]);
+              expect(loaded.template.revision, where).toBe(2);
+              expect((await reopened.manifest(ref)).generation, where).toBe(4);
+            }
+          }
+          if (!reachedAny) break;
+        }
+      });
+
       it('leaves no template or a complete one after a failure during creation', async () => {
         for (let k = 0; ; k++) {
           let reachedAny = false;
@@ -157,7 +209,8 @@ export function storageConformance(target: ConformanceTarget): void {
             );
             reachedAny ||= f.reached();
             const reopened = manager(storage, sequentialIds('autre'));
-            const list = await reopened.list(P1);
+            const { templates: list, failures } = await reopened.list(P1);
+            expect(failures).toEqual([]);
             if (ok) expect(list.length).toBe(1);
             expect(list.length).toBeLessThanOrEqual(1);
             for (const summary of list) {

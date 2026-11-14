@@ -93,7 +93,7 @@ describe('TemplateManager: creation and import', () => {
     expect([...clear.image.pixels].every((p) => p === TRANSPARENT_U32)).toBe(true);
     const opaque = await create(s, { sourcePng: rgbaPng(2, 2, () => [0, 0, 0, 255]) });
     expect([...opaque.image.pixels]).toEqual([BLACK, BLACK, BLACK, BLACK]);
-    const list = await s.manager.list(P1);
+    const list = (await s.manager.list(P1)).templates;
     expect(list.map((x) => [x.templateId, x.paintablePixels])).toEqual([
       ['modele-1', 0],
       ['modele-2', 4],
@@ -329,7 +329,7 @@ describe('TemplateManager: integrity and recovery', () => {
     const fromBackup = await s.manager.load(ref, { recover: true });
     expect(fromBackup.report.manifestSource).toBe('backup');
     expect(fromBackup.template.revision).toBe(1);
-    expect((await s.manager.list(P1))[0]?.manifestSource).toBe('backup');
+    expect((await s.manager.list(P1)).templates[0]?.manifestSource).toBe('backup');
     await expectCode(s.manager.revise(ref, { placement: at(6, 6) }), 'INVALID_MANIFEST');
 
     // A newer schema is never replaced by the older backup, even when recovering.
@@ -337,7 +337,10 @@ describe('TemplateManager: integrity and recovery', () => {
     await expectCode(s.manager.load(ref), 'UNSUPPORTED_SCHEMA');
     await expectCode(s.manager.load(ref, { recover: true }), 'UNSUPPORTED_SCHEMA');
     await expectCode(s.manager.verify(ref), 'UNSUPPORTED_SCHEMA');
-    await expectCode(s.manager.list(P1), 'UNSUPPORTED_SCHEMA');
+    expect(await s.manager.list(P1)).toEqual({
+      templates: [],
+      failures: [{ templateId: t.id, code: 'UNSUPPORTED_SCHEMA', message: 'the manifest was written by a newer version of GeoPlacer' }],
+    });
 
     // A valid manifest stored under another project is not accepted there.
     s.storage.state.manifests.set(`${P2}/${t.id}`, { current: entry.backup, backup: null });
@@ -350,8 +353,8 @@ describe('TemplateManager: projects, duplication, deletion', () => {
     const s = setup();
     const a = await create(s);
     const b = await create(s, { projectId: P2, name: 'Autre projet' });
-    expect((await s.manager.list(P1)).map((x) => x.name)).toEqual(['Fresque']);
-    expect((await s.manager.list(P2)).map((x) => x.name)).toEqual(['Autre projet']);
+    expect((await s.manager.list(P1)).templates.map((x) => x.name)).toEqual(['Fresque']);
+    expect((await s.manager.list(P2)).templates.map((x) => x.name)).toEqual(['Autre projet']);
     await expectCode(s.manager.load({ projectId: P2, templateId: a.id }), 'NOT_FOUND');
     // Blobs are per project: damaging P1's copy does not affect P2.
     const key = `${P1}/${(await s.manager.manifest(refOf(a))).revisions[0]?.quantizedFileHash ?? ''}`;
@@ -379,9 +382,143 @@ describe('TemplateManager: projects, duplication, deletion', () => {
     await s.manager.delete(ref, { confirmName: 'Fresque' });
     await expectCode(s.manager.load(ref), 'DELETED');
     await expectCode(s.manager.revise(ref, { placement: at(0, 0) }), 'DELETED');
-    expect(await s.manager.list(P1)).toEqual([]);
+    expect(await s.manager.list(P1)).toEqual({ templates: [], failures: [] });
     expect((await s.manager.manifest(ref)).deletedAt).not.toBeNull();
     expect(s.storage.state.blobs.size).toBe(2);
     await expectCode(s.manager.load({ projectId: P1, templateId: 'inconnu' as never }), 'NOT_FOUND');
+  });
+});
+
+describe('TemplateManager: listing isolation', () => {
+  it('lists the readable templates and reports the others apart, without their content', async () => {
+    const s = setup();
+    const good = await create(s, { name: 'Lisible' });
+    const corrupt = await create(s, { name: 'Corrompu secret' });
+    const newer = await create(s, { name: 'Futur' });
+    const io = await create(s, { name: 'Disque' });
+    const entryOf = (id: string) => {
+      const entry = s.storage.state.manifests.get(`${P1}/${id}`);
+      if (entry === undefined) throw new Error('missing');
+      return entry;
+    };
+    entryOf(corrupt.id).current = '{"name":"Corrompu secret", broken';
+    entryOf(corrupt.id).backup = '{"also": "broken"}';
+    const futur = entryOf(newer.id);
+    futur.current = (futur.current ?? '').replace('"schemaVersion": 1', '"schemaVersion": 9');
+    const failing: TemplateStorage = {
+      ...s.storage,
+      readManifest: async (projectId, templateId) => {
+        if (templateId === io.id) throw new Error('EIO: C:\\secret\\path\\manifest.json');
+        return s.storage.readManifest(projectId, templateId);
+      },
+    };
+    const listing = await s.reopen(failing).list(P1);
+    expect(listing.templates.map((x) => x.templateId)).toEqual([good.id]);
+    expect(listing.failures).toEqual([
+      { templateId: corrupt.id, code: 'INVALID_MANIFEST', message: 'the manifest and its backup are missing or invalid' },
+      { templateId: newer.id, code: 'UNSUPPORTED_SCHEMA', message: 'the manifest was written by a newer version of GeoPlacer' },
+      { templateId: io.id, code: 'READ_ERROR', message: 'the storage could not read the manifest' },
+    ]);
+    expect(JSON.stringify(listing.failures)).not.toMatch(/secret|broken|path/i);
+  });
+});
+
+describe('TemplateManager: explicit repair', () => {
+  async function corrupted(s: Setup) {
+    const t = await create(s);
+    const ref = refOf(t);
+    await s.manager.revise(ref, { placement: at(5, 5) });
+    await s.manager.revise(ref, { placement: at(6, 6) });
+    const entry = s.storage.state.manifests.get(`${P1}/${t.id}`);
+    if (entry === undefined) throw new Error('missing');
+    const backup = entry.backup;
+    entry.current = '{"schemaVersion":1,"truncated';
+    return { t, ref, entry, backup };
+  }
+
+  it('does nothing on a valid manifest', async () => {
+    const s = setup();
+    const t = await create(s);
+    expect(await s.manager.repair(refOf(t), { apply: true })).toEqual({
+      action: 'none', applied: false, problem: null, generation: 1, currentRevision: 1, preservedAs: null,
+    });
+  });
+
+  it('diagnoses without writing, then restores the backup and preserves the corrupt file', async () => {
+    const s = setup();
+    const { ref, entry, backup } = await corrupted(s);
+    const dry = await s.manager.repair(ref, { apply: false });
+    expect(dry).toEqual({ action: 'restore-backup', applied: false, problem: 'the current manifest is malformed', generation: 4, currentRevision: 2, preservedAs: null });
+    expect(entry.current).toBe('{"schemaVersion":1,"truncated');
+    expect(s.storage.state.preserved.size).toBe(0);
+
+    s.clock.tick(1000);
+    const done = await s.manager.repair(ref, { apply: true });
+    expect(done).toMatchObject({ action: 'restore-backup', applied: true, generation: 4, currentRevision: 2 });
+    expect(done.preservedAs).not.toBeNull();
+    expect(s.storage.state.preserved.get(done.preservedAs ?? '')).toBe('{"schemaVersion":1,"truncated');
+    expect(entry.backup).toBe(backup); // the good backup is never overwritten by the corrupt file
+    const loaded = await s.manager.load(ref);
+    expect(loaded.report).toMatchObject({ manifestSource: 'current', loadedRevision: 2, problems: [] });
+    // History up to the backup is intact and writable again.
+    expect((await s.manager.verify(ref)).revisions.map((r) => r.ok)).toEqual([true, true]);
+    const next = await s.manager.revise(ref, { placement: at(8, 8) });
+    expect(next.template.revision).toBe(3);
+    expect((await s.manager.manifest(ref)).generation).toBe(5);
+    expect(await s.manager.repair(ref, { apply: true })).toMatchObject({ action: 'none' });
+  });
+
+  it('repairs a missing current manifest from the backup (nothing to preserve)', async () => {
+    const s = setup();
+    const { ref, entry } = await corrupted(s);
+    entry.current = null;
+    expect(await s.manager.repair(ref, { apply: true })).toMatchObject({ action: 'restore-backup', applied: true, problem: 'the current manifest is missing', preservedAs: null });
+    expect((await s.manager.load(ref)).template.revision).toBe(2);
+  });
+
+  it('never replaces a newer schema, nor repairs from an invalid backup or one that does not verify', async () => {
+    const s = setup();
+    const { t, ref, entry, backup } = await corrupted(s);
+    const untouched = async (code: string): Promise<void> => {
+      const before = { current: entry.current, backup: entry.backup };
+      await expectCode(s.manager.repair(ref, { apply: true }), code);
+      expect({ current: entry.current, backup: entry.backup }).toEqual(before);
+      expect(s.storage.state.preserved.size).toBe(0);
+    };
+    entry.current = (backup ?? '').replace('"schemaVersion": 1', '"schemaVersion": 9');
+    await untouched('UNSUPPORTED_SCHEMA');
+
+    entry.current = 'garbage';
+    entry.backup = 'garbage too';
+    await untouched('INVALID_MANIFEST');
+    entry.backup = null;
+    await untouched('INVALID_MANIFEST');
+
+    entry.backup = backup;
+    const record = (JSON.parse(backup ?? '') as { revisions: Array<{ quantizedFileHash: string }> }).revisions[1];
+    s.storage.state.blobs.delete(`${P1}/${record?.quantizedFileHash ?? ''}`);
+    await untouched('INTEGRITY_ERROR');
+    await expectCode(s.manager.repair({ projectId: P1, templateId: 'absent' as never }, { apply: true }), 'NOT_FOUND');
+    expect(t.id).toBeDefined();
+  });
+});
+
+describe('TemplateManager: placement warnings', () => {
+  it('warns explicitly when a placement crosses the canvas bounds', async () => {
+    const s = setup();
+    const bounded = { yAxis: 'down', bounds: { minX: 0, minY: 0, width: 100, height: 100 } } as const;
+    const inside = await create(s, { placement: at(10, 10), coordinateSystem: bounded });
+    expect(inside.warnings).toEqual([]);
+    const ref = refOf(inside);
+    const crossing = await s.manager.revise(ref, { placement: at(98, 99) });
+    // 4x2 image at (98, 99): columns 98-99 and row 99 are inside -> 2 of 8 pixels inside.
+    expect(crossing.template.warnings).toEqual([
+      { code: 'PLACEMENT_PARTIALLY_OUTSIDE', pixelsOutside: 6, message: '6 of 8 template pixels lie outside the canvas bounds and will never be painted' },
+    ]);
+    expect((await s.manager.load(ref)).template.warnings[0]?.code).toBe('PLACEMENT_PARTIALLY_OUTSIDE');
+    expect((await s.manager.list(P1)).templates[0]?.warnings[0]?.pixelsOutside).toBe(6);
+    expect((await s.manager.load(ref, { revision: 1 })).template.warnings).toEqual([]);
+    const unbounded = await create(s, { placement: at(-1_000_000, 5) });
+    expect(unbounded.warnings).toEqual([]);
   });
 });

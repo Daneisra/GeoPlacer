@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { asProjectId, rgb, type Palette } from '@geoplacer/core';
-import { createNodeTemplateManager, pngjsCodec } from '../src/index.js';
+import { openNodeTemplateManager, pngjsCodec } from '../src/index.js';
 
 const SCENARIOS: Array<[number, 'noise' | 'pixel-art']> = [
   [2000, 'pixel-art'],
@@ -75,15 +75,19 @@ async function runOne(size: number, kind: 'noise' | 'pixel-art'): Promise<void> 
   const root = mkdtempSync(path.join(tmpdir(), 'geoplacer-bench-'));
   try {
     const sourcePng = await pngjsCodec.encode({ width: size, height: size, rgba: makeRgba(size, kind) });
-    const manager = createNodeTemplateManager(root);
+    const first = await openNodeTemplateManager(root);
     const projectId = asProjectId('bench');
     const [t, createMs] = await time(() =>
-      manager.create({ projectId, name: 'bench', sourcePng, palette, placement: { topLeft: { x: 0, y: 0 } }, coordinateSystem: { yAxis: 'down' } })
+      first.manager.create({ projectId, name: 'bench', sourcePng, palette, placement: { topLeft: { x: 0, y: 0 } }, coordinateSystem: { yAxis: 'down' } })
     );
+    await first.close();
+    // Load through a fresh instance (nothing cached), as after a restart.
+    const { manager, close } = await openNodeTemplateManager(root);
     const ref = { projectId, templateId: t.id };
-    const [, loadMs] = await time(() => createNodeTemplateManager(root).load(ref));
+    const [, loadMs] = await time(() => manager.load(ref));
     const [, reviseMs] = await time(() => manager.revise(ref, { placement: { topLeft: { x: 1, y: 1 } } }));
     const [, verifyMs] = await time(() => manager.verify(ref));
+    await close();
     const peakMb = process.resourceUsage().maxRSS / 1024;
     console.log(
       JSON.stringify({ size: `${size}x${size}`, kind, sourcePngMb: +(sourcePng.length / 1e6).toFixed(1), createMs: Math.round(createMs), loadMs: Math.round(loadMs), placementReviseMs: Math.round(reviseMs), verify2RevisionsMs: Math.round(verifyMs), peakRssMb: Math.round(peakMb) })
