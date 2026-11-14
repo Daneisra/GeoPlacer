@@ -422,3 +422,25 @@ aucune migration n'est nécessaire.
 Détails : [progression.md](../fr/progression.md). L'analyse de la reprise
 des stratégies, à trancher avant la 1B.6, est dans
 [strategies.md](../fr/strategies.md) § 4.
+
+## 14. Mise en œuvre de la Phase 1B.5 : contrats v5, ressources et améliorations
+
+`CORE_CONTRACT_VERSION` passe à **5**. Rien n'était persisté pour ces
+contrats : aucune migration.
+
+| Élément | Changement | Raison |
+|---|---|---|
+| `ResourceModel`, `ResourceSnapshot` | Remplacés par `ResourceRules` (règles versionnées du fournisseur), `ResourceObservation` (seule entrée de l'observation) et `AgentResourceState` (état sérialisable : observé, calculé, projeté, simulé) | Règles explicites et validées ; ne jamais confondre une observation et une projection |
+| `ResourceManager` | `observe` → `ObservationResult` (dépenses absorbées ou contredites, phase de régénération) ; `stateAt` ; `recordSpend` → statut (`applied`, `duplicate`, `absorbed-by-observation`) ; `timeUntil` | Source unique de vérité, sans double consommation |
+| `UpgradePlanner`, `UpgradeProposal`, `UserConfirmation` | Déplacés dans `upgrades.ts` (couche 4) ; analyse, proposition avec ETA avant / après, confirmation, application simulée | Le planificateur dépend de l'ETA (couche 3) |
+| `EtaAgent`, `EtaParameters` | L'agent porte un état de ressources ; les paramètres portent les règles (fin de `energyPerPixel`) | Un seul modèle de régénération |
+| `EtaResult.warnings` | Nouveau : `FRESHNESS_NOT_EVALUATED`, `SIMULATED_RESOURCES` | Ne jamais présenter une donnée non jugée ou simulée comme actuelle |
+| `FreshnessStatus` | `unchecked` devient `not-evaluated` | Demande du 14/11/2026 |
+| `ApplyResult.resources`, événement `resources` | `ResourceObservation`, `AgentResourceState` | Nouveaux types |
+
+L'algorithme de l'ETA n'est pas remplacé : seule son énergie vient du
+modèle commun. Il est vérifié identique à la 1B.4 avec une régénération
+d'une unité.
+
+Détails : [ressources.md](../fr/ressources.md). Proposition pour les
+numéros de révision : [modeles.md](../fr/modeles.md) (réparation).

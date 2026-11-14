@@ -1,12 +1,13 @@
 # Architecture de GeoPlacer
 
-État : **Phase 1B.4**. Les contrats existent depuis la 1B.0 ; la géométrie,
+État : **Phase 1B.5**. Les contrats existent depuis la 1B.0 ; la géométrie,
 les couleurs et les palettes sont implémentées en 1B.1 (voir
 [geometrie-couleurs.md](geometrie-couleurs.md)) ; le gestionnaire de
 modèles et sa persistance en 1B.2 (voir [modeles.md](modeles.md)) ; les
 huit stratégies de dessin en 1B.3 (voir [strategies.md](strategies.md)) ;
 la progression et le temps restant en 1B.4 (voir
-[progression.md](progression.md)).
+[progression.md](progression.md)) ; les ressources et les améliorations
+en 1B.5 (voir [ressources.md](ressources.md)).
 Le serveur et l'interface hérités de Wplacer fonctionnent comme avant.
 
 ## Arborescence
@@ -24,7 +25,9 @@ GeoPlacer/
 │   │   │   ├── template/         gestionnaire de modèles, manifeste, révisions, stockage mémoire (1B.2)
 │   │   │   ├── strategy/         8 stratégies de dessin, région éligible, PCG32 (1B.3)
 │   │   │   ├── canvas/           instantané de toile en mémoire (1B.4)
-│   │   │   └── progress/         progression et estimation du temps restant (1B.4)
+│   │   │   ├── progress/         progression et estimation du temps restant (1B.4)
+│   │   │   ├── resources/        règles, états d'agent, régénération, ResourceManager (1B.5)
+│   │   │   └── upgrades/         planificateur d'améliorations simulées (1B.5)
 │   │   ├── bench/                benchmarks (npm run bench:core, npm run bench:strategies)
 │   │   ├── test/                 Vitest (dont la suite de conformité des stockages)
 │   │   ├── tsconfig.json         compilation (sans types Node ni DOM)

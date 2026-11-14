@@ -18,7 +18,7 @@ npm run check                 # tsc, lint, lint:packages, puis test:all (contrô
 cd frontend; npx eslint .; npm run build
 ```
 
-## Tests des paquets (Phase 1B.4 : Vitest, 19 fichiers, 259 tests + 1 exhaustif optionnel)
+## Tests des paquets (Phase 1B.5 : Vitest, 23 fichiers, 302 tests + 1 exhaustif optionnel)
 
 | Paquet | Fichier | Objet |
 |---|---|---|
@@ -38,6 +38,10 @@ cd frontend; npx eslint .; npm run build
 | core | `strategy-color-outline.test.ts` | Couleur par couleur (fréquences, égalités, `colorOrder`, couleurs absentes, comptage sur l'image entière) ; contours (carré plein, trou, autre couleur, formes fines, définition vérifiée sur images aléatoires) |
 | core | `progress.test.ts` | Progression : modèle entièrement correct, incorrect (autre couleur, vide), partiel, pixels inconnus, valeurs invalides, aucun pixel éligible, 1 × 1, non carré, axe y montant, repère différent refusé, placement partiel, coordonnées proches de 2^53, provenance et fraîcheur, entrées invalides ; propriétés contre une implémentation naïve (150 cas) ; indépendance de la stratégie |
 | core | `eta.test.ts` | ETA : 0 pour un modèle terminé (même sans agent), absence d'agent, couleur indisponible, énergie insuffisante, observation incomplète ou ancienne, paramètres invalides, dépassement ; énergie nulle, régénération, cadence, disponibilité, pauses, plusieurs agents ; borne contre une simulation milliseconde par milliseconde ; monotonie |
+| core | `resources-model.test.ts` | Règles : jeu complet accepté, 22 règles invalides refusées, capacité et intervalle par niveau ; observations valides et 16 invalides ; état : invariants, sérialisation canonique, nature exigée, règles différentes refusées |
+| core | `resources-energy.test.ts` | Régénération partielle et longue durée, composition (400 cas), attentes exactes, dépenses, améliorations simulées, monnaie et plafonds ; gestionnaire : observation seule acceptée (`@ts-expect-error`), états séparés, doublons, ordre, absorption, contradictions, report de phase, agents séparés ; propriétés (150 séquences) ; chemin rapide = rejeu |
+| core | `eta-equivalence.test.ts` | ETA identique à la version 1B.4 figée sur 2 000 cas aléatoires |
+| core | `upgrades.test.ts` | Améliorations possibles et impossibles, effets, ETA avant / après, couleur rendant l'estimation possible, bénéfice nul non recommandé, autres agents, instantané périmé, déterminisme, comparaison exacte, confirmation, application unique, propriétés |
 | core | `strategy-properties.test.ts` | Propriétés des 8 stratégies sur images aléatoires : chaque pixel peignable exactement une fois, jamais un transparent, déterminisme, taille des lots, région = ordre filtré, placement et sens de l'axe y ; intégration avec le gestionnaire de modèles |
 | adapters-node | `adapters.test.ts` | Même suite de conformité sur le stockage fichiers ; décodage pngjs (palette + tRNS, gris 1/16 bits, entrelacé…) ; disposition des fichiers ; fichiers modifiés sur disque ; réparation sur disque (octets corrompus conservés) ; chemins refusés ; arrêt brutal d'un processus réel ; verrou du répertoire (un processus ; deux processus indépendants ; quatre lancés en même temps ; les deux mécanismes) ; dépendances du paquet |
 | simulator | `package.test.ts` | Résolution de `@geoplacer/core` (valeurs et types) |
@@ -53,7 +57,13 @@ Benchmarks :
 - `npm run bench:color-by-color` : avant et après l'optimisation de la 1B.4,
   avec vérification de l'ordre ([strategies.md](strategies.md) § 3) ;
 - `npm run bench:progress` : progression et ETA
-  ([progression.md](progression.md) § 4).
+  ([progression.md](progression.md) § 4) ;
+- `npm run bench:resources` : ressources, ETA, planificateur
+  ([ressources.md](ressources.md) § 6) ;
+- `npm run bench:snapshot-read` : lecture par ligne contre lecture par
+  pixel ([progression.md](progression.md) § 5) ;
+- `npm run bench:order-cache` : cache d'ordre sur disque
+  ([strategies.md](strategies.md) § 4).
 
 Simulation de l'ETA sur d'autres graines :
 `$env:GEOPLACER_ETA_SEED="5"; npx vitest run --root packages/core test/eta.test.ts`.
@@ -77,6 +87,14 @@ le commit et la version de Node) dans `test-logs/<date>-<script>.log`,
 réussite comme échec, en conservant le code de sortie
 (`scripts/run-logged.mjs`). Le dossier est ignoré par Git. À utiliser pour
 les contrôles complets, afin qu'un échec intermittent puisse être examiné.
+
+Phase 1B.5 :
+- mutation vérifiée : ne plus conserver la progression partielle de
+  régénération fait échouer six tests ;
+- tous les échecs rencontrés pendant la phase ont leur journal complet
+  conservé, même quand la relance réussissait (erreurs de rédaction de
+  tests, et trois défauts réels : deux bornes de l'ETA et le registre
+  cubique).
 
 Mutation vérifiée en 1B.4 : compter un pixel `UNKNOWN` comme correct fait
 échouer deux tests de progression. Écraser la sauvegarde lors d'une

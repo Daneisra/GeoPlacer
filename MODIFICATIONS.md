@@ -27,6 +27,23 @@ licence. L'historique Git complet du projet d'origine est conservé.
 - `start.bat` : installation des deux projets par le chemin vérifié.
 - Documentation française (`docs/fr/`, `docs/decisions/`).
 
+## 2026-11-14 — Phase 1B.5 : ressources et améliorations
+
+- `packages/core/src/resources` : règles de ressources versionnées et
+  validées, états d'agent sérialisables (observé, calculé, projeté,
+  simulé), régénération composable, opérations simulées,
+  `ResourceManager` (source unique de l'énergie, registre des dépenses).
+- `packages/core/src/upgrades` : planificateur d'améliorations (analyse,
+  simulation avec ETA avant / après, classement, confirmation,
+  application simulée) ; aucun achat réel.
+- ETA branché sur le modèle d'énergie commun, identique à la 1B.4 pour
+  une régénération d'une unité ; deux défauts de borne corrigés.
+- Fraîcheur « non évaluée » explicite et signalée.
+- Études : cache d'ordre (`bench:order-cache`), lecture par ligne
+  (`bench:snapshot-read`) ; proposition d'allocation des numéros de
+  révision (non implémentée).
+- Documentation : `docs/fr/ressources.md`, ADR 0002 § 14.
+
 ## 2026-11-14 — Phase 1B.4 : progression et temps restant
 
 - `packages/core/src/progress` : calcul de progression (correct,

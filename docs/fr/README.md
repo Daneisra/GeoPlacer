@@ -6,7 +6,15 @@ GeoPlacer est un fork de
 pour GeoPixels, avec un moteur développé et testé **uniquement sur simulateur
 local** (voir l'ADR 0001).
 
-## État actuel : Phase 1B.4, progression et temps restant
+## État actuel : Phase 1B.5, ressources et améliorations
+
+Réalisé en Phase 1B.5 (voir [ressources.md](ressources.md)) :
+- règles de ressources versionnées, états d'agent observés, calculés,
+  projetés ou simulés, régénération sans double crédit ;
+- `ResourceManager`, source unique de l'énergie, utilisée par l'ETA ;
+- planificateur d'améliorations simulées, avec confirmation explicite ;
+- études : cache d'ordre des stratégies, lecture des instantanés par
+  ligne, proposition pour les numéros de révision.
 
 Réalisé en Phase 1B.4 (voir [progression.md](progression.md)) :
 - calcul de progression : pixels corrects, incorrects et inconnus, par

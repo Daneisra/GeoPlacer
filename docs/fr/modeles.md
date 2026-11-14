@@ -224,6 +224,11 @@ Essai réel sous Windows (Node 22.23.2, processus indépendants) :
   10).
 
 La socket abstraite Linux n'a pas pu être essayée sur cette machine.
+**Phase 1B.5** : toujours impossible. Aucun Linux n'est disponible ici
+(ni WSL ni Docker), et installer WSL modifierait Windows, ce qui est
+exclu. **Le sujet reste ouvert** : le verrou actuel est conservé et la
+proposition n'est pas appliquée, faute d'essai sous Linux. Le verrou
+Windows actuel reste dépendant d'un indicateur interne de libuv.
 
 Points à trancher avant de remplacer le verrou :
 - le chemin réel, liens symboliques et casse compris, doit être
@@ -311,15 +316,69 @@ Ce qu'elle ne garantit pas :
   `(modèle, révision, x, y, couleur)` : une tentative enregistrée sur la
   révision perdue deviendrait ambiguë.
 
-Proposition, à décider avant la Phase 1B.6 :
-- Tenir par modèle un fichier de **plus hautes valeurs atteintes**
-  (génération et révision), mis à jour **avant** chaque publication.
-- Il ne fait qu'augmenter. Une interruption entre sa mise à jour et la
-  publication laisse donc seulement une valeur trop haute, ce qui est sans
-  danger.
-- La réparation reprendrait au-dessus de ces valeurs, et le numéro d'une
-  révision perdue ne serait jamais réutilisé.
-- Le mécanisme actuel n'est pas modifié dans cette phase.
+**Proposition détaillée** (Phase 1B.5, **non implémentée** : elle change
+le stockage et le schéma, elle attend votre validation) :
+
+*Principe : un registre d'allocations immuables, pas un second fichier
+modifiable.* Chaque numéro est **alloué** par la création exclusive d'un
+petit fichier, jamais modifié ni supprimé, **avant** toute publication
+qui l'utilise :
+
+```
+<racine>/projects/<p>/templates/<t>/alloc/g000000000012-r000000000005
+```
+
+1. **Ordre d'écriture** d'une opération qui publie la génération g (et,
+   s'il y en a une, la nouvelle révision r) :
+   1. g = 1 + max(génération du manifeste, plus grande génération allouée) ;
+      r = 1 + max(dernière révision du manifeste, plus grande révision allouée) ;
+   2. création exclusive (`wx`) du fichier d'allocation, `fsync`, `fsync`
+      du dossier (hors Windows). S'il existe déjà : `CONFLICT` ;
+   3. écriture et vérification des blobs (inchangé) ;
+   4. publication du manifeste par un seul renommage (inchangé).
+2. **Trous acceptés, jamais de réutilisation** : une interruption après
+   2.1-2 laisse une allocation sans manifeste. C'est un trou, sans danger :
+   l'opération suivante alloue au-dessus.
+3. **Pourquoi ce n'est pas le « second fichier modifiable »** : aucun
+   fichier n'est jamais réécrit. L'ensemble des allocations ne peut être
+   qu'en avance sur le manifeste, jamais en retard, puisqu'on alloue
+   toujours avant de publier. Il n'y a donc pas d'état incohérent à
+   réconcilier.
+4. **Réparation** : génération et révisions repartent au-dessus de la
+   plus grande allocation, non plus de la sauvegarde + 2. Plusieurs
+   réparations consécutives donnent des numéros toujours croissants.
+5. **Allocations corrompues ou absentes** : le **nom** du fichier porte les
+   numéros, son contenu est facultatif. Un contenu illisible ne gêne
+   donc pas. Si le dossier `alloc/` disparaît entièrement, la garantie
+   est perdue : la réparation le signale et exige une confirmation
+   explicite, avec un plancher calculé sur le manifeste, la sauvegarde et
+   les manifestes corrompus conservés.
+6. **Effet sur le schéma** : les numéros de révision cessent d'être
+   contigus. Schéma 2 du manifeste :
+   - révisions strictement croissantes au lieu de contiguës ;
+   - recherche d'une révision par son numéro, et non plus par sa position
+     (`revisionOf`) ;
+   - une migration 1 → 2 sans transformation (un manifeste 1 valide est
+     un manifeste 2 valide).
+7. **Port de stockage** : `allocate(projet, modèle, g, r | null)` et
+   `maxAllocations(projet, modèle)`, dans les deux stockages (mémoire et
+   fichiers), avec la suite de conformité et l'injection de panne étendues
+   à l'étape d'allocation.
+8. **Limites** :
+   - un fichier par écriture, donc beaucoup de petits fichiers à la longue.
+     Une compaction, qui remplacerait une série par un point de contrôle
+     créé de façon exclusive, est possible plus tard ;
+   - ne protège pas un répertoire partagé entre machines (déjà exclu par
+     le verrou).
+
+Tests prévus, **non livrés dans cette phase** :
+- panne à chaque étape (allocation, blobs, publication) ;
+- plusieurs réparations consécutives ;
+- allocations corrompues ou supprimées ;
+- reprise après arrêt brutal.
+
+Le mécanisme actuel (sauvegarde + 2) reste en place, avec ses tests de
+non-régression.
 
 **Listage isolé** (correction A) : `list` renvoie les modèles lisibles dans
 `templates`, et les autres dans `failures`, avec l'identifiant, un code et

@@ -14,7 +14,7 @@ futur import d'image produiront des instantanés de cette forme.
 ## 1. Utilisation
 
 ```ts
-import { computeProgress, createArraySnapshot, estimateEta } from '@geoplacer/core';
+import { computeProgress, createArraySnapshot, estimateEta, etaAgentsFrom } from '@geoplacer/core';
 
 const instantane = createArraySnapshot({
   rect, coordinateSystem, source: 'imported-snapshot', observedAt, pixels, // Int32Array
@@ -22,8 +22,9 @@ const instantane = createArraySnapshot({
 const progression = computeProgress(modele, instantane, maintenant, {
   freshness: { 'imported-snapshot': { maxAgeMs: 10 * 60_000 } },          // politique par source
 });
-const eta = estimateEta(progression, agents, {
-  energyPerPixel: 1, msPerPixel: 0, minCoveragePercent: 95,
+// Phase 1B.5 : les agents viennent du ResourceManager, les paramètres portent les règles.
+const eta = estimateEta(progression, etaAgentsFrom(ressources, maintenant), {
+  rules: ressources.rules, msPerPixel: 0, minCoveragePercent: 95,
 }, maintenant);
 ```
 
@@ -102,7 +103,7 @@ n'existe aucun seuil par défaut commun à toutes les sources.
 |---|---|
 | `fresh` | âge ≤ `maxAgeMs` de la source |
 | `stale` | âge > `maxAgeMs` |
-| `unchecked` | aucune politique pour cette source |
+| `not-evaluated` | aucune politique pour cette source : l'âge **n'est pas jugé** (`ageMs` reste indiqué) ; l'ETA ajoute l'avertissement `FRESHNESS_NOT_EVALUATED` |
 | `future` | `observedAt` postérieur à `now` (horloges incohérentes) |
 
 Les zones que l'instantané ne couvre pas restent **inconnues**.
@@ -122,25 +123,30 @@ Elles sont renvoyées avec chaque résultat (`assumptions`) :
 2. **Travail** = pixels incorrects connus + pixels **inconnus**, supposés
    à repeindre (pessimiste).
 3. Un agent peint un pixel à la fois, au plus un tous les `msPerPixel`
-   (cadence C), et dépense `energyPerPixel` (k) par pixel.
-4. **Énergie** : prévue depuis la dernière observation de l'agent, arrondie
-   vers le bas et plafonnée à `maxEnergy`. La régénération pendant la
-   rafale initiale, les pauses et l'attente est ignorée (pessimiste).
-5. **Rythme** : l'agent peint d'abord B = ⌊E / k⌋ pixels avec son énergie,
-   puis un pixel tous les D = max(C, k × R), où R est son intervalle de
-   régénération. Le premier pixel après la rafale peut attendre au plus
-   min(C, k × R) de plus, car la phase de régénération est inconnue.
+   (cadence C), et dépense le `costPerPixel` (k) des règles par pixel.
+4. **Énergie** (Phase 1B.5) : elle vient du modèle commun des ressources
+   (`advance`) : pas entiers, phase inconnue comme borne basse. La
+   régénération pendant la rafale initiale, les pauses et l'attente est
+   ignorée (pessimiste).
+5. **Rythme** (`paintingCapacity`, modèle commun) : l'agent peint d'abord
+   B = ⌊E / k⌋ pixels avec son énergie, puis attend la régénération, phase
+   inconnue et reste d'énergie compté nul. Avec une régénération d'une
+   unité : un pixel tous les D = max(C, k × R), après une première attente
+   d'au plus min(C, k × R). Avec A unités : le gain sûr par pas est
+   min(A, capacité − k + 1), l'énergie étant plafonnée.
 6. **Répartition** : le travail est réparti entre agents de la meilleure
    façon possible, dans le respect de leurs palettes. C'est la seule
    hypothèse **optimiste** ; elle est exacte avec un seul agent, le cas de
    la V1.
 7. Aucune écriture refusée, aucune modification par un tiers, aucune
    panne (optimiste).
-8. Personne ne peint pendant les pauses configurées. Un agent commence à
-   `availableFrom`.
+8. Personne ne peint pendant les pauses configurées. Un agent indisponible
+   commence à la fin de son indisponibilité (jamais si elle n'a pas de
+   fin).
 
-Les agents ont chacun leurs ressources : énergie, maximum, régénération,
-palette, disponibilité.
+Les agents ont chacun leur état de ressources (énergie, niveaux,
+palette, disponibilité) sous les règles communes du fournisseur (voir
+[ressources.md](ressources.md) § 5).
 
 ### Calcul
 
@@ -175,7 +181,7 @@ valeur arbitraire de remplacement.
 
 | Code | Situation |
 |---|---|
-| `INVALID_PARAMETERS` | paramètre ou ressource invalide : énergie négative ou non entière, régénération ≤ 0, cadence négative, couverture minimale hors de [0, 100], pause vide, agent en double, observation postérieure à `now`, instantané « future »… |
+| `INVALID_PARAMETERS` | paramètre, règles ou état de ressources invalide : règles incohérentes, état invalide, d'un autre agent, d'autres règles ou daté après `now`, cadence négative, couverture minimale hors de [0, 100], pause vide, agent en double, instantané « future »… |
 | `STALE_SNAPSHOT` | instantané trop ancien pour la politique de sa source |
 | `INSUFFICIENT_OBSERVATION` | couverture inférieure à `minCoveragePercent` (paramètre obligatoire, sans valeur par défaut) |
 | `NO_AGENT` | du travail reste et aucun agent n'est fourni |
@@ -226,16 +232,24 @@ compteurs par couleur.
 
 ## 5. Limites connues
 
-- Une source **sans politique de fraîcheur** (`unchecked`) est acceptée
-  par l'ETA quel que soit son âge : c'est à l'appelant de configurer une
-  politique pour les observations importées.
+- Une source **sans politique de fraîcheur** (`not-evaluated`) est encore
+  acceptée par l'ETA, mais jamais présentée comme actuelle : le résultat
+  porte l'avertissement `FRESHNESS_NOT_EVALUATED` et l'âge de
+  l'instantané. Configurer une politique pour les observations importées
+  reste à la charge de l'appelant.
 - La borne « jamais inférieure à la simulation » est vérifiée pour **un
   seul agent**. Avec plusieurs agents, seule la monotonie est testée ; la
   répartition reste l'hypothèse optimiste n° 6.
 
-- Pas de lecture en masse des instantanés : un appel `get` par pixel. Une
-  lecture par ligne réduirait le coût. Elle ne sera ajoutée au contrat que
-  si une mesure le justifie (1B.6 ou 1B.7).
+- Pas de lecture en masse des instantanés : un appel `get` par pixel.
+  **Étude de la Phase 1B.5** (`npm run bench:snapshot-read`) : la même
+  boucle de comptage, mais lisant une ligne entière, est ×1,9 à ×2,1 plus
+  rapide sur le pixel art (2000² : 77–78 → 38–39 ms) et ×1,4 sur le bruit
+  (145 → 104 ms), où la recherche de couleur domine. Résultats identiques.
+  Ce prototype utilise le lecteur le moins cher possible (vue sans copie) ;
+  un vrai lecteur copierait la ligne. Avantage réel mais conditionnel :
+  aucun contrat modifié ; ajout de `readRow` facultatif proposé pour la
+  1B.6, avec une table de couleurs compacte pour le bruit.
 - L'ETA ne connaît ni les refus d'écriture ni les modifications par des
   tiers. Ses hypothèses optimistes sont nommées dans le résultat.
 - Les intervalles de régénération sont supposés constants. Une

@@ -300,6 +300,47 @@ comparaison par pixel**, pas de la position de chaque pixel dans l'ordre.
   l'ordre Fisher-Yates validé en Phase 1B.3 ; les modèles existants
   changeraient d'ordre.
 
+### Étude du cache d'ordre (Phase 1B.5, `npm run bench:order-cache`)
+
+L'aléatoire PCG32 version 1 est **conservé** (décision du 14/11/2026) : sa
+position d'un pixel ne se calcule pas sans l'ordre complet. Étude d'un
+cache facultatif, sur disque réel (pixel art, une exécution) :
+
+| Taille | Stratégie | Ordre | Construction | Écriture (fsync) | Relecture + vérification | Reprise à 99 % |
+|---|---|---|---|---|---|---|
+| 2000² | centre | 14,8 Mio | 618 ms | 149 ms | 154 ms | < 0,1 ms |
+| 2000² | aléatoire | 14,8 Mio | 586 ms | 92 ms | 289 ms | < 0,1 ms |
+| 4096² | centre | 62,1 Mio | 2,99 s | 819 ms | 728 ms | < 0,1 ms |
+| 4096² | aléatoire | 62,1 Mio | 2,78 s | 370 ms | 1,25 s | < 0,1 ms |
+
+- **Clé** : empreinte SHA-256 des pixels quantifiés de la révision
+  (`quantizedImageHash`), identifiant et version de la stratégie, graine,
+  `colorOrder`. Le placement n'en fait **pas** partie : l'ordre de toute
+  l'image ne dépend pas du placement (propriété de filtrage de la 1B.3).
+  Changer de révision, de stratégie, de version ou de graine change la
+  clé : le cache est refusé avant usage (vérifié).
+- **Vérification avant usage** : clé, SHA-256 du contenu, puis
+  permutation (chaque index dans l'image, peignable, une seule fois, tous
+  présents). La permutation domine le coût de relecture.
+- **Position du curseur** : un simple décalage dans l'ordre ; reprise
+  immédiate.
+- **Mémoire** : 4 octets par pixel peignable, 62 Mio en 4096². Acceptable
+  pour la V1 (un agent actif, quelques modèles), à limiter s'il y a
+  beaucoup de modèles actifs.
+
+**Conclusions** :
+1. Le cache évite la reconstruction (2,8 à 3 s en 4096², et jusqu'à 13 s
+   mesurés en 1B.3 sur machine chargée) contre 0,4 à 1,25 s de relecture
+   vérifiée.
+2. Une position de curseur ne suffit pas : un pixel déjà dépassé peut
+   être abîmé ensuite. Le `WorkPlanner` devra quand même retrouver ces
+   pixels.
+3. Proposition pour la 1B.6 : clé de tri par pixel pour sept stratégies
+   (aucune mémoire) ; pour l'aléatoire, la **table des rangs** (inverse de
+   l'ordre mis en cache, 4 octets par pixel de plus) donne cette clé en
+   O(1). `nextBatch` = comparaison avec la toile, puis les k plus petites
+   clés. À mesurer par un prototype avant décision.
+
 ## 5. Limites connues
 
 - **Couleur par couleur** sur une image bruitée de 2000 × 2000 : 149 ms
