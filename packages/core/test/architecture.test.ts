@@ -38,6 +38,7 @@ const LAYERS: Readonly<Record<string, number>> = {
   work: 3,
   progress: 3,
   scheduler: 4,
+  upgrades: 4,
   index: 5,
 };
 
@@ -85,6 +86,8 @@ describe('@geoplacer/core architecture', () => {
       progress: ['contracts', 'geometry', 'strategy', 'resources', 'progress'],
       // Resource rules and agent states: pure, contracts only.
       resources: ['contracts', 'resources'],
+      // Upgrade planning: simulations over resources and the ETA; no purchase, no I/O.
+      upgrades: ['contracts', 'resources', 'progress', 'upgrades'],
     };
     for (const file of sourceFiles(srcDir)) {
       const folder = path.relative(srcDir, file).split(path.sep)[0] ?? '';

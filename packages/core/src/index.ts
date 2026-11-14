@@ -16,3 +16,4 @@ export * from './strategy/index.js';
 export * from './canvas/index.js';
 export * from './progress/index.js';
 export * from './resources/index.js';
+export * from './upgrades/index.js';

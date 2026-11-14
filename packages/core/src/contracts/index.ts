@@ -6,7 +6,7 @@
  *   1 geometry, palette, resources, accounts, ports
  *   2 template, canvas
  *   3 strategy, work, progress
- *   4 scheduler
+ *   4 scheduler, upgrades
  */
 
 export * from './primitives.js';
@@ -22,3 +22,4 @@ export * from './strategy.js';
 export * from './work.js';
 export * from './progress.js';
 export * from './scheduler.js';
+export * from './upgrades.js';
