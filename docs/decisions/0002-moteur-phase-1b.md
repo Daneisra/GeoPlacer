@@ -350,3 +350,25 @@ Réalisé :
 - L'image quantifiée est persistée et jamais recalculée au chargement : la
   couleur, donc le `TaskId`, ne dépend pas de l'arrondi d'un moteur
   JavaScript.
+
+## 11. Mise en œuvre de la Phase 1B.2 : contrats v2 des modèles
+
+`CORE_CONTRACT_VERSION` passe à **2** : le contrat des modèles change de
+forme. Rien n'était encore persisté, donc aucune migration de données
+n'est nécessaire.
+
+| Élément | Changement | Raison |
+|---|---|---|
+| `TemplateMetadataV1`, `TemplateMetadataCodec`, `TemplateInput`, `TemplatePatch` | Remplacés par `TemplateManifestV1` (un manifeste par modèle, révisions immuables en liste) et par `CreateTemplateInput`, `RevisionChange`, `SettingsPatch` | Séparer ce qui crée une révision de ce qui n'en crée pas |
+| `TemplateManager` | Asynchrone ; `load` avec `LoadReport`, `revise`, `restoreRevision`, `updateSettings`, `setStatus`, `duplicate`, `delete` (confirmation par le nom), `verify` | Fonctions demandées pour la 1B.2 |
+| `Template` | Ajouts : `alphaThreshold`, `quantization`, `sourceImageHash`, `quantizedImageHash` | La révision porte tout ce qui détermine ses pixels |
+| Ports (couche 1) | `TemplateStorage` (comparaison-échange sur `generation`), `PngCodec`, `Hasher`, `IdSource`, `TimeSource` | Cœur sans E/S ; implémentations dans `@geoplacer/adapters-node` |
+| Identifiants | `[a-z0-9-]{1,64}` sans nom de périphérique Windows | Noms de dossiers sûrs sous NTFS |
+
+Les critères reportés de la § 10 sont tenus :
+- limites de 4096 × 4096 et 16 777 216 pixels par défaut, vérifiées
+  avant toute allocation ;
+- index `Uint32` garanti par `assertValidLimits` ;
+- image quantifiée persistée, jamais recalculée au chargement.
+
+Détails : [modeles.md](../fr/modeles.md).

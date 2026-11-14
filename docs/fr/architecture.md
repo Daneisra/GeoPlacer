@@ -1,9 +1,10 @@
 # Architecture de GeoPlacer
 
-État : **Phase 1B.1**. Les contrats existent depuis la 1B.0 ; la géométrie,
-les couleurs et les palettes sont implémentées (voir
-[geometrie-couleurs.md](geometrie-couleurs.md)). Le serveur et l'interface
-hérités de Wplacer fonctionnent comme avant.
+État : **Phase 1B.2**. Les contrats existent depuis la 1B.0 ; la géométrie,
+les couleurs et les palettes sont implémentées en 1B.1 (voir
+[geometrie-couleurs.md](geometrie-couleurs.md)) ; le gestionnaire de
+modèles et sa persistance en 1B.2 (voir [modeles.md](modeles.md)). Le
+serveur et l'interface hérités de Wplacer fonctionnent comme avant.
 
 ## Arborescence
 
@@ -16,12 +17,15 @@ GeoPlacer/
 │   │   │   ├── contracts/        interfaces et constantes, sans algorithme
 │   │   │   ├── geometry/         projection, rectangles, limites, conversion de repère (1B.1)
 │   │   │   ├── color/            RVB, OKLab, distances (1B.1)
-│   │   │   └── palette/          palettes par agent, plus proche couleur, quantification (1B.1)
+│   │   │   ├── palette/          palettes par agent, plus proche couleur, quantification (1B.1)
+│   │   │   └── template/         gestionnaire de modèles, manifeste, révisions, stockage mémoire (1B.2)
 │   │   ├── bench/                benchmarks (npm run bench:core)
-│   │   ├── test/                 Vitest (constantes, types, architecture)
+│   │   ├── test/                 Vitest (dont la suite de conformité des stockages)
 │   │   ├── tsconfig.json         compilation (sans types Node ni DOM)
 │   │   ├── tsconfig.test.json    vérification des sources et des tests
 │   │   └── vitest.config.ts
+│   ├── adapters-node/            @geoplacer/adapters-node : stockage fichiers, codec PNG (pngjs),
+│   │                             SHA-256, UUID, horloge ; benchmark npm run bench:templates (1B.2)
 │   └── simulator/                @geoplacer/simulator (squelette, dépend de core)
 ├── src/                          serveur hérité (Express, Jest) — inchangé
 ├── frontend/                     interface React héritée — inchangée
@@ -35,22 +39,28 @@ est une décision séparée, qui n'est pas encore prise (ADR 0002, § 7).
 ## Règles de dépendance
 
 ```
-@geoplacer/simulator  ──►  @geoplacer/core  ◄──  (futur) serveur
+@geoplacer/simulator      ──►  @geoplacer/core  ◄──  (futur) serveur
+@geoplacer/adapters-node  ──►  @geoplacer/core
 ```
 
 - `core` ne dépend d'**aucun** paquet externe, d'aucun module Node et d'aucune
   API du navigateur. Il n'effectue aucune entrée/sortie. Un test
   d'architecture le vérifie à chaque exécution.
-- `simulator` dépend de `core` (référence de projet TypeScript). L'inverse
-  est interdit, ce qui exclut tout cycle entre paquets.
+- `simulator` et `adapters-node` dépendent de `core` (références de projet
+  TypeScript). L'inverse est interdit, ce qui exclut tout cycle entre
+  paquets. `adapters-node` n'a qu'une autre dépendance : `pngjs` 7.0.0
+  (JavaScript pur, MIT), vérifiée par test.
+- Les entrées/sorties du gestionnaire de modèles passent par des **ports**
+  (`TemplateStorage`, `PngCodec`, `Hasher`, `IdSource`, `TimeSource`),
+  définis dans `core` et implémentés par `adapters-node` ou par les tests.
 - Dans `core`, les contrats sont organisés en couches ; un fichier n'importe
   que des couches inférieures (vérifié par test) :
 
 | Couche | Fichiers | Contenu |
 |---|---|---|
 | 0 | `primitives`, `config` | Identifiants nominaux, `Rgb`, sentinelles de transparence, `Clock`, `EngineConfig` |
-| 1 | `geometry`, `palette`, `resources`, `accounts` | `Projection`, `PaletteManager`, `ColorDistance`, `ResourceManager`, `UpgradePlanner`, `AccountManager` |
-| 2 | `template`, `canvas` | `TemplateManager`, métadonnées PNG + JSON, `CanvasReader`, `CanvasWriter`, `CanvasProvider` |
+| 1 | `geometry`, `palette`, `resources`, `accounts`, `ports` | `Projection`, `PaletteManager`, `ColorDistance`, `ResourceManager`, `UpgradePlanner`, `AccountManager`, ports d'E/S |
+| 2 | `template`, `canvas` | `TemplateManager`, manifeste et révisions, `CanvasReader`, `CanvasWriter`, `CanvasProvider` |
 | 3 | `strategy`, `work`, `progress` | `DrawingStrategy`, `WorkPlanner`, `AttemptManager`, journal, historique, `ProgressCalculator`, `EtaEstimator` |
 | 4 | `scheduler` | `TaskScheduler`, événements du moteur |
 
@@ -61,7 +71,8 @@ est une décision séparée, qui n'est pas encore prise (ADR 0002, § 7).
 | Contrats (interfaces, constantes) | `packages/core/src/contracts/` | 1B.0 (fait) |
 | Logique métier pure | `packages/core/src/<domaine>/` | 1B.1 (géométrie, couleurs, palettes : fait) à 1B.8 |
 | Implémentations simulées | `packages/simulator/src/` | 1B.7 |
-| Adaptateurs d'E/S (fichiers, WebSocket) | serveur | 1B.9 |
+| Adaptateurs d'E/S Node (fichiers, PNG, SHA-256) | `packages/adapters-node/src/` | 1B.2 (modèles : fait) |
+| Branchement au serveur, WebSocket | serveur | 1B.9 |
 
 ## Principes structurants
 
@@ -91,6 +102,7 @@ détection de cycles sur tout `src`) :
 | `geometry` | `contracts`, `geometry` |
 | `color` | `contracts`, `color` |
 | `palette` | `contracts`, `color`, `palette` |
+| `template` | `contracts`, `color`, `palette`, `geometry`, `template` |
 
 ## Limites des contrôles automatiques
 

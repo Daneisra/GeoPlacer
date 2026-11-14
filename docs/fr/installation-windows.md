@@ -125,30 +125,50 @@ npm start               # node --env-file-if-exists=.env dist/server.js
 Le serveur affiche `Server listening on http://127.0.0.1:3000`. L'interface
 compilée (`frontend/dist`) est servie à la même adresse.
 
-### Mode développement (partiellement vérifié en Phase 1B.1)
+### Mode développement : anomalie ouverte (diagnostic de la Phase 1B.2)
 
-Résultat du test du 14/11/2026, dans un environnement non interactif :
-- **Vite** démarre, sert l'interface, et son proxy renvoie l'interface lors
-  d'un rafraîchissement direct d'une page ;
-- **sous `npm run dev`**, le backend lancé par `concurrently` (`tsx watch`)
-  n'a pas démarré, **y compris avec la commande d'origine**
-  `--env-file=.env` : ce n'est pas une régression, mais la cause n'est pas
-  établie ;
-- **lancé seul**, le backend démarre normalement.
+Dans l'environnement de test, qui est non interactif, le backend lancé par
+`npm run dev` ne démarre pas. Diagnostic du 14/11/2026 :
+- sorties standard et d'erreur capturées séparément ;
+- arbre de processus relevé ;
+- cmd.exe et PowerShell essayés ;
+- arrêt de tout l'arbre (`taskkill /T /F`) après chaque essai.
 
-En attendant, utiliser deux terminaux, ou `start.bat`, qui lance déjà le
-backend sans `concurrently` :
+| Lancement | Entrée standard | Backend |
+|---|---|---|
+| `npm run dev` (cmd.exe ou PowerShell, avec ou sans `--raw`) | tube fourni par `concurrently` | **ne démarre pas** (aucune sortie en 120 s) |
+| `npm run dev:backend` seul | tube ouvert et muet | **ne démarre pas** |
+| `npm run dev:backend` seul | fermée (`ignore`) | démarre en 6 s |
+| `concurrently` + `tsx` **sans** `watch` | tube | démarre |
+| `concurrently` + `node --watch --import tsx` | tube | démarre en 6 s |
+
+**Cause identifiée (déclencheur)** : `tsx watch` lit son entrée standard
+(touche Entrée pour relancer). Quand cette entrée est un **tube** resté
+ouvert, ce qui est toujours le cas sous `concurrently`, le serveur se
+bloque au chargement de `chalk` 5.6.2, importé par `gradient-string`
+3.0.0 (bannière de démarrage).
+
+Isolé par bissection :
+- un script trivial, `express`, `ws` et `swagger` ne bloquent pas ;
+- `tty.isatty` seul ne bloque pas.
+
+La ligne exacte en cause dans `chalk` n'est pas identifiée.
+
+Dans un vrai terminal, `npm run dev:backend` reçoit la console et non un
+tube : il doit fonctionner. **`npm run dev` reste à vérifier dans un vrai
+terminal**, car `concurrently` donne toujours un tube à ses enfants.
+
+**Contournement** (deux terminaux, ou `start.bat`) :
 
 ```powershell
-npm run dev:backend     # terminal 1 : tsx watch (vérifié seul)
+npm run dev:backend     # terminal 1 : tsx watch, port 3000
 npm run dev:frontend    # terminal 2 : Vite, port 5173
 ```
 
-Commande d'origine, à revérifier dans un vrai terminal :
-
-```powershell
-npm run dev             # backend (tsx watch) + frontend (Vite, port 5173)
-```
+**Correction proposée, non appliquée** (à valider) : remplacer
+`npx tsx watch` par `node --watch --import tsx` dans `dev` et
+`dev:backend`. Vérifiée sous `concurrently` : démarrage en 6 s, et
+relance automatique quand un fichier `.ts` importé change.
 
 ## 6. Configuration (`.env`)
 

@@ -18,24 +18,34 @@ npm run check                 # tsc, lint, lint:packages, puis test:all (contrô
 cd frontend; npx eslint .; npm run build
 ```
 
-## Tests des paquets (Phase 1B.1 : Vitest, 8 fichiers, 83 tests + 1 exhaustif optionnel)
+## Tests des paquets (Phase 1B.2 : Vitest, 13 fichiers, 165 tests + 1 exhaustif optionnel)
 
 | Paquet | Fichier | Objet |
 |---|---|---|
 | core | `constants.test.ts` | Valeurs des constantes (un seul agent, sentinelles, versions) |
-| core | `contracts.types.test.ts` | Garanties de types : lecture seule sans `writer`, ordonnanceur limité aux fournisseurs inscriptibles, identifiants et couleurs nominaux, métadonnées PNG + JSON |
+| core | `contracts.types.test.ts` | Garanties de types : lecture seule sans `writer`, ordonnanceur limité aux fournisseurs inscriptibles, identifiants et couleurs nominaux, manifeste et gestionnaire de modèles |
 | core | `architecture.test.ts` | Aucun import externe ni Node/DOM ; couches sans cycle ; aucun algorithme dans les contrats |
 | core | `package.test.ts` | Point d'entrée |
 | core | `geometry.test.ts` | Projection (1×1, non carrée, négatifs, origine non nulle, Y inversé), limites et placement partiel, allers-retours, entrées invalides, conversion de repère |
 | core | `color.test.ts` | RVB et hexadécimal, alpha, noir ≠ transparent, OKLab (références d'Ottosson, gris, aller-retour), distances (métrique, espace euclidien) |
 | core | `palette.test.ts` | Plus proche couleur, règle d'égalité, doublons, chemin rapide = chemin générique, quantification déterministe, palettes par agent, couleurs absentes |
+| core | `template-validation.test.ts` | En-tête PNG (types, profondeurs, CRC, tronqué), limites avant décodage (bombe PNG), identifiants et noms, pixels canoniques, quantification par défaut |
+| core | `template-manifest.test.ts` | Manifeste : aller-retour stable, `extensions` conservées, schéma plus récent refusé, 28 manifestes malformés refusés ; règles de révision |
+| core | `template-manager.test.ts` | Création, PNG invalide ou corrompu, dimensions excessives, image entièrement transparente ou opaque, seuil alpha, déterminisme, révisions, réglages sans révision, restauration, concurrence, conflit, empreinte fausse, récupération, manifeste malformé ou étranger, projets, duplication, suppression |
+| core | `template-storage.test.ts` | Suite de conformité sur le stockage mémoire (panne injectée à chaque appel) |
+| adapters-node | `adapters.test.ts` | Même suite de conformité sur le stockage fichiers ; décodage pngjs (palette + tRNS, gris 1/16 bits, entrelacé…) ; disposition des fichiers ; fichiers modifiés sur disque ; chemins refusés ; arrêt brutal d'un processus réel ; dépendances du paquet |
+| simulator | `package.test.ts` | Résolution de `@geoplacer/core` (valeurs et types) |
 
 Test exhaustif facultatif (aller-retour OKLab des 16,7 M couleurs, environ
 10 s) : `$env:GEOPLACER_EXHAUSTIVE="1"; npm run test --workspace=packages/core`.
 
-Benchmarks : `npm run bench:core` (résultats dans
-[geometrie-couleurs.md](geometrie-couleurs.md) § 4).
-| simulator | `package.test.ts` | Résolution de `@geoplacer/core` (valeurs et types) |
+Benchmarks :
+- `npm run bench:core` : résultats dans
+  [geometrie-couleurs.md](geometrie-couleurs.md) § 4 ;
+- `npm run bench:templates` : résultats dans [modeles.md](modeles.md) § 6.
+
+Mutation vérifiée en 1B.2 : publier le manifeste **avant** d'écrire les
+blobs fait échouer la suite de conformité (scénario « nouvelle source »).
 
 Les garanties de types sont vérifiées par `npm run typecheck:packages` : un
 `@ts-expect-error` devenu inutile fait échouer la vérification. Deux

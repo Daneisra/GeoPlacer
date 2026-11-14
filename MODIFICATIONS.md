@@ -27,6 +27,22 @@ licence. L'historique Git complet du projet d'origine est conservé.
 - `start.bat` : installation des deux projets par le chemin vérifié.
 - Documentation française (`docs/fr/`, `docs/decisions/`).
 
+## 2026-11-14 — Phase 1B.2 : gestion des modèles
+
+- `packages/core/src/template` : gestionnaire de modèles pur (via des
+  ports), lecture de l'en-tête PNG et limites avant décodage, pixels
+  canoniques, manifeste versionné (schéma 1), règles de révision,
+  stockage en mémoire.
+- Nouveau paquet `packages/adapters-node` : stockage fichiers atomique
+  (temporaire, `fsync`, renommage avec reprise, `.bak` copié, chemins
+  confinés), codec PNG pngjs 7.0.0, SHA-256, UUID, horloge.
+- Tests : suite de conformité commune aux deux stockages avec panne
+  injectée à chaque appel, arrêt brutal d'un processus réel, PNG invalides
+  ou corrompus, transparence, seuil alpha, isolation des projets.
+- Benchmark `npm run bench:templates` (2000² et 4096²).
+- Documentation : `docs/fr/modeles.md`, ADR 0002 § 11, inventaire complet
+  de l'ADR 0003, diagnostic de `npm run dev`.
+
 ## 2026-11-14 — Phase 1B.1 : géométrie et couleurs
 
 - `packages/core/src/geometry` : projection image ↔ toile (Y descendant ou
