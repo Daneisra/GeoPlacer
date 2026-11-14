@@ -6,7 +6,11 @@ GeoPlacer est un fork de
 pour GeoPixels, avec un moteur développé et testé **uniquement sur simulateur
 local** (voir l'ADR 0001).
 
-## État actuel : Phase 1B.0, espace de travail du nouveau moteur
+## État actuel : Phase 1B.1, géométrie et couleurs
+
+Réalisé en Phase 1B.1 : projection image ↔ toile, conversions OKLab,
+palettes par agent et quantification (voir
+[geometrie-couleurs.md](geometrie-couleurs.md)).
 
 Réalisé en Phase 1B.0 :
 - paquets `@geoplacer/core` (contrats seuls) et `@geoplacer/simulator`
@@ -41,6 +45,7 @@ Le moteur de dessin hérité n'est **pas** fonctionnel et sera remplacé.
 | Document | Contenu |
 |---|---|
 | [architecture.md](architecture.md) | Paquets, couches, règles de dépendance, principes du moteur |
+| [geometrie-couleurs.md](geometrie-couleurs.md) | Repères, projection, OKLab, palettes, quantification, performances |
 | [installation-windows.md](installation-windows.md) | Installation et lancement vérifiés sous Windows |
 | [securite.md](securite.md) | Modèle de menace, protections, limites |
 | [persistance.md](persistance.md) | Fichiers de données, écriture atomique, sauvegarde et restauration |
@@ -48,4 +53,5 @@ Le moteur de dessin hérité n'est **pas** fonctionnel et sera remplacé.
 | [recette-navigateur.md](recette-navigateur.md) | Procédure de vérification manuelle dans un navigateur |
 | [../decisions/0001-fork-et-perimetre.md](../decisions/0001-fork-et-perimetre.md) | Décision de fork et périmètre |
 | [../decisions/0002-moteur-phase-1b.md](../decisions/0002-moteur-phase-1b.md) | Nouveau moteur (statut : accepté avec ajustements) |
+| [../decisions/0003-migration-api-v1.md](../decisions/0003-migration-api-v1.md) | Migration des routes vers `/api/v1/` (statut : proposé) |
 | [../../MODIFICATIONS.md](../../MODIFICATIONS.md) | Modifications apportées au code d'origine (AGPL §5a) |

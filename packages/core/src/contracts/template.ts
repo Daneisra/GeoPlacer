@@ -47,6 +47,11 @@ export interface Template {
   readonly revision: number;
   readonly image: TemplateImage;
   readonly placement: TemplatePlacement;
+  /**
+   * Coordinate system in which `placement` is expressed. The canvas reader's
+   * system is the reference; a different one is converted explicitly
+   * (geometry/convertPlacement), never implicitly.
+   */
   readonly coordinateSystem: CoordinateSystem;
   readonly palette: Palette;
   /** Higher first. */
@@ -90,6 +95,11 @@ export interface TemplateMetadataV1 {
     readonly pngSha256: string;
   };
   readonly placement: TemplatePlacement;
+  /**
+   * Coordinate system in which `placement` is expressed. The canvas reader's
+   * system is the reference; a different one is converted explicitly
+   * (geometry/convertPlacement), never implicitly.
+   */
   readonly coordinateSystem: CoordinateSystem;
   readonly palette: Palette;
   readonly strategy: StrategyConfig;

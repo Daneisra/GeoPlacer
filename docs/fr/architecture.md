@@ -1,8 +1,9 @@
 # Architecture de GeoPlacer
 
-État : **Phase 1B.0**. L'espace de travail du nouveau moteur est en place ;
-seuls les contrats existent. Le serveur et l'interface hérités de Wplacer
-fonctionnent comme avant.
+État : **Phase 1B.1**. Les contrats existent depuis la 1B.0 ; la géométrie,
+les couleurs et les palettes sont implémentées (voir
+[geometrie-couleurs.md](geometrie-couleurs.md)). Le serveur et l'interface
+hérités de Wplacer fonctionnent comme avant.
 
 ## Arborescence
 
@@ -12,7 +13,11 @@ GeoPlacer/
 │   ├── core/                     @geoplacer/core
 │   │   ├── src/
 │   │   │   ├── index.ts          point d'entrée public
-│   │   │   └── contracts/        interfaces et constantes, sans algorithme
+│   │   │   ├── contracts/        interfaces et constantes, sans algorithme
+│   │   │   ├── geometry/         projection, rectangles, limites, conversion de repère (1B.1)
+│   │   │   ├── color/            RVB, OKLab, distances (1B.1)
+│   │   │   └── palette/          palettes par agent, plus proche couleur, quantification (1B.1)
+│   │   ├── bench/                benchmarks (npm run bench:core)
 │   │   ├── test/                 Vitest (constantes, types, architecture)
 │   │   ├── tsconfig.json         compilation (sans types Node ni DOM)
 │   │   ├── tsconfig.test.json    vérification des sources et des tests
@@ -54,7 +59,7 @@ est une décision séparée, qui n'est pas encore prise (ADR 0002, § 7).
 | Niveau | Emplacement | Phase |
 |---|---|---|
 | Contrats (interfaces, constantes) | `packages/core/src/contracts/` | 1B.0 (fait) |
-| Logique métier pure | `packages/core/src/<domaine>/` | 1B.1 à 1B.8 |
+| Logique métier pure | `packages/core/src/<domaine>/` | 1B.1 (géométrie, couleurs, palettes : fait) à 1B.8 |
 | Implémentations simulées | `packages/simulator/src/` | 1B.7 |
 | Adaptateurs d'E/S (fichiers, WebSocket) | serveur | 1B.9 |
 
@@ -76,6 +81,16 @@ est une décision séparée, qui n'est pas encore prise (ADR 0002, § 7).
   l'historique sont persistés (ADR 0002, § 3).
 - **Aucune intégration non autorisée.** Aucun fournisseur n'écrit sur un
   service public.
+
+Dépendances autorisées entre dossiers de `core` (vérifiées par test, avec
+détection de cycles sur tout `src`) :
+
+| Dossier | Peut importer |
+|---|---|
+| `contracts` | `contracts` |
+| `geometry` | `contracts`, `geometry` |
+| `color` | `contracts`, `color` |
+| `palette` | `contracts`, `color`, `palette` |
 
 ## Limites des contrôles automatiques
 

@@ -103,6 +103,9 @@ npm run test:all              # typecheck des paquets, puis Jest, puis Vitest
 npm run check                 # tsc, lint, lint:packages, puis test:all (contrôle complet)
 npm run build                 # paquets + backend + frontend
 
+# Benchmarks géométrie et couleurs (quelques minutes)
+npm run bench:core
+
 # Un seul paquet, ou en mode surveillance
 npm run test --workspace=packages/core
 cd packages/core; npx vitest; cd ....

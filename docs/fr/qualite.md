@@ -18,7 +18,7 @@ npm run check                 # tsc, lint, lint:packages, puis test:all (contrô
 cd frontend; npx eslint .; npm run build
 ```
 
-## Tests des paquets (Phase 1B.0 : Vitest, 6 fichiers, 17 tests)
+## Tests des paquets (Phase 1B.1 : Vitest, 8 fichiers, 78 tests + 1 exhaustif optionnel)
 
 | Paquet | Fichier | Objet |
 |---|---|---|
@@ -26,6 +26,15 @@ cd frontend; npx eslint .; npm run build
 | core | `contracts.types.test.ts` | Garanties de types : lecture seule sans `writer`, ordonnanceur limité aux fournisseurs inscriptibles, identifiants et couleurs nominaux, métadonnées PNG + JSON |
 | core | `architecture.test.ts` | Aucun import externe ni Node/DOM ; couches sans cycle ; aucun algorithme dans les contrats |
 | core | `package.test.ts` | Point d'entrée |
+| core | `geometry.test.ts` | Projection (1×1, non carrée, négatifs, origine non nulle, Y inversé), limites et placement partiel, allers-retours, entrées invalides, conversion de repère |
+| core | `color.test.ts` | RVB et hexadécimal, alpha, noir ≠ transparent, OKLab (références d'Ottosson, gris, aller-retour), distances (métrique, espace euclidien) |
+| core | `palette.test.ts` | Plus proche couleur, règle d'égalité, doublons, chemin rapide = chemin générique, quantification déterministe, palettes par agent, couleurs absentes |
+
+Test exhaustif facultatif (aller-retour OKLab des 16,7 M couleurs, environ
+10 s) : `$env:GEOPLACER_EXHAUSTIVE="1"; npm run test --workspace=packages/core`.
+
+Benchmarks : `npm run bench:core` (résultats dans
+[geometrie-couleurs.md](geometrie-couleurs.md) § 4).
 | simulator | `package.test.ts` | Résolution de `@geoplacer/core` (valeurs et types) |
 
 Les garanties de types sont vérifiées par `npm run typecheck:packages` : un

@@ -27,6 +27,20 @@ licence. L'historique Git complet du projet d'origine est conservé.
 - `start.bat` : installation des deux projets par le chemin vérifié.
 - Documentation française (`docs/fr/`, `docs/decisions/`).
 
+## 2026-11-14 — Phase 1B.1 : géométrie et couleurs
+
+- `packages/core/src/geometry` : projection image ↔ toile (Y descendant ou
+  ascendant), limites et placement partiel, conversion explicite entre
+  repères, validation stricte.
+- `packages/core/src/color` : RVB 24 bits, règle alpha, conversions OKLab,
+  distances OKLab et RVB, espace euclidien déclaratif.
+- `packages/core/src/palette` : palettes par agent, plus proche couleur
+  avec règle d'égalité documentée, quantification déterministe compacte,
+  couleurs absentes.
+- Benchmarks (`npm run bench:core`), règles d'architecture étendues.
+- Documentation : `docs/fr/geometrie-couleurs.md`, ADR 0002 § 10,
+  ADR 0003 (plan de migration `/api/v1`, proposé).
+
 ## 2026-11-14 — Phase 1B.0 : espace de travail du nouveau moteur
 
 - `.env` retiré du suivi Git (fichier local conservé), `.env.*` ignorés sauf

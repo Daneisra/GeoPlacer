@@ -267,7 +267,7 @@ Réalisé :
 | `SchedulerDependencies` sans progression | `progress` et `eta` ajoutés | Les événements `progress` portent `etaMs` |
 | — | Identifiants `ProjectId`, type `Timestamp` | Clarté des contrats |
 
-### Points ouverts avant la 1B.1
+### Points ouverts avant la 1B.1 (tranchés le 14/11/2026, voir § 10)
 
 1. **Système de coordonnées en double** : il est porté à la fois par
    `Template.coordinateSystem` et par `CanvasReader.coordinateSystem`, et
@@ -285,3 +285,53 @@ Réalisé :
    par l'utilisateur.
 4. **Routes de l'API sous `/api/`** (F13) : à étudier, avec une
    compatibilité transitoire pour le frontend existant.
+
+## 10. Décisions du 14/11/2026 et mise en œuvre de la Phase 1B.1
+
+### Décisions
+
+1. **Repères.** Le repère du `CanvasReader` fait foi pour la toile. Trois
+   espaces sont distingués :
+   - l'image source, qui est l'espace du modèle (origine en haut à gauche,
+     Y vers le bas) ;
+   - le modèle positionné, défini par `placement.topLeft` ;
+   - la toile.
+
+   Un modèle dont le placement est exprimé dans un repère d'orientation
+   différente **n'est pas refusé** : il est converti explicitement
+   (`convertPlacement`). Seuls sont refusés les systèmes inconnus, les
+   conversions ambiguës (`AMBIGUOUS_TRANSFORM`) et les placements contraires
+   aux contraintes (`assertPlacement`). Aucune inversion implicite. Détail :
+   [docs/fr/geometrie-couleurs.md](../fr/geometrie-couleurs.md).
+2. **`TaskId`** (implémentation prévue en 1B.6, fonction pure du cœur) :
+   - dérivé de `(templateId, révision, ix, iy, couleur)` ;
+   - **coordonnées de l'image**, pas de la toile : elles sont toujours des
+     entiers positifs canoniques et ne dépendent ni du repère de la toile
+     ni d'une conversion de placement. Le passage à la toile reste univoque,
+     car tout changement de placement incrémente la révision ;
+   - indépendant de la stratégie de dessin ;
+   - forme canonique :
+     `<templateId encodé>:<révision>:<ix>:<iy>:<rrggbb>`, avec :
+     - `templateId` encodé par `encodeURIComponent` ;
+     - les entiers en base 10, sans zéro de tête ni signe ;
+     - la couleur en hexadécimal minuscule sur 6 chiffres.
+3. **`AttemptId`** : identifiant unique durable, généré par l'**adaptateur
+   d'infrastructure** (par exemple UUID v7, ordonné dans le temps), puis
+   injecté dans le cœur par un port (`IdSource`). Le cœur ne produit jamais
+   d'aléa ni d'horodatage par lui-même. Il est journalisé dès le bail, donc
+   il survit aux redémarrages.
+4. **Interface sans `.env`** : l'interface doit être servie dès qu'une
+   version compilée existe, indépendamment de `NODE_ENV`, avec un message
+   explicite si elle n'est pas compilée. Commit séparé, après la 1B.1.
+5. **API sous `/api/v1/`** : migration progressive, avec compatibilité
+   temporaire des routes actuelles. Plan :
+   [ADR 0003](0003-migration-api-v1.md).
+
+### Écarts introduits par la 1B.1
+
+| Élément | Changement | Raison |
+|---|---|---|
+| `ColorDistance` | `euclideanSpace?` facultatif (`EuclideanColorSpace` : `dimensions`, `project`) | Mesuré : la quantification d'un bruit 2000×2000 passait de 26,5 s à 3,7 s ; le contrat reste remplaçable |
+| `Projection` | Contrat inchangé ; fonctions ajoutées hors contrat : `placementTransform`, `locateInImage`, `checkPlacement`, `assertPlacement`, `canvasSystemTransform`, `convertPlacement` | Parcours sans allocation, limites, conversion de repère |
+| `Template.coordinateSystem` | Sens précisé : repère dans lequel `placement` est exprimé | Décision 1 |
+| `PaletteManager` | Contrat inchangé ; ajouts : `createPaletteMatcher`, `agentColors`, `quantizeRgba` (avec statistiques), `countColors` | Palettes par agent, mémo réutilisable |
