@@ -1,6 +1,7 @@
 /**
  * GeoPlacer Phase 1B — proposed core interfaces (draft v2).
- * Status: PROPOSED (ADR 0002). Not compiled by the project build; checked with
+ * Status: SUPERSEDED on 2026-11-14 by packages/core/src/contracts (ADR 0002, section 9).
+ * Kept for history. Not compiled by the project build; was checked with
  * tsc --strict --exactOptionalPropertyTypes --noUncheckedIndexedAccess.
  * Target: packages/core (no I/O, no service-specific code, no DOM/Node types).
  */

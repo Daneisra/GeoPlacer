@@ -26,3 +26,17 @@ licence. L'historique Git complet du projet d'origine est conservé.
 - Migration vers Zod 4.6.7 et collections bornées.
 - `start.bat` : installation des deux projets par le chemin vérifié.
 - Documentation française (`docs/fr/`, `docs/decisions/`).
+
+## 2026-11-14 — Phase 1B.0 : espace de travail du nouveau moteur
+
+- `.env` retiré du suivi Git (fichier local conservé), `.env.*` ignorés sauf
+  les exemples, démarrage possible sans `.env` (`--env-file-if-exists`),
+  `.env` généré par `start.bat` depuis `.env.example`.
+- Lecture centralisée et validée de la configuration
+  (`src/config/server-config.ts`).
+- `@types/node` aligné sur Node 22.
+- Espaces de travail npm `packages/core` et `packages/simulator`,
+  configuration TypeScript stricte (`tsconfig.base.json`), Vitest 5.1.0.
+- Contrats du moteur, sans algorithme (`packages/core/src/contracts`).
+- Documentation : architecture, ADR 0002 accepté avec ajustements,
+  commandes Windows, qualité.

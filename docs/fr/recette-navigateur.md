@@ -47,7 +47,7 @@ Lancer Node directement, sans `npm start` : ainsi, le Ctrl+C de l'étape 5
 atteint bien le serveur.
 
 ```powershell
-node --env-file=.env dist/server.js
+node --env-file-if-exists=.env dist/server.js
 ```
 
 | Attendu | Résultat |
@@ -111,7 +111,7 @@ Dans **Settings** :
    |---|---|
    | `Received SIGINT. Starting graceful shutdown...`, puis `Graceful shutdown completed` (sinon, noter le message exact) | |
 
-2. Relancer `node --env-file=.env dist/server.js`, ouvrir
+2. Relancer `node --env-file-if-exists=.env dist/server.js`, ouvrir
    `http://127.0.0.1:3000/`, puis aller dans **Settings** par le menu.
 
    | Attendu | Résultat |
@@ -167,7 +167,7 @@ paramètres de test : il peut être supprimé.
 | Fenêtre du pare-feu Windows | Refuser l'accès. Vérifier que `.env` contient `HOST="127.0.0.1"`. |
 | Page `{"error":"Forbidden","reason":"cross-site"}` | L'adresse a été ouverte depuis un lien d'une autre page : la taper ou la coller directement. |
 | Page `…"reason":"forbidden-host"` | L'adresse utilisée n'est ni `127.0.0.1` ni `localhost` : utiliser `http://127.0.0.1:3000/`. |
-| Port 3000 occupé | `$env:PORT=3100; node --env-file=.env dist/server.js` (sans modifier `.env`), puis ouvrir `http://127.0.0.1:3100/`. Le flux de logs en direct sera indisponible (port fixé à 3000). |
+| Port 3000 occupé | `$env:PORT=3100; node --env-file-if-exists=.env dist/server.js` (sans modifier `.env`), puis ouvrir `http://127.0.0.1:3100/`. Le flux de logs en direct sera indisponible (port fixé à 3000). |
 | Le serveur ne démarre pas (`canvas.node` manquant, module absent) | `$env:GEOPLACER_SETUP_ONLY="1"; .\start.bat; Remove-Item Env:GEOPLACER_SETUP_ONLY`, puis `npx tsc`. |
 | Ctrl+C ne rend pas la main | Fermer la fenêtre du terminal. Les écritures atomiques protègent `data\`. |
 | Paramètres ou données incohérents | Serveur arrêté : supprimer `data\`, ou restaurer `..\GeoPlacer-recette-sauvegarde-data`. |

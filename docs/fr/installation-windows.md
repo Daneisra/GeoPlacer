@@ -81,10 +81,32 @@ Get-FileHash "$(npm config get cache)\_prebuilds\*canvas-v3.2.3-napi-v7-win32-x6
 
 ## 4. Compiler et vérifier
 
+Le dépôt contient deux ensembles de code, testés avec deux outils :
+- le **serveur hérité** (`src/`), testé avec **Jest** ;
+- les **nouveaux paquets** (`packages/core`, `packages/simulator`), testés
+  avec **Vitest**.
+
 ```powershell
-npx tsc                 # compile le backend dans dist/
-npm test                # tests Jest
-npm run lint            # ESLint backend (0 erreur attendue)
+# Serveur hérité
+npx tsc                       # compile le backend dans dist/
+npm run test:legacy           # Jest (identique à « npm test »)
+npm run lint                  # ESLint backend (0 erreur attendue)
+
+# Nouveaux paquets
+npm run build:packages        # tsc -b packages/core packages/simulator
+npm run typecheck:packages    # types des sources et des tests (dont les @ts-expect-error)
+npm run test:packages         # Vitest dans chaque paquet
+npm run lint:packages         # ESLint sur packages/
+
+# Tout
+npm run test:all              # Jest puis Vitest
+npm run build                 # paquets + backend + frontend
+
+# Un seul paquet, ou en mode surveillance
+npm run test --workspace=packages/core
+cd packages/core; npx vitest; cd ....
+
+# Frontend seul
 cd frontend; npm run build; cd ..
 ```
 
@@ -93,7 +115,7 @@ cd frontend; npm run build; cd ..
 ### Mode production (vérifié)
 
 ```powershell
-npm start               # node --env-file=.env dist/server.js
+npm start               # node --env-file-if-exists=.env dist/server.js
 ```
 
 Le serveur affiche `Server listening on http://127.0.0.1:3000`. L'interface
@@ -106,6 +128,19 @@ npm run dev             # backend (tsx watch) + frontend (Vite, port 5173)
 ```
 
 ## 6. Configuration (`.env`)
+
+`.env` est **local** : il n'est pas suivi par Git et ne doit jamais être
+commité. Il ne doit contenir aucun secret.
+
+- **Génération** : `start.bat` crée `.env` à partir de `.env.example`
+  s'il est absent, sans jamais écraser un fichier existant. Manuellement :
+  `Copy-Item .env.example .env`.
+- **Fichier facultatif** : sans `.env`, le serveur démarre avec les
+  valeurs par défaut ci-dessous (vérifié sur un clone neuf). Une valeur
+  vide est traitée comme absente ; une valeur invalide est remplacée par son
+  défaut, avec un avertissement `Invalid …` au démarrage.
+- **Fichiers ignorés** : `.env` et `.env.*` sont ignorés par Git, sauf
+  `.env.example` et `.env.*.example`.
 
 | Variable | Défaut | Rôle |
 |---|---|---|

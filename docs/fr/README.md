@@ -6,7 +6,22 @@ GeoPlacer est un fork de
 pour GeoPixels, avec un moteur développé et testé **uniquement sur simulateur
 local** (voir l'ADR 0001).
 
-## État actuel : Phase 1A, fondation et sécurité
+## État actuel : Phase 1B.0, espace de travail du nouveau moteur
+
+Réalisé en Phase 1B.0 :
+- paquets `@geoplacer/core` (contrats seuls) et `@geoplacer/simulator`
+  (squelette) ;
+- Vitest pour ces paquets ;
+- `.env` local et facultatif.
+
+Voir [architecture.md](architecture.md). V1 : **un seul agent actif** ; les
+essais multi-agents se feront uniquement sur le simulateur local.
+
+**Interface non validée** : la recette navigateur
+([recette-navigateur.md](recette-navigateur.md)) n'a pas encore été
+effectuée. Les bugs F12 et F13 restent suivis.
+
+Acquis de la Phase 1A, fondation et sécurité :
 
 - Dépendances reproductibles : lockfiles versionnés, `npm ci`.
 - Serveur local sécurisé :
@@ -25,11 +40,12 @@ Le moteur de dessin hérité n'est **pas** fonctionnel et sera remplacé.
 
 | Document | Contenu |
 |---|---|
+| [architecture.md](architecture.md) | Paquets, couches, règles de dépendance, principes du moteur |
 | [installation-windows.md](installation-windows.md) | Installation et lancement vérifiés sous Windows |
 | [securite.md](securite.md) | Modèle de menace, protections, limites |
 | [persistance.md](persistance.md) | Fichiers de données, écriture atomique, sauvegarde et restauration |
 | [qualite.md](qualite.md) | Tests, lint, évaluation de Vitest |
 | [recette-navigateur.md](recette-navigateur.md) | Procédure de vérification manuelle dans un navigateur |
 | [../decisions/0001-fork-et-perimetre.md](../decisions/0001-fork-et-perimetre.md) | Décision de fork et périmètre |
-| [../decisions/0002-moteur-phase-1b.md](../decisions/0002-moteur-phase-1b.md) | Proposition du nouveau moteur (statut : proposé) |
+| [../decisions/0002-moteur-phase-1b.md](../decisions/0002-moteur-phase-1b.md) | Nouveau moteur (statut : accepté avec ajustements) |
 | [../../MODIFICATIONS.md](../../MODIFICATIONS.md) | Modifications apportées au code d'origine (AGPL §5a) |

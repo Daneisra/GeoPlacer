@@ -60,9 +60,9 @@ Toutes les fonctions de décision sont pures et couvertes par des tests
   `PUT /template/:id`, ordre des couleurs, overlay, `/bridge`, `/t`. À
   vérifier en particulier : le décodeur de codes de partage (RLE), dont la
   sortie peut dépasser la limite d'entrée de 12 Mo.
-- **`.env` est versionné** bien que listé dans `.gitignore`. Tout secret
-  qui y serait ajouté apparaîtrait dans Git. Ne pas y mettre de secret ; le
-  retirer du suivi demandera une étape de copie depuis `.env.example`.
+- **`.env`** (résolu en Phase 1B.0) : retiré du suivi Git, ignoré avec
+  les autres `.env.*` sauf les exemples, généré depuis `.env.example`. Les
+  versions historiques ne contenaient aucun secret (historique non réécrit).
 - **Croissance des journaux** : les requêtes bloquées sont journalisées
   avant le limiteur de débit, et les fichiers de log n'ont pas de rotation.
 - **Vulnérabilités npm restantes** : aucune haute. `glob` (modérée, via

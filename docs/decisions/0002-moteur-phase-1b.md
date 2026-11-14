@@ -1,10 +1,11 @@
 # ADR 0002 : nouveau moteur (Phase 1B)
 
 - **Date** : 13/11/2026
-- **Statut** : **proposé**, en attente de validation
-- **Interfaces** : [`0002-interfaces-proposees.ts`](0002-interfaces-proposees.ts).
-  Vérifiées avec `tsc` en mode `strict`, avec `exactOptionalPropertyTypes`
-  et `noUncheckedIndexedAccess`.
+- **Statut** : **accepté avec ajustements** le 14/11/2026 (voir § 8).
+  Phase 1B.0 réalisée (voir § 9).
+- **Contrats en vigueur** : `packages/core/src/contracts/`.
+- **Brouillon d'origine** : [`0002-interfaces-proposees.ts`](0002-interfaces-proposees.ts),
+  conservé pour l'historique et **remplacé** par les contrats ci-dessus.
 
 ## 1. Objectif
 
@@ -191,7 +192,7 @@ et être déterministe à graine égale.
 Le branchement dans l'interface et la suppression du moteur hérité
 viendront ensuite, dans des commits séparés et justifiés.
 
-## 7. Décisions à valider
+## 7. Décisions soumises à validation (validées le 14/11/2026, sauf la 5)
 
 1. Travail dérivé plutôt que matérialisé (§ 3).
 2. OKLab comme distance de couleur par défaut.
@@ -200,4 +201,71 @@ viendront ensuite, dans des commits séparés et justifiés.
    `canvas`.
 4. `SnapshotCanvasProvider` : suivi de progression réel à partir d'une image
    de la zone importée **manuellement** par l'utilisateur.
-5. Moment du déplacement de `src/` et `frontend/` sous `apps/`.
+5. Moment du déplacement de `src/` et `frontend/` sous `apps/` : **non décidé**.
+
+## 8. Ajustements validés (14/11/2026)
+
+- **Planification dérivée** acceptée, avec ces exigences :
+  - tableaux compacts ;
+  - planification déterministe ;
+  - tentatives à identifiants stables ;
+  - journal de reprise ;
+  - déduplication et réconciliation ;
+  - benchmarks de mémoire et de performance.
+
+  La cible de 200 ms pour `nextBatch` sera mesurée sur 2000×2000, en
+  distinguant les mesures **à froid** et **à chaud**.
+- **OKLab** est la distance initiale, derrière une interface remplaçable
+  (`ColorDistance`). À prévoir :
+  - des conversions RVB ↔ OKLab testées ;
+  - la transparence ;
+  - une palette par agent ;
+  - une quantification déterministe ;
+  - des tests sur des couleurs proches.
+- **PNG + JSON** pour les modèles. Le JSON contient au minimum : version de
+  schéma, dimensions, origine, système de coordonnées, palette, stratégie,
+  identifiant de projet, SHA-256 du PNG. Il est validé et migré
+  (`TemplateMetadataCodec`).
+- **Fournisseurs de toile** :
+  - simulateur ;
+  - import manuel d'instantanés, qui portent une date d'observation ; la
+    progression mesurée sur un instantané est distinguée de la progression
+    simulée ;
+  - capacités de **lecture et d'écriture séparées** : un fournisseur en
+    lecture seule ne peut pas recevoir de placement.
+- **Aucune intégration non autorisée** avec GeoPixels.
+- **V1** : un seul agent actif en production ; multi-agents uniquement sur
+  le simulateur.
+- **F12 et F13** restent suivis. Une séparation des routes de l'API sous
+  `/api/` est à étudier, avec une migration compatible avec le frontend
+  existant.
+
+## 9. Mise en œuvre de la Phase 1B.0 et écarts avec le brouillon
+
+Réalisé :
+- espace de travail `packages/core` et `packages/simulator` ;
+- Vitest 5.1.0 ;
+- `@types/node` ^22 ;
+- contrats seuls (aucun algorithme) dans `packages/core/src/contracts`,
+  en couches sans cycle (vérifié par test) ;
+- `.env` retiré du suivi Git.
+
+Écarts avec `0002-interfaces-proposees.ts` :
+
+| Brouillon | Contrat retenu | Raison |
+|---|---|---|
+| `CanvasProvider` unique avec `capabilities.write` | `CanvasReader` + `CanvasWriter`, union `ReadOnlyCanvasProvider` / `ReadWriteCanvasProvider` | Séparation des capacités garantie à la compilation |
+| `SchedulerDependencies.canvas: CanvasProvider` | `ReadWriteCanvasProvider` ; `AttemptManager.recover` aussi | Un instantané en lecture seule ne peut pas recevoir de placement |
+| `CanvasSnapshot` avec `takenAt` | `source` + `observedAt` obligatoires | Distinguer simulé et mesuré ; obsolescence visible |
+| `ProgressSnapshot` sans origine | `basis: { source, observedAt }` | Idem |
+| `ProgressCalculator.compute(template, snapshot, system, now)` | `compute(template, snapshot, now)` | Le système de coordonnées est porté par le modèle |
+| `PaletteManager.nearest(rgb, palette, metric)` | `nearest(rgb, colors, distance: ColorDistance)` | Distance remplaçable ; la palette de l'agent est passée explicitement |
+| `ColorMetric` (énumération) | Interface `ColorDistance` | Remplacement ultérieur de l'algorithme |
+| `Template` sans projet ni système | `projectId`, `coordinateSystem`, `palette` ajoutés | Alignement sur les métadonnées JSON |
+| — | `TemplateMetadataV1`, `TemplateMetadataCodec`, `TEMPLATE_METADATA_SCHEMA_VERSION` | Stockage PNG + JSON validé et migrable |
+| `Projection.templateBounds(image, …)` | `bounds(size, …)` ; `canvasToImage` renvoie un `ImagePoint` | Pas de dépendance de la géométrie vers le modèle (couches) |
+| `SchedulerDependencies` sans progression | `progress` et `eta` ajoutés | Les événements `progress` portent `etaMs` |
+| — | Identifiants `ProjectId`, type `Timestamp` | Clarté des contrats |
+
+Points restant à décider avant ou pendant la 1B.1 : voir le rapport de la
+Phase 1B.0.

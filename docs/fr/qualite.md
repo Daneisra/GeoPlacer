@@ -2,14 +2,37 @@
 
 ## Commandes
 
+Deux lanceurs coexistent (Phase 1B.0) : **Jest** pour le serveur hérité
+(`src/__tests__`), **Vitest** pour les nouveaux paquets (`packages/*`).
+Aucune migration globale de Jest vers Vitest n'est prévue à ce stade.
+
 ```powershell
-npx tsc --noEmit        # vérification des types (strict)
-npm test                # Jest + ts-jest
-npm run lint            # ESLint backend
+npx tsc --noEmit              # types du serveur hérité (strict)
+npm run test:legacy           # Jest (identique à « npm test »)
+npm run lint                  # ESLint backend
+npm run typecheck:packages    # types des paquets, tests compris
+npm run test:packages         # Vitest
+npm run lint:packages         # ESLint des paquets
+npm run test:all              # Jest puis Vitest
 cd frontend; npx eslint .; npm run build
 ```
 
-## Tests backend (fin de Phase 1A : 8 suites, 86 tests)
+## Tests des paquets (Phase 1B.0 : Vitest, 6 fichiers, 17 tests)
+
+| Paquet | Fichier | Objet |
+|---|---|---|
+| core | `constants.test.ts` | Valeurs des constantes (un seul agent, sentinelles, versions) |
+| core | `contracts.types.test.ts` | Garanties de types : lecture seule sans `writer`, ordonnanceur limité aux fournisseurs inscriptibles, identifiants et couleurs nominaux, métadonnées PNG + JSON |
+| core | `architecture.test.ts` | Aucun import externe ni Node/DOM ; couches sans cycle ; aucun algorithme dans les contrats |
+| core | `package.test.ts` | Point d'entrée |
+| simulator | `package.test.ts` | Résolution de `@geoplacer/core` (valeurs et types) |
+
+Les garanties de types sont vérifiées par `npm run typecheck:packages` : un
+`@ts-expect-error` devenu inutile fait échouer la vérification. Deux
+mutations volontaires (un `writer` ajouté au fournisseur en lecture seule ;
+un import vers une couche supérieure) ont bien été détectées.
+
+## Tests backend (Phase 1B.0 : 9 suites, 94 tests)
 
 | Suite | Objet |
 |---|---|
@@ -21,6 +44,7 @@ cd frontend; npx eslint .; npm run build
 | `log-redaction.test.ts` | Masquage dans un vrai pipeline Winston |
 | `settings-update.test.ts` | Validation, bornes alignées sur chaque contrôle de la page Paramètres, mise à jour sur place, nettoyage au chargement |
 | `json-store.test.ts` | Écriture atomique, quarantaine, restauration, arrêts brutaux réels |
+| `server-config.test.ts` | Configuration absente, vide, partielle ou invalide ; cohérence de `.env.example` |
 
 Les tests n'émettent aucune requête vers un service public. Les tests de
 persistance travaillent dans des dossiers temporaires du système.
@@ -54,6 +78,6 @@ Essai réalisé dans un clone jetable, sans modifier le projet :
   échecs viennent de `jest.fn()` (4 appels à remplacer par `vi.fn()`).
 - Durée : 3,7 s avec Vitest, contre 9,5 s avec Jest.
 
-Recommandation : adopter Vitest pour les nouveaux paquets (`packages/core`,
-`packages/simulator`), garder Jest pour le code hérité pendant la
-transition, puis migrer les 4 appels.
+Décision (14/11/2026), appliquée en Phase 1B.0 : Vitest 5.1.0 pour
+`packages/core` et `packages/simulator` ; Jest conservé pour le code hérité ;
+`@types/node` aligné sur ^22.
