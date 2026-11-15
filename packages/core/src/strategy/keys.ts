@@ -20,6 +20,7 @@
 import type { DrawingStrategyId, StrategyConfig, TemplateImage } from '../contracts/index.js';
 import { TRANSPARENT_U32 } from '../contracts/index.js';
 import { colorRanking } from './color-outline.js';
+import { ColorIdTable } from './color-table.js';
 import { assertImage, StrategyError } from './common.js';
 import { random } from './center-random.js';
 
@@ -84,26 +85,34 @@ export function prepareOrderKeys(image: TemplateImage, config: StrategyConfig, o
     case 'color-by-color': {
       const { colors } = colorRanking(image, config);
       if (colors.length * N > Number.MAX_SAFE_INTEGER) throw new StrategyError('INVALID_IMAGE', 'too many colors for exact color-by-color keys');
-      const rankOf = new Map<number, number>(colors.map((c, r) => [c, r]));
+      // Phase 1B.7: typed open-addressing table (id = rank) instead of a Map:
+      // the lookup dominates on noisy images, where the color changes at every pixel.
+      const rankOf = new ColorIdTable(colors.length);
+      for (const c of colors) rankOf.idOf(c);
       let lastColor = TRANSPARENT_U32;
       let lastRank = 0;
       return make((i) => {
         const c = pixels[i]!;
         if (c !== lastColor) {
           lastColor = c;
-          lastRank = rankOf.get(c) ?? 0;
+          lastRank = Math.max(0, rankOf.find(c));
         }
         return lastRank * N + i;
-      }, colors.length * 16);
+      }, rankOf.bytes);
     }
-    case 'outline-first':
-      return make((i) => {
-        const iy = Math.floor(i / W);
-        const ix = i - iy * W;
-        const p = pixels[i];
-        const outline = ix === 0 || iy === 0 || ix === W - 1 || iy === H - 1 || pixels[i - 1] !== p || pixels[i + 1] !== p || pixels[i - W] !== p || pixels[i + W] !== p;
-        return (outline ? 0 : N) + i;
-      });
+    case 'outline-first': {
+      // Phase 1B.7: outline bitmap computed once per revision (N / 8 bytes)
+      // instead of four neighbour reads per candidate.
+      const outline = new Uint8Array((N + 7) >> 3);
+      for (let iy = 0; iy < H; iy++) {
+        const edgeRow = iy === 0 || iy === H - 1;
+        for (let ix = 0, i = iy * W; ix < W; ix++, i++) {
+          const p = pixels[i];
+          if (edgeRow || ix === 0 || ix === W - 1 || pixels[i - 1] !== p || pixels[i + 1] !== p || pixels[i - W] !== p || pixels[i + W] !== p) outline[i >> 3]! |= 1 << (i & 7);
+        }
+      }
+      return make((i) => ((outline[i >> 3]! >> (i & 7)) & 1 ? i : N + i), outline.byteLength);
+    }
     case 'random': {
       const order = options.randomOrder ?? random.order(image, config);
       const ranks = rankTable(N, order);

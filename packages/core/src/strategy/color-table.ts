@@ -30,6 +30,11 @@ export class ColorIdTable {
     return this.count;
   }
 
+  /** Bytes held by the table. */
+  get bytes(): number {
+    return this.keys.byteLength + this.ids.byteLength + this.byId.byteLength;
+  }
+
   colorOf(id: number): number {
     return this.byId[id]!;
   }

@@ -224,8 +224,12 @@ export function storageConformance(target: ConformanceTarget): void {
       });
 
       it('leaves no copy or a complete one after a failure during duplication', { timeout: 30_000 }, async () => {
+        // Followed since Phase 1B.6 (a 5 s timeout once on a fresh clone, cause not established):
+        // the slow iterations are logged as they happen, so that a recurrence leaves data.
+        const started = performance.now();
         for (let k = 0; ; k++) {
           let reachedAny = false;
+          const iteration = performance.now();
           for (const after of [false, true]) {
             const storage = await target.make();
             const t = await create(manager(storage));
@@ -244,8 +248,12 @@ export function storageConformance(target: ConformanceTarget): void {
             expect(templates.length).toBeLessThanOrEqual(1);
             for (const summary of templates) expect((await manager(storage).verify({ projectId: P2, templateId: summary.templateId })).revisions[0]?.ok).toBe(true);
           }
+          const ms = performance.now() - iteration;
+          if (ms > 250) console.log(`[duplication ${target.name}] iteration ${k}: ${Math.round(ms)} ms (total ${Math.round(performance.now() - started)} ms)`);
           if (!reachedAny) break;
         }
+        const total = performance.now() - started;
+        if (total > 2500) console.log(`[duplication ${target.name}] total ${Math.round(total)} ms`);
       });
 
       it('never gives a revision number to two contents across repeated corruption and repair', async () => {

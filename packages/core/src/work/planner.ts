@@ -37,6 +37,7 @@ import { snapshotFreshness } from '../progress/progress.js';
 import { timeUntilEnergy } from '../resources/energy.js';
 import { validateState } from '../resources/state.js';
 import { prepareOrderKeys, type OrderKeys } from '../strategy/keys.js';
+import { ColorIdTable } from '../strategy/color-table.js';
 import { loadRandomOrder } from '../strategy/order-cache.js';
 import { random } from '../strategy/center-random.js';
 
@@ -160,7 +161,9 @@ export function nextBatch(prepared: PreparedTemplate, request: PlanRequest): Pla
     const point = canvasToImage({ x: Number(key.slice(0, comma)), y: Number(key.slice(comma + 1)) }, template.placement, template.coordinateSystem);
     if (point.ix >= 0 && point.iy >= 0 && point.ix < width && point.iy < template.image.height) inFlight.add(point.iy * width + point.ix);
   }
-  const palette = new Set<number>(resources.unlockedColors);
+  // Typed open-addressing table: on noisy images the color changes at every pixel.
+  const palette = new ColorIdTable(resources.unlockedColors.length);
+  for (const c of resources.unlockedColors) palette.idOf(c);
   const missingColors = new Map<number, number>();
   const includeUnknown = request.unknownPixels === 'include';
 
@@ -221,7 +224,7 @@ export function nextBatch(prepared: PreparedTemplate, request: PlanRequest): Pla
       const color = pixels[index]!;
       if (color !== lastColor) {
         lastColor = color;
-        lastUnlocked = palette.has(color);
+        lastUnlocked = palette.find(color) >= 0;
       }
       if (!lastUnlocked) {
         missingColors.set(color, (missingColors.get(color) ?? 0) + 1);
