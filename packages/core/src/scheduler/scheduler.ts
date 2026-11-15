@@ -346,6 +346,9 @@ export function createScheduler(config: SchedulerConfig, deps: SchedulerDependen
       setState('waiting-resources', 'the resources could not be observed');
       return { kind: 'sleep', ms: config.reconcileRetryMs };
     }
+    // An observation just made is dated after `now` on a real clock (Phase 1B.9): the cycle
+    // continues at the later time, never asking for a state before the observation.
+    now = Math.max(clock.now(), resources.observed(agent)?.at ?? 0);
     const resourcesNow = resources.stateAt(agent, now, now);
     progress = computeProgress(current, snapshot, now, config.freshness === undefined ? {} : { freshness: config.freshness });
     eta = estimateEta(progress, [{ id: agent, state: resourcesNow }], { rules: resources.rules, msPerPixel: config.eta.msPerPixel, minCoveragePercent: config.eta.minCoveragePercent, maxResourceAgeMs: config.maxResourceAgeMs, ...(config.eta.pauses === undefined ? {} : { pauses: config.eta.pauses }) }, now);

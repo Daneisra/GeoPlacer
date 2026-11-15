@@ -25,6 +25,18 @@ describe('scheduler: a complete run and its state machine', () => {
     expect(e.events.filter((x) => x.type === 'attempt').length).toBe(final.attemptsClosed);
   });
 
+  it('a clock that moves at every reading (a real clock): the resources observed after the cycle time never break the cycle (Phase 1B.9)', async () => {
+    // Found in Phase 1B.9 with the real clock of the server: the cycle read the time, then observed the
+    // resources (dated later), then asked for the state at the earlier time (TIME_BEFORE_STATE).
+    const e = new Engine(flag(8, 6), { tickMs: 1 });
+    await e.scheduler.start();
+    const final = await e.scheduler.done();
+    expect(final.recentErrors).toEqual([]);
+    expect(final).toMatchObject({ state: 'completed', applied: 48 });
+    expect(e.wrong()).toBe(0);
+    expect(e.appliedTwice()).toBe(0);
+  });
+
   it('step() runs one cycle at a time, deterministically', async () => {
     const run = async (): Promise<string> => {
       const e = new Engine(flag(4, 3), { config: { maxBatchSize: 5 } });

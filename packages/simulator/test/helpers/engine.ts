@@ -104,6 +104,8 @@ export interface EngineOptions {
   readonly writeLatencyMs?: number;
   /** Where the scheduler reads the template (default: `current`). */
   readonly templates?: TemplateSource;
+  /** Time moves forward by this much at EVERY reading of the clock (a real clock does; Phase 1B.9). */
+  readonly tickMs?: number;
 }
 
 /** A process of the engine: a new one over the same journal and canvas is a restart. */
@@ -126,6 +128,11 @@ export class Engine {
     this.options = options;
     const clock = createManualClock(1_000_000);
     const sleep = clock.sleep.bind(clock);
+    if (options.tickMs !== undefined) {
+      const read = clock.now.bind(clock);
+      const tick = options.tickMs;
+      Object.assign(clock, { now: () => (clock.advance(tick), read()) });
+    }
     // Counted sleeps: the proof that waiting is not a busy loop.
     this.clock = Object.assign(clock, {
       sleep: async (ms: number, signal?: Parameters<ManualClock['sleep']>[1]) => {
