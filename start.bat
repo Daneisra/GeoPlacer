@@ -51,6 +51,11 @@ if "%GEOPLACER_SETUP_ONLY%"=="1" (
   exit /b 0
 )
 
+rem The server imports the engine packages (packages/*): build them first (Phase 1B.9).
+echo [setup] Building the engine packages...
+call npm run build:packages --silent
+if not "!errorlevel!"=="0" goto :install_failed
+
 call cls
 echo [run] Starting backend and frontend in separate windows...
 start "Backend" cmd /k "npx tsx watch --env-file-if-exists=.env src/server.ts"

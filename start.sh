@@ -18,6 +18,10 @@ else
   if [[ $? != 0 ]]; then NEED_INSTALL=1; fi
 fi
 
+# The server imports the engine packages (packages/*): build them first (Phase 1B.9).
+echo "[setup] Building the engine packages..."
+npm run build:packages --silent || exit 1
+
 echo [run] Starting backend and frontend...
 echo "Starting backend on port 3000..."
 npx tsx watch --env-file=.env src/server.ts &

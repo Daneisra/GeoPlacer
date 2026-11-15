@@ -10,12 +10,15 @@
     "packages/*"
   ],
   "scripts": {
+    "prestart": "npm run build:packages --silent",
     "start": "node --env-file-if-exists=.env dist/server.js",
+    "predev": "npm run build:packages --silent",
     "dev": "concurrently --prefix-colors=blue,green --names=backend,frontend \"node --watch --env-file-if-exists=.env --import tsx src/server.ts\" \"npm run dev:frontend\"",
+    "predev:backend": "npm run build:packages --silent",
     "dev:backend": "node --watch --env-file-if-exists=.env --import tsx src/server.ts",
     "dev:frontend": "cd frontend && npm run dev",
     "build": "npm run build:packages && tsc && cd frontend && npm run build",
-    "build:backend": "tsc",
+    "build:backend": "npm run build:packages && tsc",
     "build:frontend": "cd frontend && npm run build",
     "build:packages": "tsc -b packages/core packages/simulator packages/adapters-node packages/engine-service",
     "build:watch": "tsc --watch",
