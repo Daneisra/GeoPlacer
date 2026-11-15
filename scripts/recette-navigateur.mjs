@@ -217,13 +217,20 @@ async function main() {
   await page.locator('#logsViewer').getByText('Connected', { exact: true }).waitFor({ timeout: 15_000 });
   record('6.1', 'Logs : indicateur « Connected », WebSocket ws://127.0.0.1:3000 ouvert', frames.some((f) => f.startsWith('open ws://127.0.0.1:3000')));
   record('6.2', 'messages « subscribed to logs » et « Connected to log stream »', frames.some((f) => /subscribed to logs/i.test(f)) && frames.some((f) => /Connected to log stream/.test(f)));
+  // Phase 1B.9: the count includes the engine WebSocket of each dashboard tab, so the check is that
+  // the count announced live grows when the second tab connects, not a fixed value.
+  const maxTotal = async () => Math.max(0, ...[...(await page.locator('body').innerText()).matchAll(/connected \((\d+) total\)/gi)].map((m) => Number(m[1])));
+  const totalBefore = await maxTotal();
   const second = await context.newPage();
   watch(second, 'onglet 2');
   await second.goto(`${BASE}/`);
   await second.click('a[href="/logs"]');
   await second.locator('#logsViewer').getByText('Connected', { exact: true }).waitFor({ timeout: 15_000 });
-  await page.waitForFunction(() => /connected \(2 total\)/i.test(document.body.innerText), null, { timeout: 10_000 }).catch(() => null);
-  record('6.3', 'le premier onglet reçoit « WebSocket client connected (2 total) » en direct', /connected \(2 total\)/i.test(await page.locator('body').innerText()));
+  await page
+    .waitForFunction((before) => [...document.body.innerText.matchAll(/connected \((\d+) total\)/gi)].some((m) => Number(m[1]) > Math.max(1, before)), totalBefore, { timeout: 10_000 })
+    .catch(() => null);
+  const totalAfter = await maxTotal();
+  record('6.3', 'le premier onglet reçoit en direct « WebSocket client connected (N total) » du second onglet', totalAfter > Math.max(1, totalBefore), `${totalBefore} → ${totalAfter}`);
   const logFile = path.join(work, 'data', 'logs.log');
   const logs = existsSync(logFile) ? readFileSync(logFile, 'utf8') : '';
   record('6.4', 'data/logs.log existe, sans cookie ni jeton', logs.length > 0 && !/cookie|token=|j=ey/i.test(logs), `${logs.length} octets`);
@@ -253,7 +260,11 @@ async function main() {
 
   // 7. Console and failed requests over the whole session.
   // The refused save of check 4.2 logs its 400 on purpose: those two lines are expected, nothing else is.
-  const expected = (e) => /status of 400 \(Bad Request\)/.test(e) || /Failed to save settings: AxiosError: Request failed with status code 400/.test(e);
+  // Phase 1B.9: during the restart of check 5.2, the dashboard's engine WebSocket reconnects: refused while the server is down.
+  const expected = (e) =>
+    /status of 400 \(Bad Request\)/.test(e) ||
+    /Failed to save settings: AxiosError: Request failed with status code 400/.test(e) ||
+    /ws:\/\/127\.0\.0\.1:3000\/api\/v1\/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED/.test(e);
   const unexpected = consoleErrors.filter((e) => !expected(e));
   record('7', 'aucune erreur ni avertissement en console (hors refus voulu du contrôle 4.2)', unexpected.length === 0, unexpected.join(' | '));
   record('7a', 'erreurs console attendues (refus 400 du contrôle 4.2)', null, `${consoleErrors.length - unexpected.length} ligne(s)`);
