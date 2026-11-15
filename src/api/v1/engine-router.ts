@@ -106,11 +106,19 @@ function route(fn: (req: Request) => Promise<unknown> | unknown): RequestHandler
 
 const STATE_CHANGING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
+/**
+ * Origins that may drive the engine (HTTP and WebSocket): none (same-origin
+ * tools), or an http(s) page; never a browser extension. The server-wide
+ * Host/Origin checks apply on top.
+ */
+export function isEngineOriginAllowed(origin: string | undefined): boolean {
+  return origin === undefined || origin === 'null' || /^https?:\/\//i.test(origin);
+}
+
 /** Refuses browser extension origins and non-JSON state-changing requests under /api/v1. */
 export function v1Guards(): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
-    const origin = req.headers.origin;
-    if (typeof origin === 'string' && origin !== 'null' && !/^https?:\/\//i.test(origin)) {
+    if (!isEngineOriginAllowed(req.headers.origin)) {
       sendError(res, 403, 'FORBIDDEN_ORIGIN', 'this origin may not drive the engine');
       return;
     }

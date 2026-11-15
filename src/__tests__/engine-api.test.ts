@@ -284,6 +284,21 @@ describe('engine WebSocket channel', () => {
     expect(ws.sent[2].event.type).toBe('canvas-resync');
   });
 
+  it('a slow client is resynchronised once drained, even when no further event comes (run over)', async () => {
+    const api = fakeEngine();
+    const ws = new FakeSocket();
+    attachEngineSocket(ws, api, { maxBufferedBytes: 100, drainCheckMs: 5 });
+    ws.bufferedAmount = 1_000;
+    api.emit('canvas', { pixels: [1, 1] });
+    api.emit('state', { from: 'running', to: 'completed' });
+    expect(ws.sent).toHaveLength(1);
+    ws.bufferedAmount = 0;
+    await new Promise((r) => setTimeout(r, 40));
+    expect(ws.sent.slice(1).map((m) => m.type)).toEqual(['resync', 'event']);
+    expect(ws.sent[1]).toMatchObject({ dropped: 2 });
+    ws.fire('close');
+  });
+
   it('a reconnection gets a fresh hello; a closed socket is unsubscribed and the engine goes on', () => {
     const api = fakeEngine();
     const first = new FakeSocket();

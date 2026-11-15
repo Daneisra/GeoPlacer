@@ -183,6 +183,11 @@ describe('server with the engine (real processes)', () => {
     expect(await b.exit).toBe(2);
     expect(b.output()).toContain('already used by another GeoPlacer instance');
 
+    // The engine channel refuses a browser extension origin (like the /api/v1 routes).
+    const ext = new WebSocket(`ws://127.0.0.1:${a.port}/api/v1/ws`, { headers: { Host: `127.0.0.1:${a.port}`, Origin: 'chrome-extension://abcdefghijklmnop' } });
+    const extClose = await new Promise<number>((r) => ext.once('close', (code) => r(code)));
+    expect(extClose).toBe(1008);
+
     // WebSocket: hello first, then sequenced events.
     const ws = new WebSocket(`ws://127.0.0.1:${a.port}/api/v1/ws`, { headers: { Host: `127.0.0.1:${a.port}` } });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- JSON read by the test

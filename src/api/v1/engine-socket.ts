@@ -31,15 +31,19 @@ export interface SocketLike {
 export interface EngineSocketOptions {
   /** Bytes waiting to be sent beyond which events are dropped (default 1 MiB). */
   readonly maxBufferedBytes?: number;
+  /** While behind, how often the buffer is checked (default 500 ms): the resync never waits for a next event. */
+  readonly drainCheckMs?: number;
 }
 
 const OPEN = 1;
 
 export function attachEngineSocket(ws: SocketLike, api: EngineApi, options: EngineSocketOptions = {}): () => void {
   const limit = options.maxBufferedBytes ?? 1024 * 1024;
+  const drainCheckMs = options.drainCheckMs ?? 500;
   let behind = false;
   let dropped = 0;
   let closed = false;
+  let drainTimer: ReturnType<typeof setInterval> | null = null;
 
   const send = (message: unknown): void => {
     if (closed || ws.readyState !== OPEN) return;
@@ -54,20 +58,35 @@ export function attachEngineSocket(ws: SocketLike, api: EngineApi, options: Engi
     send({ type, stream: stream.id, seq: stream.seq, status: api.status(), ...(type === 'resync' ? { dropped } : {}) });
   };
 
+  /** Caught up: everything missed is replaced by a fresh status and a canvas re-read. */
+  const catchUp = (): void => {
+    if (drainTimer !== null) clearInterval(drainTimer);
+    drainTimer = null;
+    const stream = api.stream;
+    hello('resync');
+    send({ type: 'event', stream: stream.id, seq: stream.seq, at: Date.now(), event: { type: 'canvas-resync', reason: `${dropped} event(s) dropped for a slow connection` } });
+    behind = false;
+    dropped = 0;
+  };
+
   hello('hello');
   const unsubscribe = api.subscribe((e: EngineEventEnvelopeLike) => {
     if (closed || ws.readyState !== OPEN) return;
     if (ws.bufferedAmount > limit) {
-      behind = true;
       dropped++;
+      if (!behind) {
+        behind = true;
+        // Even if the engine sends nothing more (run over), the client is resynchronised once drained.
+        drainTimer = setInterval(() => {
+          if (closed || ws.readyState !== OPEN) return;
+          if (ws.bufferedAmount <= limit) catchUp();
+        }, drainCheckMs);
+        (drainTimer as { unref?: () => void }).unref?.();
+      }
       return;
     }
     if (behind) {
-      // Caught up: everything missed is replaced by a fresh status and a canvas re-read.
-      hello('resync');
-      send({ type: 'event', stream: e.stream, seq: e.seq, at: e.at, event: { type: 'canvas-resync', reason: `${dropped} event(s) dropped for a slow connection` } });
-      behind = false;
-      dropped = 0;
+      catchUp();
       if (e.event.type === 'canvas' || e.event.type === 'status') return;
     }
     send({ type: 'event', stream: e.stream, seq: e.seq, at: e.at, event: e.event });
@@ -87,6 +106,7 @@ export function attachEngineSocket(ws: SocketLike, api: EngineApi, options: Engi
   const close = (): void => {
     if (closed) return;
     closed = true;
+    if (drainTimer !== null) clearInterval(drainTimer);
     unsubscribe();
   };
   ws.on('close', close);

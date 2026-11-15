@@ -31,7 +31,7 @@ import overlayRouter from './routes/overlay.js';
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 import { applyBaseProtections } from './app-base.js';
 // New engine (Phase 1B.9): local simulation only
-import { createEngineRouter } from './api/v1/engine-router.js';
+import { createEngineRouter, isEngineOriginAllowed } from './api/v1/engine-router.js';
 import { ENGINE_WS_PATH, attachEngineSocket } from './api/v1/engine-socket.js';
 import { EngineLockedError, engineDataDir, openEngine, type OpenedEngine } from './engine/bootstrap.js';
 
@@ -506,6 +506,11 @@ async function startServer(): Promise<void> {
 
       // Engine channel (Phase 1B.9): its own messages, no log stream.
       if (engine !== null && (req.url ?? '').split('?')[0] === ENGINE_WS_PATH) {
+        // Same origin rule as the /api/v1 routes: never a browser extension.
+        if (!isEngineOriginAllowed(req.headers.origin)) {
+          ws.close(1008, 'origin not allowed');
+          return;
+        }
         wsConnections.add(ws);
         attachEngineSocket(ws, engine.api);
         ws.isAlive = true;
