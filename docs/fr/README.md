@@ -6,7 +6,23 @@ GeoPlacer est un fork de
 pour GeoPixels, avec un moteur développé et testé **uniquement sur simulateur
 local** (voir l'ADR 0001).
 
-## État actuel : Phase 1B.7, journal compacté et simulateur de toile
+## État actuel : Phase 1B.8, ordonnanceur mono-agent sur simulateur
+
+Réalisé en Phase 1B.8 :
+- **ordonnanceur mono-agent** (voir [ordonnanceur.md](ordonnanceur.md)) :
+  - il coordonne modèle, planification, tentatives, journal, ressources,
+    progression et ETA sur la toile simulée locale ;
+  - huit états, commandes `start`, `pause`, `resume`, `stop` et `status`,
+    abonnement aux événements ;
+  - attentes sans boucle active ;
+- **reprise après dommage** : chaque bail prouve une lecture de la toile
+  qui couvre ses points, et une tentative incertaine ne se clôt qu'une fois
+  entièrement observée (voir [journal.md](journal.md)) ;
+- **compactage automatique** du journal, avec seuils par défaut ;
+- **tests de crash des modèles** sans minuteur, par étapes nommées ;
+- **premier push** : branche `feat/phase1b7-journal-simulator` publiée.
+
+## Phase 1B.7, journal compacté et simulateur de toile
 
 Réalisé en Phase 1B.7 :
 - **journal** (voir [journal.md](journal.md)) :
@@ -112,6 +128,7 @@ Le moteur de dessin hérité n'est **pas** fonctionnel et sera remplacé.
 | [planification.md](planification.md) | `WorkPlanner`, tentatives, journal, reprise après crash |
 | [journal.md](journal.md) | Compactage, checkpoints, générations, diagnostic et réparation, historique |
 | [simulateur.md](simulateur.md) | Toile simulée locale, pannes déterministes, scénarios de réconciliation |
+| [ordonnanceur.md](ordonnanceur.md) | Ordonnanceur mono-agent : boucle, états, commandes, attentes, scénarios, performances |
 | [geometrie-couleurs.md](geometrie-couleurs.md) | Repères, projection, OKLab, palettes, quantification, performances |
 | [installation-windows.md](installation-windows.md) | Installation et lancement vérifiés sous Windows |
 | [securite.md](securite.md) | Modèle de menace, protections, limites |

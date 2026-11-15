@@ -509,3 +509,26 @@ Détails : [planification.md](../fr/planification.md),
   pas une génération 0.
 
 Détails : [journal.md](../fr/journal.md), [simulateur.md](../fr/simulateur.md).
+
+## 17. Mise en œuvre de la Phase 1B.8 : contrats v9, ordonnanceur mono-agent
+
+`CORE_CONTRACT_VERSION` passe à **9**.
+
+| Élément | Changement | Raison |
+|---|---|---|
+| Règle après dommage | `canvasReadRequiredAfter` et `confirmCanvasRead` remplacés par `damage` (plancher daté, jamais levé par une date) et `LeaseRequest.evidence` : chaque bail prouve une lecture postérieure au dommage, valide en chacun de ses points (`EVIDENCE_REQUIRED`) | En 1B.7, une lecture récente d'un seul pixel suffisait |
+| `reconcile` | Accepte plusieurs lectures et ne clôt une tentative que si chacun de ses pixels a été observé (`INCOMPLETE_OBSERVATION`) | Une lecture partielle libérait des points incertains |
+| `JournalState` | Schéma 2 (`damage`) ; le schéma 1 est relu et converti, `canvas-verified` n'a plus d'effet | Relecture prudente des données de la 1B.7 |
+| `PlanRequest.damageFloor` | Lecture antérieure au dommage refusée, pixels inconnus jamais proposés tant qu'il existe | Cohérence avec la preuve exigée au bail |
+| `AttemptJournal.stats`, `AutoCompactionPolicy`, `CompactionStatus`, `DEFAULT_AUTO_COMPACTION` | Compactage automatique ; `usable()` et `JOURNAL_UNAVAILABLE` | Journal borné sans intervention |
+| `TaskScheduler` (couche 5) | Remplace le squelette : états, commandes (`start`, `pause`, `resume`, `stop`, `status`, `subscribe`, `done`, `step`), `SchedulerStatus`, `SchedulerEvent`, ports `TemplateSource` et `ResourceSource` | Ordonnanceur mono-agent opérationnel sur le simulateur |
+
+**Décisions** :
+- l'ordonnanceur ne contient aucune règle propre : il coordonne les
+  composants existants ;
+- un seul agent actif en V1 (liste conservée, multi-agent refusé) ;
+- les attentes passent par `Clock.sleep`, sans boucle active ;
+- une écriture sans réponse fiable n'est jamais relancée, et l'arrêt
+  n'abandonne jamais une tentative démarrée.
+
+Détails : [ordonnanceur.md](../fr/ordonnanceur.md), [journal.md](../fr/journal.md) § 3 et § 4.

@@ -29,8 +29,9 @@ journal produit et dont la reprise a besoin :
   les dépenses enregistrées en mémoire ne survivent pas à un redémarrage,
   donc une observation des ressources plus récente est exigée. Cette
   donnée est **explicite** et survit à la purge des résumés ;
-- l'exigence d'une **lecture de la toile** après un dommage
-  (`canvasReadRequiredAfter`) ;
+- le **dommage** éventuel (`damage` : date et raison), plancher de tout
+  bail ultérieur (§ 4 ; schéma 2 depuis la 1B.8, un checkpoint de
+  schéma 1 est relu et converti) ;
 - les **générations endommagées à préserver** ;
 - la **position de reprise** : `lastSeq`, le numéro du dernier événement
   inclus.
@@ -63,6 +64,39 @@ journal/
   attempts-000000000002.log
   attempts.log                 génération 0 (journal de la 1B.6), tant qu'elle est conservée
 ```
+
+**Compactage automatique** (Phase 1B.8, `AutoCompactionPolicy`) :
+
+- **Déclenchement** : après une opération qui clôt des tentatives, dans la
+  file sérialisée du gestionnaire, donc jamais deux compactages à la fois.
+  Jamais pendant la reprise, jamais sur un journal endommagé.
+- **Critères** (le premier atteint) : nombre d'événements ou d'octets de
+  la génération active, comptés depuis le chargement ; âge du dernier
+  checkpoint.
+- **Refus motivés**, consultables dans `compactionStatus()` : les
+  tentatives ouvertes contiennent trop de pixels (le checkpoint ne
+  rétrécirait pas) ; l'espace libre est **inconnu** (jamais supposé
+  suffisant) ; l'espace libre est inférieur au minimum plus deux fois la
+  taille estimée du checkpoint.
+- **Échec** : il n'échoue pas l'opération qui l'a déclenché. Si le journal
+  reste dans un état inconnu (publication interrompue), toute opération
+  est refusée (`JOURNAL_UNAVAILABLE`) jusqu'à une reprise.
+- **Désactivation** : `enabled: false`, pour les diagnostics.
+- **Valeurs par défaut** (`DEFAULT_AUTO_COMPACTION`, modifiables), prévues
+  pour le simulateur et un seul agent :
+
+| Seuil | Défaut |
+|---|---|
+| `maxActiveEvents` | 10 000 événements (environ 3 300 tentatives) |
+| `maxActiveBytes` | 64 Mio |
+| `maxAgeMs` | 1 heure |
+| `maxOpenWrites` (refus au-delà) | 200 000 pixels ouverts |
+| `minFreeBytes` | 256 Mio, plus deux fois le checkpoint estimé |
+
+Le journal fichier sérialise **lui-même** `load`, `append` et `compact`.
+Sans cela, un événement ajouté pendant un compactage tombait dans
+l'ancienne génération et était perdu au rechargement : le défaut a été
+reproduit par un test, puis corrigé.
 
 **Compactage** (`AttemptManager.compact`). Les écritures du gestionnaire
 sont **bloquées** pendant toute l'opération, qui est sérialisée avec les
@@ -102,7 +136,7 @@ la génération.
 | Fichiers d'une génération au-dessus du pointeur (compactage interrompu) | Ignorés pour l'état ; signalés |
 | Checkpoint inutilisable, génération précédente conservée | Reconstruction depuis la génération précédente, **signalée comme dommage** |
 | Checkpoint inutilisable, rien avant | **Refus** (`CHECKPOINT_UNUSABLE`) : aller au diagnostic |
-| Ligne endommagée, séquence manquante, événement incohérent | Dommage : tentatives ouvertes réconciliées, lecture de la toile exigée, compactage refusé |
+| Ligne endommagée, séquence manquante, événement incohérent | Dommage : tentatives ouvertes réconciliées, preuve de couverture exigée pour chaque bail (§ 4), compactage refusé |
 | Dernière ligne coupée | Ignorée (ajout interrompu), mise de côté et coupée avant l'ajout suivant |
 
 ## 4. Garanties après un crash
@@ -126,21 +160,29 @@ sont **incertaines jusqu'à une nouvelle observation**. Le moteur ne
 reconstruit pas l'énergie de lui-même : il exige une observation plus
 récente que la dernière dépense journalisée.
 
-**Journal endommagé** : comme une ligne perdue a pu être un bail, la
-reprise refuse **tout** bail (`CANVAS_READ_REQUIRED`) tant qu'une lecture
-de la toile **plus récente** que le dommage n'a pas été présentée à
-`confirmCanvasRead`, qui la journalise.
+**Journal endommagé** (règle de la Phase 1B.8, qui remplace celle de la
+1B.7) : une ligne perdue a pu être un bail sur **n'importe quel** point.
+La reprise inscrit donc un **dommage** daté dans l'état. Il n'est **jamais
+levé par une date** ; à partir de là :
 
-**Ce que la règle garantit exactement** : la date de la lecture, qui doit
-suivre le dommage. Elle ne garantit **pas** sa couverture : une lecture
-d'un seul pixel lève l'exigence. Lire toute la zone utile, puis planifier
-à partir d'une lecture postérieure, reste à la charge de l'appelant.
+- **Chaque bail porte sa preuve** (`evidence`) : la lecture de la toile
+  d'où il a été planifié, plus récente que le dommage, avec une valeur
+  **valide** (ni inconnue ni invalide) en **chacun** des points loués.
+  Sinon le bail est refusé (`EVIDENCE_REQUIRED`). Une lecture récente d'un
+  seul pixel, ou de la moitié des points, ne suffit donc plus.
+- **Une tentative incertaine ne se clôt** que si chacun de ses pixels a été
+  observé avec une valeur valide, dans une ou plusieurs lectures (la plus
+  récente compte). Sinon `INCOMPLETE_OBSERVATION` : elle reste ouverte et
+  ses points restent réservés. Cela vaut aussi sans dommage.
+- **Le `WorkPlanner`** refuse une lecture antérieure ou égale au dommage
+  (`SNAPSHOT_BEFORE_DAMAGE`) et ne propose plus de pixel inconnu, quelle
+  que soit la politique.
 
-Le `WorkPlanner` ne propose que des points observés dans l'instantané
-fourni : un point hors de l'instantané est inconnu, donc ignoré par la
-politique `skip`. Lier la planification à une lecture postérieure au
-dommage, avec un plancher de date appliqué par `nextBatch`, est prévu
-avec l'ordonnanceur.
+La couverture n'est pas enregistrée point par point, ce qui grossirait
+sans fin pour une toile de 2000² : c'est chaque bail qui l'apporte. Les
+données de la 1B.7 sont relues prudemment. Un ancien événement
+`canvas-verified` n'a plus d'effet, et un checkpoint de schéma 1 qui
+exigeait une lecture devient un dommage à la même date.
 
 Les points lus au mieux dans les lignes endommagées ne sont qu'un détail
 du rapport : ils ne servent jamais de garantie.
@@ -218,7 +260,7 @@ d'échec) : il n'expose aucun secret.
 | Fin déchirée seule | La mettre de côté puis la couper (même règle que l'ajout) |
 | Journal endommagé | Nouvelle génération : toute tentative ouverte passe **à réconcilier**, une lecture de la toile est exigée avant tout bail, les ressources de chaque agent sont incertaines, et la génération endommagée et la précédente sont **préservées** (jamais supprimées par la rétention) |
 | Pointeur absent ou illisible | Rétablir le pointeur vers la plus haute génération au checkpoint valide, puis réparer comme un journal endommagé |
-| Checkpoint inutilisable, rien avant | Reconstruire depuis les seuls événements de la génération ; le plan l'annonce (`stateCertain: false`), car les tentatives ouvertes du checkpoint perdu ne peuvent pas toutes être connues. Aucun bail n'est accepté avant une lecture de la toile postérieure, dont la couverture reste à la charge de l'appelant (§ 4) |
+| Checkpoint inutilisable, rien avant | Reconstruire depuis les seuls événements de la génération ; le plan l'annonce (`stateCertain: false`), car les tentatives ouvertes du checkpoint perdu ne peuvent pas toutes être connues. Tout bail ultérieur doit prouver une lecture postérieure qui couvre ses points (§ 4) |
 
 Une corruption au milieu du journal n'est **jamais ignorée
 automatiquement** : seule la réparation confirmée la traite, et la
@@ -319,17 +361,14 @@ l'ordonnanceur, qui n'est pas fait.
 
 ## 10. Limites
 
-- Le compactage est **manuel** (`compact`) : son déclenchement
-  automatique sera fait avec l'ordonnanceur.
-- Il bloque les écritures pendant toute sa durée (70 à 87 ms pour le
+- Le compactage automatique (Phase 1B.8) se déclenche après les
+  opérations qui closent des tentatives. Un journal sans clôture (que des
+  baux ouverts) ne se compacte pas tout seul.
+- Le compactage bloque les écritures pendant toute sa durée (70 à 87 ms pour le
   journal de 146 Mio). Il n'existe pas de compactage concurrent.
 - La durabilité n'est pas démontrée contre une coupure électrique, et le
   chemin Linux (fsync du répertoire) n'est pas exécuté ici.
 - Aucun outil ne reconstruit l'historique.
-- La lecture de la toile exigée après un dommage est contrôlée par sa date,
-  pas par sa couverture (§ 4) : un plancher de date dans `nextBatch` est
-  prévu avec l'ordonnanceur.
 - La réparation d'un checkpoint inutilisable, sans génération antérieure,
   ne peut pas retrouver les tentatives ouvertes perdues. Elle l'annonce,
-  et aucun bail n'est accepté avant une lecture postérieure (dont la
-  couverture reste à la charge de l'appelant).
+  et chaque bail ultérieur doit prouver la couverture de ses points.

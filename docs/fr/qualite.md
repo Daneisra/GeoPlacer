@@ -18,7 +18,7 @@ npm run check                 # tsc, lint, lint:packages, puis test:all (contrô
 cd frontend; npx eslint .; npm run build
 ```
 
-## Tests des paquets (Phase 1B.7 : Vitest, 33 fichiers, 423 tests + 1 exhaustif optionnel)
+## Tests des paquets (Phase 1B.8 : Vitest, 37 fichiers, 463 tests + 1 exhaustif optionnel)
 
 | Paquet | Fichier | Objet |
 |---|---|---|
@@ -54,6 +54,10 @@ cd frontend; npx eslint .; npm run build
 | adapters-node | `journal-tool.test.ts` | Diagnostic en lecture seule (empreinte du répertoire inchangée, aucun contenu ni chemin exposé) ; réparation (plan, identifiant, sauvegarde vérifiée, trace, préservation, fin déchirée, pointeur absent, checkpoint inutilisable, journal modifié après le plan) ; injection de fautes à chaque opération de la réparation ; ligne de commande |
 | simulator | `package.test.ts` | Résolution de `@geoplacer/core` (valeurs et types) |
 | simulator | `canvas.test.ts` | Fournisseur de toile simulé : contrats, lecture (limites, repère, `readRow`, copie datée), écriture (ordre des refus, énergie des règles du core, régénération), idempotence, pannes déterministes, acteurs externes |
+| core | `damage-coverage.test.ts` | Phase 1B.8 : après un dommage, bail refusé avec une lecture d'un pixel ou de la moitié, accepté avec une lecture complète ; valeurs inconnues ou invalides ; plancher du WorkPlanner ; tentatives incertaines closes seulement une fois entièrement observées (un pixel, la moitié, tout ; plusieurs zones distinctes ; lectures progressives ; lecture trop ancienne) ; modification après réconciliation ; dommage persistant à travers compactage et reprise ; relecture prudente des données de la 1B.7 |
+| core | `auto-compaction.test.ts` | Compactage automatique : seuils d'événements, d'octets et d'âge ; désactivation ; refus motivés (tentatives ouvertes, espace inconnu ou insuffisant) ; jamais sur un journal endommagé ; échec sans perte et journal en état inconnu ; défauts documentés ; concurrence : 80 opérations simultanées et compactages fréquents, sans chevauchement ni perte, même état que le journal complet |
+| simulator | `scheduler.test.ts` | Ordonnanceur : exécution complète et statut, `step` déterministe, refus du multi-agent, attente d'énergie sans boucle active (attentes comptées), indisponibilité, palette individuelle, pause, arrêt avec et sans abandon, arrêt sans lecture possible, abonnés, toutes les pannes du simulateur, redémarrages, panne de journalisation, panne de compactage, nouvelle révision, compactage au long cours |
+| simulator | `scenarios.test.ts` | Scénarios A (100 × 100, vrai TemplateManager), C (interruptions), D (modification externe), E (ressources incertaines) |
 | simulator | `reconciliation.test.ts` | Les dix scénarios de réconciliation avec l'`AttemptManager`, le repère y vers le haut, le déterminisme |
 
 Test exhaustif facultatif (aller-retour OKLab des 16,7 M couleurs, environ
@@ -76,6 +80,8 @@ Benchmarks :
   ([strategies.md](strategies.md) § 4) ;
 - `npm run bench:reservations` : réservations de numéros
   ([modeles.md](modeles.md)) ;
+- `npm run bench:scheduler` : ordonnanceur sur 2000 × 2000
+  ([ordonnanceur.md](ordonnanceur.md) § 9) ;
 - `npm run bench:planner-focus` : couleur par couleur et contours d'abord,
   médiane, p95, maximum, A/B dans un même processus
   ([planification.md](planification.md) § 8) ;
@@ -132,6 +138,37 @@ Phase 1B.6, mutations vérifiées (chacune fait échouer au moins un test) :
   antérieure à l'envoi en réconciliation (2 tests), dépense enregistrée en
   plus de l'observation rapportée.
 
+Phase 1B.8, mutations vérifiées (chacune fait échouer au moins un test) :
+- bail sans contrôle de couverture (2 tests) ; réconciliation sans
+  exigence d'observation complète (4 tests) ;
+- compactage automatique lancé hors de la file sérialisée (5 tests) ;
+- journal fichier sans sérialisation interne de `append` et `compact`
+  (1 test : l'événement ajouté pendant un compactage était perdu) ;
+- ordonnanceur qui renvoie une écriture incertaine (2 tests) ; arrêt sans
+  réconciliation de la tentative démarrée (2 tests).
+
+Phase 1B.8, échecs rencontrés (journaux complets conservés hors du
+dépôt) :
+- **Un défaut réel**, trouvé par les tests et corrigé : l'ordonnanceur
+  attendait deux fois par lot (le temps d'un pixel, puis le reste) au lieu
+  d'une. Ce n'était pas une boucle active, mais il y avait deux fois trop
+  de cycles.
+- **Un risque réel**, signalé par la revue puis démontré par un test : un
+  `append` pendant un `compact` du journal fichier.
+- **Erreurs de rédaction des tests**, corrigées :
+  - un `Int32Array` convertissait NaN et 1,5 en valeurs valides ;
+  - ressources non observées après une réconciliation ;
+  - exemple « invalide » devenu valide (schéma 2) ;
+  - horloge virtuelle partagée par des séries concurrentes ;
+  - attente par tours d'événements sur une boucle en microtâches ;
+  - écriture suspendue d'un processus « mort » relâchée par erreur ;
+  - filtre d'étape qui ne testait que la fin du nom (réservations) ;
+  - étapes de blob inatteignables sans nouvelle image ;
+  - `prefer-const`.
+- **Délai de la duplication interrompue** : toujours suivi par la mesure
+  de chaque itération lente. Pas de récidive en 1B.8, et la cause reste
+  non établie.
+
 Phase 1B.7, mutations vérifiées (chacune fait échouer au moins un test) :
 - reprise depuis un checkpoint sans `lastSpendAt` (3 tests) ; `lastSpendAt`
   non mis à jour à la clôture (1 test) ;
@@ -175,15 +212,15 @@ dépôt) :
 Il est hors de `npm run check`. Les corrections de la recette n'en ajoutent
 aucun : le compte est vérifié avant et après.
 
-**Tests de processus** : le test du journal arrête l'enfant à des étapes
-nommées, sans minuteur.
+**Tests de processus** : depuis la Phase 1B.8, **tous** les tests d'arrêt
+brutal arrêtent l'enfant à une étape nommée, sans minuteur :
+- pour le journal : les opérations de fichier du compactage et des ajouts ;
+- pour les modèles : `NodeTemplateStorage.onStep`, avec le fichier
+  temporaire créé, écrit et renommé, et les réservations, blobs PNG
+  compris.
 
-**Écart ouvert** (demande de la 1B.7, § 9) : les tests de modèles des
-phases 1B.2 et 1B.5 attendent une poignée de main explicite (« ready »),
-puis tuent l'enfant après un délai. Ce délai sert à choisir l'instant du
-crash, mais c'est bien un minuteur. Aucune assertion n'en dépend, sauf
-« au moins une écriture sur 8 passages ». Leur passage aux étapes nommées
-est à faire.
+Les tests du verrou entre processus gardent une durée de détention du
+verrou : c'est l'objet même du test, pas une attente de synchronisation.
 
 Phase 1B.6, échecs rencontrés (journaux complets conservés hors du dépôt) :
 - **test des processus tués pendant les ajouts au journal**, deux échecs :

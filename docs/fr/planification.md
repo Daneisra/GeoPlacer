@@ -233,8 +233,9 @@ Au démarrage, `recover(now)` est obligatoire avant toute autre opération
    manquante, checkpoint de repli) : un événement « démarrée », ou un
    bail entier, a pu être perdu. **Toutes** les tentatives ouvertes sont
    donc envoyées en réconciliation, et aucune n'est libérée. Depuis la
-   1B.7, aucun bail n'est accepté avant une lecture de la toile plus
-   récente (`confirmCanvasRead`), et le compactage est refusé.
+   1B.7, le compactage est refusé ; depuis la 1B.8, chaque bail porte une
+   lecture postérieure au dommage qui couvre ses points (voir
+   [journal.md](journal.md) § 4).
 4. **Ressources incertaines** : le registre des dépenses du
    `ResourceManager` ne survit pas au redémarrage. Chaque agent ayant
    démarré une tentative exige une observation plus récente que sa
@@ -248,7 +249,7 @@ Au démarrage, `recover(now)` est obligatoire avant toute autre opération
 `RecoveryReport` contient `released`, `toReconcile`, `discardedTailBytes`,
 `corruptLines` et `inconsistentEvents`. Depuis la 1B.7, il contient aussi
 `generation`, `fromCheckpoint`, `sequenceGaps`, `problems`, `damaged` et
-`canvasReadRequiredAfter`. Une tentative close est conservée sous forme de
+`damage`. Une tentative close est conservée sous forme de
 résumé, sans ses pixels (`get` renvoie ce résumé). La reprise est idempotente : une
 deuxième reprise ne libère rien de plus (testé).
 

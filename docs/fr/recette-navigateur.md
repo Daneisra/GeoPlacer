@@ -58,10 +58,18 @@ passes, **28 contrôles, 0 KO**.
    pas. Elles passent maintenant par un magasin partagé, et les styles ont
    été ajoutés.
 
-**Restent manuels** : la section 5.1 (vrai Ctrl+C et message d'arrêt
-propre), car Windows ne transmet pas de signal à un processus enfant : le
-script l'arrête brutalement. Restent aussi l'aspect visuel des
-notifications et un essai sous Firefox.
+**Aspect des notifications** : vérifié en Phase 1B.8 par captures d'écran
+dans Edge. Les notifications apparaissent en bas à droite, sans couvrir
+la barre latérale ; l'étiquette est verte (« OK ») ou rouge (« ERR ») ;
+le titre, le message et le bouton de fermeture sont lisibles sur le thème
+sombre ; plusieurs notifications s'empilent.
+
+**Restent manuels** :
+- la section 5.1 (vrai Ctrl+C et message d'arrêt propre), car Windows ne
+  transmet pas de signal à un processus enfant : le script l'arrête
+  brutalement ;
+- un essai sous **Firefox**, qui n'est pas installé sur la machine de
+  développement.
 
 ## Recette manuelle
 

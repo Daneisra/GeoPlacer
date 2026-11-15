@@ -1,6 +1,6 @@
 # Architecture de GeoPlacer
 
-État : **Phase 1B.7**. Les contrats existent depuis la 1B.0 ; la géométrie,
+État : **Phase 1B.8**. Les contrats existent depuis la 1B.0 ; la géométrie,
 les couleurs et les palettes sont implémentées en 1B.1 (voir
 [geometrie-couleurs.md](geometrie-couleurs.md)) ; le gestionnaire de
 modèles et sa persistance en 1B.2 (voir [modeles.md](modeles.md)) ; les
@@ -11,7 +11,8 @@ en 1B.5 (voir [ressources.md](ressources.md)) ; la planification du
 travail, les tentatives et la reprise après crash en 1B.6 (voir
 [planification.md](planification.md)) ; le compactage du journal, son
 diagnostic et sa réparation, et le simulateur de toile en 1B.7 (voir
-[journal.md](journal.md) et [simulateur.md](simulateur.md)).
+[journal.md](journal.md) et [simulateur.md](simulateur.md)) ; l'ordonnanceur
+mono-agent en 1B.8 (voir [ordonnanceur.md](ordonnanceur.md)).
 Le serveur et l'interface hérités de Wplacer fonctionnent comme avant.
 
 ## Arborescence
@@ -32,7 +33,8 @@ GeoPlacer/
 │   │   │   ├── progress/         progression et estimation du temps restant (1B.4)
 │   │   │   ├── resources/        règles, états d'agent, régénération, ResourceManager (1B.5)
 │   │   │   ├── upgrades/         planificateur d'améliorations simulées (1B.5)
-│   │   │   └── work/             WorkPlanner, AttemptManager, formats du journal et des checkpoints (1B.6, 1B.7)
+│   │   │   ├── work/             WorkPlanner, AttemptManager, formats du journal et des checkpoints (1B.6, 1B.7)
+│   │   │   └── scheduler/        ordonnanceur mono-agent (1B.8)
 │   │   ├── bench/                benchmarks (npm run bench:core, bench:strategies, bench:planner…)
 │   │   ├── test/                 Vitest (dont la suite de conformité des stockages)
 │   │   ├── tsconfig.json         compilation (sans types Node ni DOM)
@@ -85,7 +87,7 @@ est une décision séparée, qui n'est pas encore prise (ADR 0002, § 7).
 | 2 | `template`, `canvas` | `TemplateManager`, manifeste et révisions, `CanvasReader`, `CanvasWriter`, `CanvasProvider` |
 | 3 | `strategy`, `progress` | `DrawingStrategy`, cache d'ordre, `ProgressCalculator`, `EtaEstimator` |
 | 4 | `work`, `upgrades` | `WorkPlanner`, `AttemptManager`, journal, historique (1B.6 : passés de la couche 3 à la 4, car ils dépendent de `progress`) ; `UpgradePlanner` |
-| 5 | `scheduler` | `TaskScheduler`, événements du moteur |
+| 5 | `scheduler` | `TaskScheduler`, états, commandes, statut et événements, ports `TemplateSource` et `ResourceSource` (1B.8) |
 
 ## Séparation des responsabilités
 
@@ -132,6 +134,7 @@ détection de cycles sur tout `src`) :
 | `resources` | `contracts`, `resources` |
 | `upgrades` | `contracts`, `resources`, `progress`, `upgrades` |
 | `work` | `contracts`, `geometry`, `strategy`, `progress`, `resources`, `template` (uniquement le CRC-32 partagé des lignes du journal), `work` |
+| `scheduler` | `contracts`, `geometry`, `progress`, `work`, `scheduler` |
 
 ## Limites des contrôles automatiques
 

@@ -32,7 +32,8 @@ canvas.addAgent({ agent, energy: 20, unlockedColors: [red, green] });
 | Énergie | Calculée par les **fonctions de règles du core** (`stateFromObservation`, `advance`, `consumeEnergy`) avec l'horloge injectée : le même modèle que le moteur, régénération comprise |
 | Ressources rapportées | Chaque réponse contient l'observation exacte des ressources après l'écriture (`ApplyResult.resources`) |
 | Idempotence | Facultative : une tentative répétée n'est pas réappliquée, et son premier résultat est renvoyé |
-| Pannes déterministes | `injectFaults(...)`, consommées une par appel d'écriture, dans l'ordre : `fail-before`, `partial` (les k premiers pixels, puis échec), `answer-lost` (tout appliqué, réponse perdue), `reject` (tout refusé avec une raison), `unknown-outcomes` (appliqué, résultats inconnus) |
+| Pannes déterministes | `injectFaults(...)`, consommées une par appel d'écriture, dans l'ordre : `none` (aucune panne, pour placer les suivantes), `fail-before`, `partial` (les k premiers pixels, puis échec), `answer-lost` (tout appliqué, réponse perdue), `reject` (tout refusé avec une raison), `unknown-outcomes` (appliqué, résultats inconnus), `hold` (écriture suspendue jusqu'à `releaseHeld()` ou au signal d'abandon, pixels posés avant ou après ; `forgetHeld()` simule un appelant mort) |
+| Latence et disponibilité (1B.8) | `writeLatencyMs` sur l'horloge virtuelle (une réponse est datée après l'observation qui la précède) ; `setAvailability(agent, …)` ; `resourceSource()` pour l'ordonnanceur |
 | Acteurs externes | `paint(point, color)`, `erase(point)` : un autre joueur modifie la toile |
 | Traçabilité | `events` (chaque pixel appliqué ou modifié de l'extérieur), `appliedCount(point)`, `writeCalls` |
 | Horloge virtuelle | `createManualClock` : `advance`, `set` (jamais en arrière), `sleep` sans attente réelle |
@@ -64,7 +65,7 @@ toile).
 
 - Une seule toile en mémoire, sans persistance : le simulateur sert aux
   tests et aux scénarios contrôlés.
-- Aucune boucle autonome : l'ordonnanceur (choix du modèle, de l'agent,
-  cadence) fait l'objet de la phase suivante.
+- La boucle autonome est l'ordonnanceur mono-agent de la Phase 1B.8 :
+  voir [ordonnanceur.md](ordonnanceur.md).
 - Les règles de ressources sont fournies par l'appelant. Celles des tests
   sont **synthétiques** et ne décrivent aucun service réel.

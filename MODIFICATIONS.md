@@ -27,6 +27,27 @@ licence. L'historique Git complet du projet d'origine est conservé.
 - `start.bat` : installation des deux projets par le chemin vérifié.
 - Documentation française (`docs/fr/`, `docs/decisions/`).
 
+## 2026-11-15 — Phase 1B.8 : ordonnanceur mono-agent sur simulateur
+
+- `packages/core/src/scheduler` : ordonnanceur mono-agent (boucle, états,
+  commandes, statut, événements), qui ne fait que coordonner les
+  composants existants.
+- `packages/core/src/work` :
+  - preuve de couverture exigée pour chaque bail après un dommage ;
+  - réconciliation qui exige une observation complète de la tentative ;
+  - compactage automatique (seuils par défaut) ;
+  - contrats v9.
+- `packages/adapters-node` :
+  - journal sérialisé lui-même, statistiques, espace libre ;
+  - accroche de test des étapes d'écriture du stockage ;
+  - tests de crash des modèles par étapes nommées.
+- `packages/simulator` : latence d'écriture, panne « hold »,
+  indisponibilité datée, source de ressources ; tests de l'ordonnanceur,
+  scénarios A, C, D et E, banc du scénario B.
+- Documentation : `docs/fr/ordonnanceur.md`, ADR 0002 § 17, mises à jour
+  de `journal.md`, `simulateur.md`, `recette-navigateur.md`,
+  `planification.md`, `architecture.md`, `qualite.md`, README.
+
 ## 2026-11-15 — Phase 1B.7 : journal compacté, simulateur, recette navigateur
 
 - `packages/core/src/work` :
