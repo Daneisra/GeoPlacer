@@ -18,6 +18,12 @@ npm run check                 # tsc, lint, lint:packages, puis test:all (contrô
 cd frontend; npx eslint .; npm run build
 ```
 
+Sur un **clone neuf**, `npm run build` construit aussi le frontend, qui a
+ses propres dépendances hors des workspaces. Il faut donc lancer
+`cd frontend; npm ci` en plus du `npm ci` racine, sinon le build échoue
+dans `frontend` (modules `react`, `vite`… introuvables). C'est vérifié en
+Phase 1B.8 : les tests passent sans cette étape, le build la requiert.
+
 ## Tests des paquets (Phase 1B.8 : Vitest, 37 fichiers, 463 tests + 1 exhaustif optionnel)
 
 | Paquet | Fichier | Objet |
