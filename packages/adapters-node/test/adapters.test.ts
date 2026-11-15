@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ProjectId, TemplateId, TemplateManager } from '@geoplacer/core';
 import { TemplateError, asProjectId, createTemplateManager, loadRandomOrder, random, rgb } from '@geoplacer/core';
 import {
@@ -11,6 +11,9 @@ import {
   FileOrderCacheStore,
   NodeTemplateStorage,
   acquireDataDirectoryLock,
+  acquireInstanceGuard,
+  guardPipeName,
+  type InstanceGuardStatus,
   nodeSha256Hasher,
   openNodeTemplateManager,
   pngjsCodec,
@@ -515,6 +518,70 @@ describe('data directory lock (independent processes)', () => {
       }
     });
   }
+});
+
+describe('named pipe guard of the data directory (Phase 1B.9, Windows)', () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const child = path.join(here, 'fixtures', 'lock-child.ts');
+  const repoRoot = path.resolve(here, '..', '..', '..');
+  // A sandbox can forbid named pipes (EACCES): the guard is then unavailable and the lock alone applies.
+  let pipes: InstanceGuardStatus | null = null;
+  beforeAll(async () => {
+    if (process.platform !== 'win32') return;
+    const probe = await acquireInstanceGuard(await tempRoot());
+    pipes = probe.status;
+    await probe.release();
+    if (pipes.status !== 'held') console.log(`[pipe guard] not testable here: ${pipes.detail ?? ''}`);
+  });
+
+  it('derives one name per directory, whatever the case, trailing separator or relative spelling', () => {
+    const root = path.resolve('some-dir-that-does-not-exist');
+    expect(guardPipeName(root)).toBe(guardPipeName(root.toUpperCase()));
+    expect(guardPipeName(root)).toBe(guardPipeName(`${root}${path.sep}`));
+    expect(guardPipeName(root)).toBe(guardPipeName('some-dir-that-does-not-exist'));
+    expect(guardPipeName(root)).not.toBe(guardPipeName(`${root}-2`));
+    expect(guardPipeName(root)).toMatch(/^\\\\\.\\pipe\\geoplacer-[0-9a-f]{40}$/);
+  });
+
+  it('refuses a second guard on the same directory spelled differently, in the same process', async () => {
+    if (pipes?.status !== 'held') return;
+    const root = await tempRoot();
+    const first = await acquireInstanceGuard(root);
+    expect(first.status.status).toBe('held');
+    await expect(acquireInstanceGuard(root.toUpperCase())).rejects.toBeInstanceOf(DataDirectoryLockedError);
+    await first.release();
+    const again = await acquireInstanceGuard(root);
+    expect(again.status.status).toBe('held');
+    await again.release();
+  });
+
+  it('two processes: the guard alone refuses the second one, and is freed when the holder is killed', { timeout: 60_000 }, async () => {
+    if (pipes?.status !== 'held') return;
+    const root = await tempRoot();
+    const run = (args: string[]) => {
+      const proc = spawn(process.execPath, ['--import', 'tsx', child, ...args], { cwd: repoRoot, env: { ...process.env, TSX_TSCONFIG_PATH: path.join(here, 'fixtures', 'tsconfig.child.json') }, stdio: ['ignore', 'pipe', 'pipe'] });
+      let out = '';
+      const exit = new Promise<number | null>((resolve) => proc.on('exit', (code) => resolve(code)));
+      const line = new Promise<string>((resolve, reject) => {
+        proc.stdout.on('data', (c: Buffer) => {
+          out += c.toString();
+          if (out.includes('\n')) resolve(out.trim());
+        });
+        void exit.then((code) => reject(new Error(`exit ${String(code)} without a line`)));
+      });
+      return { proc, line, exit };
+    };
+    const holder = run([root, 'windows-share-lock', '60000']);
+    expect(await holder.line).toMatch(/^acquired \d+ \S+ guard=held$/);
+    const second = run([root.toUpperCase(), 'guard-only', '0']);
+    expect(await second.line).toBe(`refused DATA_DIRECTORY_LOCKED ${String(holder.proc.pid)}`);
+    expect(await second.exit).toBe(3);
+    holder.proc.kill('SIGKILL');
+    await holder.exit;
+    const third = run([root, 'guard-only', '0']);
+    expect(await third.line).toBe('guard held');
+    expect(await third.exit).toBe(0);
+  });
 });
 
 describe('package boundaries', () => {

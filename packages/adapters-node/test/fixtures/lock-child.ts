@@ -7,12 +7,28 @@
  */
 
 import { asProjectId, rgb } from '@geoplacer/core';
-import { DataDirectoryLockedError, openNodeTemplateManager, pngjsCodec, type LockMechanism } from '../../src/index.js';
+import { DataDirectoryLockedError, acquireInstanceGuard, openNodeTemplateManager, pngjsCodec, type LockMechanism } from '../../src/index.js';
 
 const [root, mechanism, holdMs] = process.argv.slice(2);
 if (root === undefined || mechanism === undefined) throw new Error('usage: lock-child <root> <mechanism> <holdMs>');
 
 async function main(): Promise<void> {
+  if (mechanism === 'guard-only') {
+    // Phase 1B.9: only the named pipe guard (no lock inside the directory).
+    try {
+      const guard = await acquireInstanceGuard(root as string);
+      process.stdout.write(`guard ${guard.status.status}\n`);
+      await new Promise((resolve) => setTimeout(resolve, Number(holdMs ?? 0)));
+      await guard.release();
+      return;
+    } catch (error) {
+      if (error instanceof DataDirectoryLockedError) {
+        process.stdout.write(`refused ${error.code} ${String(error.owner?.pid ?? 'unknown')}\n`);
+        process.exit(3);
+      }
+      throw error;
+    }
+  }
   let handle;
   try {
     handle = await openNodeTemplateManager(root as string, { lockMechanism: mechanism as LockMechanism });
@@ -32,7 +48,7 @@ async function main(): Promise<void> {
     placement: { topLeft: { x: 0, y: 0 } },
     coordinateSystem: { yAxis: 'down' },
   });
-  process.stdout.write(`acquired ${process.pid} ${t.id}\n`);
+  process.stdout.write(`acquired ${process.pid} ${t.id} guard=${handle.lock.guard.status}\n`);
   await new Promise((resolve) => setTimeout(resolve, Number(holdMs ?? 0)));
   await handle.close();
 }

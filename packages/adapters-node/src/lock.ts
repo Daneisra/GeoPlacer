@@ -19,10 +19,21 @@
  *
  * The owner (pid, start time) is also written to `<root>/.geoplacer.lock.owner`
  * so that a refused instance can say who holds the directory.
+ *
+ * Added guard (Phase 1B.9, Windows): before the lock, the instance listens
+ * on a named pipe whose name derives from the canonical path of the
+ * directory (Node `net` IPC server, a documented interface). Windows refuses
+ * a second listener on the same pipe name (EADDRINUSE) and frees the name
+ * when the process exits or is killed. The guard does not replace the lock
+ * inside the directory: two spellings of one directory (junction, subst,
+ * UNC path) can give two names. Where a pipe cannot be created (a sandbox,
+ * other platforms), the guard is reported unavailable and the lock alone
+ * applies.
  */
 
-import { randomUUID } from 'node:crypto';
-import { constants } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { constants, realpathSync } from 'node:fs';
+import { createServer, type Server } from 'node:net';
 import { link, mkdir, open, readFile, rename, rm, writeFile, type FileHandle } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import path from 'node:path';
@@ -57,10 +68,17 @@ export class DataDirectoryLockedError extends Error {
   }
 }
 
+/** State of the added guard: held, or unavailable with the reason (the lock alone then applies). */
+export interface InstanceGuardStatus {
+  readonly status: 'held' | 'unavailable';
+  readonly detail: string | null;
+}
+
 export interface DataDirectoryLock {
   /** Absolute data directory. */
   readonly root: string;
   readonly mechanism: LockMechanism;
+  readonly guard: InstanceGuardStatus;
   readonly held: boolean;
   /** Throws when the lock has been released: no write may happen without it. */
   assertHeld(): void;
@@ -70,6 +88,39 @@ export interface DataDirectoryLock {
 export interface LockOptions {
   /** Default: 'windows-share-lock' on Windows, 'pid-file' elsewhere. */
   readonly mechanism?: LockMechanism;
+  /** Named pipe guard (Windows only; default true). */
+  readonly guard?: boolean;
+}
+
+/** Pipe name of a directory: canonical path, lower-cased (Windows paths ignore case). */
+export function guardPipeName(root: string): string {
+  let canonical: string;
+  try {
+    canonical = realpathSync.native(root);
+  } catch {
+    canonical = path.resolve(root);
+  }
+  const digest = createHash('sha256').update(canonical.toLowerCase().replace(/[\\/]+$/, '')).digest('hex').slice(0, 40);
+  return `\\\\.\\pipe\\geoplacer-${digest}`;
+}
+
+/**
+ * Listens on the guard pipe of `root`. EADDRINUSE: another instance holds
+ * it (DataDirectoryLockedError). Any other error: unavailable.
+ */
+export async function acquireInstanceGuard(root: string): Promise<{ readonly status: InstanceGuardStatus; release(): Promise<void> }> {
+  if (process.platform !== 'win32') return { status: { status: 'unavailable', detail: 'no pipe guard on this platform: the lock inside the directory applies' }, release: async () => undefined };
+  const server: Server = createServer((socket) => socket.destroy());
+  const outcome = await new Promise<'held' | { code: string }>((resolve) => {
+    server.once('error', (error) => resolve({ code: errorCode(error) ?? 'UNKNOWN' }));
+    server.listen(guardPipeName(root), () => resolve('held'));
+  });
+  if (outcome !== 'held') {
+    if (outcome.code === 'EADDRINUSE') throw new DataDirectoryLockedError(await readOwner(path.join(root, OWNER)));
+    return { status: { status: 'unavailable', detail: `the pipe guard could not be created (${outcome.code}): the lock inside the directory applies` }, release: async () => undefined };
+  }
+  server.unref();
+  return { status: { status: 'held', detail: null }, release: () => new Promise<void>((resolve) => server.close(() => resolve())) };
 }
 
 function errorCode(error: unknown): string | undefined {
@@ -103,6 +154,7 @@ function makeLock(root: string, mechanism: LockMechanism, onRelease: () => Promi
   return {
     root,
     mechanism,
+    guard: { status: 'unavailable', detail: 'not requested' },
     get held() {
       return held;
     },
@@ -194,5 +246,26 @@ export async function acquireDataDirectoryLock(root: string, options: LockOption
   const mechanism = options.mechanism ?? (process.platform === 'win32' ? 'windows-share-lock' : 'pid-file');
   if (mechanism === 'windows-share-lock' && process.platform !== 'win32') throw new Error('the windows-share-lock mechanism requires Windows');
   const owner: LockOwner = { pid: process.pid, host: hostname(), startedAt: new Date().toISOString(), token: randomUUID() };
-  return mechanism === 'windows-share-lock' ? acquireShareLock(absolute, owner) : acquirePidFile(absolute, owner);
+  const guard = options.guard === false ? null : await acquireInstanceGuard(absolute);
+  let lock: DataDirectoryLock;
+  try {
+    lock = mechanism === 'windows-share-lock' ? await acquireShareLock(absolute, owner) : await acquirePidFile(absolute, owner);
+  } catch (error) {
+    await guard?.release();
+    throw error;
+  }
+  if (guard === null) return lock;
+  return {
+    root: lock.root,
+    mechanism: lock.mechanism,
+    guard: guard.status,
+    get held() {
+      return lock.held;
+    },
+    assertHeld: () => lock.assertHeld(),
+    release: async () => {
+      await lock.release();
+      await guard.release();
+    },
+  };
 }

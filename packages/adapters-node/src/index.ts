@@ -14,6 +14,9 @@ export { nodeSha256Hasher } from './hasher.js';
 export {
   DataDirectoryLockedError,
   acquireDataDirectoryLock,
+  acquireInstanceGuard,
+  guardPipeName,
+  type InstanceGuardStatus,
   type DataDirectoryLock,
   type LockMechanism,
   type LockOptions,
