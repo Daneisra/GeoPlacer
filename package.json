@@ -35,6 +35,7 @@
     "bench:resources": "node --import tsx packages/core/bench/resources.bench.ts",
     "bench:planner": "node --expose-gc --import tsx packages/core/bench/planner.bench.ts",
     "bench:planner-focus": "node --expose-gc --import tsx packages/core/bench/planner-focus.bench.ts",
+    "bench:scheduler": "npm run build:packages && node --expose-gc --import tsx packages/simulator/bench/scheduler.bench.ts",
     "bench:journal": "npm run build:packages && node --expose-gc --import tsx packages/adapters-node/bench/journal.bench.ts",
     "journal:diagnose": "npm run build:packages --silent && node --import tsx packages/adapters-node/src/journal-cli.ts diagnose",
     "journal:repair": "npm run build:packages --silent && node --import tsx packages/adapters-node/src/journal-cli.ts repair",
