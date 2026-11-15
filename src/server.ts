@@ -3,9 +3,7 @@
  * WPlace auto-drawing bot
  */
 
-import express from 'express';
-import cors from 'cors';
-import rateLimit from 'express-rate-limit';
+import express, { Router } from 'express';
 import swaggerJsdoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
 import { WebSocketServer } from 'ws';
@@ -31,6 +29,11 @@ import overlayRouter from './routes/overlay.js';
 
 // Import middleware
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
+import { applyBaseProtections } from './app-base.js';
+// New engine (Phase 1B.9): local simulation only
+import { createEngineRouter } from './api/v1/engine-router.js';
+import { ENGINE_WS_PATH, attachEngineSocket } from './api/v1/engine-socket.js';
+import { EngineLockedError, engineDataDir, openEngine, type OpenedEngine } from './engine/bootstrap.js';
 
 // Import services and utilities
 import { networkInterfaces } from 'node:os';
@@ -39,8 +42,6 @@ import { detectFrontend, isUiNavigation, uiDocumentMiddleware, FRONTEND_NOT_BUIL
 import {
   buildAllowedHostnames,
   compileOriginPatterns,
-  isAllowedOrigin,
-  createLocalAccessMiddleware,
   createWebSocketVerifier,
   type LocalAccessPolicy,
 } from './middleware/local-access.js';
@@ -143,13 +144,6 @@ setTemplatesProcessQueueFn(() => processQueue(getTemplatesFromRoutes()));
 
 // Express setup
 const app = express();
-const limiter = rateLimit({
-  windowMs: RATE_LIMIT_WINDOW_MS,
-  limit: RATE_LIMIT_MAX,
-  message: 'Too many requests from this IP, please try again later.',
-  standardHeaders: true,
-  legacyHeaders: false,
-});
 
 // Local access policy: Host (anti DNS rebinding) and Origin (anti cross-site) checks
 const interfaceAddresses = Object.values(networkInterfaces())
@@ -161,25 +155,23 @@ const accessPolicy: LocalAccessPolicy = {
   originPatterns: compileOriginPatterns(ALLOWED_ORIGINS),
 };
 
-app.use(
-  createLocalAccessMiddleware(accessPolicy, (reason, req) => {
+// Host/Origin checks, CORS, rate limiter (every route, before the body is
+// parsed), JSON size limit: see app-base.ts.
+applyBaseProtections(app, {
+  policy: accessPolicy,
+  rateLimitWindowMs: RATE_LIMIT_WINDOW_MS,
+  rateLimitMax: RATE_LIMIT_MAX,
+  jsonLimit: JSON_LIMIT,
+  onBlocked: (reason, req) => {
     logger.warn(`Blocked request (${reason}): ${req.method} ${req.path}`);
-  })
-);
-
-app.use(cors({
-  // Requests with a disallowed Origin are already rejected above; this only
-  // decides which CORS headers allowed origins receive.
-  origin: (origin, callback) => {
-    callback(null, !origin || isAllowedOrigin(origin, accessPolicy));
   },
-  credentials: true,
-}));
-// Rate limiting applies to every route (no route lives under /api/, where the
-// limiter was previously mounted) and runs before the JSON body is parsed.
-app.use(limiter);
+});
 app.use(express.static('public'));
-app.use(express.json({ limit: JSON_LIMIT }));
+
+// New engine API (Phase 1B.9), filled once the engine is open (before listening).
+const apiV1 = Router();
+app.use('/api/v1', apiV1);
+let engine: OpenedEngine | null = null;
 
 // Mount routes
 // F13: browser navigations (address bar, F5) to a UI page get the UI, even
@@ -313,6 +305,17 @@ async function gracefulShutdown(signal: string): Promise<void> {
   // Clear all intervals
   serverState.intervals.forEach(clearInterval);
 
+  // Stop the simulation after the operation in progress (aborted after the
+  // grace period), close the simulated world and the journal, release the lock.
+  if (engine !== null) {
+    try {
+      await engine.close(GRACEFUL_SHUTDOWN_TIMEOUT_MS);
+      log('SYSTEM', 'wplacer', 'Engine stopped and data directory released');
+    } catch (error) {
+      logger.error('Failed to stop the engine cleanly:', error);
+    }
+  }
+
   // Persist state
   try {
     saveUsers();
@@ -418,6 +421,26 @@ async function startServer(): Promise<void> {
       logger.warn(`HOST=${APP_HOST}: the server is reachable from the local network. Use 127.0.0.1 unless this is intended.`);
     }
 
+    // The engine is opened BEFORE listening: a data directory used by another
+    // instance is refused here, explicitly, without any write.
+    const engineDir = engineDataDir(process.env, DATA_DIR);
+    try {
+      engine = await openEngine(engineDir, (level, message) => {
+        if (level === 'error') logger.error(`[engine] ${message}`);
+        else if (level === 'warn') logger.warn(`[engine] ${message}`);
+        else logger.info(`[engine] ${message}`);
+      });
+    } catch (error) {
+      if (error instanceof EngineLockedError) {
+        logger.error(`Refused to start: ${error.message}`);
+        console.error(gradient('red', 'yellow')(`\nGeoPlacer is already running on this data directory. ${error.message}\n`));
+        process.exit(2);
+      }
+      throw error;
+    }
+    apiV1.use(createEngineRouter(engine.api));
+    logger.info('Engine ready: local simulation only (no connection to a real service).');
+
     // Attempt to bind to available ports
     const ports = [APP_PRIMARY_PORT, ...APP_FALLBACK_PORTS];
     let server: any = null;
@@ -474,10 +497,23 @@ async function startServer(): Promise<void> {
       });
     });
 
-    wss.on('connection', (ws: any, _req) => {
+    wss.on('connection', (ws: any, req) => {
       // Check connection limit
       if (wsConnections.size >= MAX_WS_CONNECTIONS) {
         ws.close(1013, 'Server overloaded');
+        return;
+      }
+
+      // Engine channel (Phase 1B.9): its own messages, no log stream.
+      if (engine !== null && (req.url ?? '').split('?')[0] === ENGINE_WS_PATH) {
+        wsConnections.add(ws);
+        attachEngineSocket(ws, engine.api);
+        ws.isAlive = true;
+        ws.on('pong', () => {
+          ws.isAlive = true;
+        });
+        ws.on('close', () => cleanupWebSocket(ws));
+        ws.on('error', () => cleanupWebSocket(ws));
         return;
       }
 
@@ -544,6 +580,14 @@ async function startServer(): Promise<void> {
     // Register graceful shutdown handlers
     process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
     process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+    // A parent process (tests, a supervisor) can ask for the same controlled
+    // shutdown over IPC: Windows cannot send SIGINT to a child process.
+    if (typeof process.send === 'function') {
+      process.on('message', (message) => {
+        if (message === 'shutdown') void gracefulShutdown('IPC shutdown');
+      });
+      process.send({ type: 'listening', port: boundPort });
+    }
 
     logger.info('Server started successfully');
     console.log(gradient('green', 'yellow')('Server started successfully'));
