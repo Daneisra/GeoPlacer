@@ -13,6 +13,12 @@
  * Phase 1B.7 (contracts v8): sequence numbers, checkpoints and journal
  * generations (compaction), closed attempts kept as summaries, canvas read
  * required after damage.
+ *
+ * Phase 1B.8 (contracts v9): after damage, a timestamp alone never
+ * suffices: every lease carries its evidence (a canvas read newer than the
+ * damage in which each leased point has a valid value), and an uncertain
+ * attempt closes only when each of its pixels was observed; journal
+ * statistics and automatic compaction.
  */
 
 import type { CanvasSnapshot, CanvasSource, PixelWrite, PixelWriteOutcome } from './canvas.js';
@@ -56,6 +62,12 @@ export interface PlanRequest {
    * than it.
    */
   readonly resourcesUncertainSince?: Timestamp | null;
+  /**
+   * Phase 1B.8: damage floor of the journal (AttemptManager.damage()). A
+   * snapshot taken at or before it is refused, and unknown pixels are never
+   * proposed while it is set, whatever the policy.
+   */
+  readonly damageFloor?: Timestamp | null;
   readonly now: Timestamp;
 }
 
@@ -67,6 +79,7 @@ export type PlanRefusalCode =
   | 'STALE_RESOURCES'
   | 'RESOURCES_UNCERTAIN'
   | 'AGENT_UNAVAILABLE'
+  | 'SNAPSHOT_BEFORE_DAMAGE'
   | 'INVALID_REQUEST';
 
 export interface PlanResult {
@@ -168,9 +181,15 @@ export type JournalEvent =
       readonly at: Timestamp;
       readonly results: readonly { readonly taskId: PixelWrite['taskId']; readonly result: 'observed-correct' | 'observed-incorrect' | 'observed-unknown' }[];
     }
-  /** Phase 1B.7: the journal was found damaged; no lease until a canvas read newer than `at`. */
+  /**
+   * The journal was found damaged at `at`: from then on every lease must
+   * carry evidence newer than the damage (Phase 1B.8; in 1B.7: a newer read).
+   */
   | { readonly type: 'canvas-read-required'; readonly at: Timestamp; readonly reason: string }
-  /** Phase 1B.7: a canvas read taken at `observedAt` (> the requirement) lifts it. */
+  /**
+   * Phase 1B.7 only (still read): a read that lifted the requirement. Since
+   * Phase 1B.8 it has NO effect: a timestamp alone never lifts the damage.
+   */
   | { readonly type: 'canvas-verified'; readonly at: Timestamp; readonly observedAt: Timestamp };
 
 /**
@@ -200,8 +219,15 @@ export interface ClosedAttempt {
  * journal produces, and what a checkpoint stores. Rebuilding from a
  * checkpoint plus the later events must give the same state.
  */
+/** Damage seen in the journal: a floor for every later lease and plan (Phase 1B.8). */
+export interface JournalDamage {
+  readonly at: Timestamp;
+  readonly reason: string;
+}
+
 export interface JournalState {
-  readonly schemaVersion: 1;
+  /** 2 since Phase 1B.8 (a schema-1 checkpoint is read and converted). */
+  readonly schemaVersion: 2;
   /** Sequence number of the last event included (0: none). */
   readonly lastSeq: number;
   /** Open attempts, complete (leased, started, needs-reconciliation), by attempt id. */
@@ -217,8 +243,11 @@ export interface JournalState {
    * it survives the retention of the summaries.
    */
   readonly lastSpendAt: readonly { readonly agent: AgentId; readonly at: Timestamp }[];
-  /** Damage seen: no lease until a canvas read newer than this (null: none). */
-  readonly canvasReadRequiredAfter: Timestamp | null;
+  /**
+   * Damage seen (null: none). It is never lifted by a timestamp: every
+   * lease must carry evidence newer than it, covering each leased point.
+   */
+  readonly damage: JournalDamage | null;
   /** Damaged journal generations: never deleted by the retention. */
   readonly preservedGenerations: readonly number[];
 }
@@ -259,14 +288,26 @@ export interface CompactionReport {
   readonly retentionPending: readonly number[];
 }
 
+/** Size of the active generation (Phase 1B.8: automatic compaction). */
+export interface JournalStats {
+  readonly generation: number;
+  /** Events and bytes of the active generation (since its checkpoint), counted from the load on. */
+  readonly activeEvents: number;
+  readonly activeBytes: number;
+  /** Free space where the journal is written; null when unknown (never assumed enough). */
+  readonly freeBytes: number | null;
+}
+
 export interface AttemptJournal {
   load(visitor: JournalVisitor): Promise<JournalLoadReport>;
+  stats(): Promise<JournalStats>;
   /** Durable before returning (the attempt state machine relies on it); returns the sequence number. */
   append(event: JournalEvent): Promise<number>;
   /**
    * Writes `state` as the checkpoint of a new generation, publishes it, then
    * applies the retention. Never deletes data before the new generation is
    * verified and published; an interruption leaves the previous one in use.
+   * Appends and compactions of one journal never overlap (serialized).
    */
   compact(state: JournalState): Promise<CompactionReport>;
 }
@@ -307,6 +348,12 @@ export interface LeaseRequest {
   readonly writes: readonly PixelWrite[];
   readonly now: Timestamp;
   readonly ttlMs: number;
+  /**
+   * Phase 1B.8: the canvas read the batch was planned from. Required while
+   * the journal is damaged: newer than the damage, with a valid value at
+   * every leased point.
+   */
+  readonly evidence?: CanvasSnapshot;
 }
 
 export interface RecoveryReport {
@@ -324,13 +371,42 @@ export interface RecoveryReport {
   readonly problems: readonly string[];
   /** Damage of any kind: open attempts are reconciled, compaction is refused. */
   readonly damaged: boolean;
-  /** No lease until a canvas read newer than this (null: none). */
-  readonly canvasReadRequiredAfter: Timestamp | null;
+  /** Damage floor (null: none): leases then need evidence newer than it. */
+  readonly damage: JournalDamage | null;
 }
 
 export interface CompactOptions {
   /** Closed summaries kept (oldest dropped first); default: all. */
   readonly maxClosedSummaries?: number;
+}
+
+/**
+ * Automatic compaction (Phase 1B.8). Checked after an operation that
+ * closes attempts, inside the manager's serialized queue (never two at a
+ * time), never during recovery, never on a damaged journal.
+ */
+export interface AutoCompactionPolicy {
+  /** false: manual compaction only (diagnostics). */
+  readonly enabled: boolean;
+  /** Compact when the active generation holds at least this many events... */
+  readonly maxActiveEvents?: number;
+  /** ...or this many bytes... */
+  readonly maxActiveBytes?: number;
+  /** ...or when the last checkpoint (or the recovery) is older than this. */
+  readonly maxAgeMs?: number;
+  /** Skip while the open attempts hold more pixels than this (the checkpoint would not shrink). */
+  readonly maxOpenWrites?: number;
+  /** Skip unless the free space is known and at least this plus twice the estimated checkpoint. */
+  readonly minFreeBytes?: number;
+  readonly maxClosedSummaries?: number;
+}
+
+export interface CompactionStatus {
+  readonly lastAt: Timestamp | null;
+  readonly lastReport: CompactionReport | null;
+  /** Last failed or skipped attempt, with its reason. */
+  readonly lastProblem: { readonly at: Timestamp; readonly kind: 'failed' | 'skipped'; readonly reason: string } | null;
+  readonly automatic: number;
 }
 
 export interface AttemptManager {
@@ -356,12 +432,15 @@ export interface AttemptManager {
   /** A new revision of a template: older open attempts are cancelled (never started) or sent to reconciliation. */
   revisionChanged(projectId: ProjectId, templateId: TemplateId, revision: number, now: Timestamp): Promise<readonly Attempt[]>;
   /**
-   * Closes an uncertain attempt from a fresh canvas read: never retried
-   * blindly. The read must be newer than the start and, once the attempt
+   * Closes an uncertain attempt from fresh canvas reads: never retried
+   * blindly. Each read must be newer than the start and, once the attempt
    * was sent to reconciliation, newer than that time (a read taken between
-   * the start and a crash may predate the write).
+   * the start and a crash may predate the write). Phase 1B.8: the attempt
+   * closes only when EVERY one of its pixels has a valid value in one of the
+   * reads (the newest valid one counts); otherwise INCOMPLETE_OBSERVATION
+   * and the attempt stays open (its points stay reserved).
    */
-  reconcile(attemptId: AttemptId, snapshot: CanvasSnapshot, now: Timestamp): Promise<Attempt>;
+  reconcile(attemptId: AttemptId, snapshots: CanvasSnapshot | readonly CanvasSnapshot[], now: Timestamp): Promise<Attempt>;
   /** Open attempts complete; closed ones as summaries (while retained). */
   get(attemptId: AttemptId): Attempt | ClosedAttempt | undefined;
   open(): readonly Attempt[];
@@ -375,12 +454,18 @@ export interface AttemptManager {
    * are not kept, so a newer observation is required.
    */
   resourcesUncertainSince(agent: AgentId): Timestamp | null;
-  /** No lease until a canvas read newer than this (damage seen; null: none). */
-  canvasReadRequiredAfter(): Timestamp | null;
-  /** Journals a canvas read newer than the requirement, which lifts it. */
-  confirmCanvasRead(snapshot: CanvasSnapshot, now: Timestamp): Promise<void>;
+  /** Damage floor (null: none): leases need evidence newer than it, covering their points. */
+  damage(): JournalDamage | null;
   /** The logical state (what a checkpoint stores). */
   state(): JournalState;
   /** Writes a checkpoint and starts a new journal generation; refused on a damaged journal (repair first). */
   compact(now: Timestamp, options?: CompactOptions): Promise<CompactionReport>;
+  /** Manual and automatic compactions: last result, last failure or skip. */
+  compactionStatus(): CompactionStatus;
+  /**
+   * False after a failure that leaves the journal in an unknown state (e.g.
+   * an interrupted publish): every operation is then refused until a new
+   * process recovers (JOURNAL_UNAVAILABLE).
+   */
+  usable(): boolean;
 }

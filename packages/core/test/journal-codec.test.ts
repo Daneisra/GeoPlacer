@@ -157,7 +157,7 @@ describe('journal line format', () => {
 
 describe('checkpoint format', () => {
   const state: JournalState = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     lastSeq: 42,
     open: [
       leasedAttempt,
@@ -167,7 +167,7 @@ describe('checkpoint format', () => {
     closed: [{ attemptId: 'c1' as never, agent: 'agent-1' as never, projectId: 'projet' as never, templateId: 'modèle' as never, revision: 1, state: 'finished', leasedAt: 1, startedAt: 2, closedAt: 3, pixels: 4, applied: 3, reconciled: false }],
     purgedClosed: 7,
     lastSpendAt: [{ agent: 'agent-1' as never, at: 3 }],
-    canvasReadRequiredAfter: 40,
+    damage: { at: 40, reason: 'recovered from a damaged journal' },
     preservedGenerations: [2],
   };
 
@@ -204,14 +204,14 @@ describe('checkpoint format', () => {
   it('validates the state: open attempts consistent with their state, unique ids, closed summaries', () => {
     expect(isJournalState(state)).toBe(true);
     const bad: unknown[] = [
-      { ...state, schemaVersion: 2 },
+      { ...state, schemaVersion: 3 },
       { ...state, open: [{ ...leasedAttempt, state: 'started' }] },
       { ...state, open: [{ ...leasedAttempt, state: 'finished' }] },
       { ...state, open: [leasedAttempt, leasedAttempt] },
       { ...state, closed: [{ ...state.closed[0], applied: 9 }] },
       { ...state, closed: [{ ...state.closed[0], attemptId: 'a1' }] },
       { ...state, lastSpendAt: [{ agent: 'x', at: 1 }, { agent: 'x', at: 2 }] },
-      { ...state, canvasReadRequiredAfter: -1 },
+      { ...state, damage: { at: -1, reason: "x" } },
       { ...state, preservedGenerations: [-1] },
     ];
     for (const s of bad) expect(isJournalState(s)).toBe(false);

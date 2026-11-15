@@ -22,14 +22,6 @@ function recordingJournal(): { journal: ReturnType<typeof createMemoryJournal>; 
   return { journal, all };
 }
 
-async function code(promise: Promise<unknown>): Promise<string> {
-  try {
-    await promise;
-    return 'resolved';
-  } catch (error) {
-    return error instanceof AttemptError ? error.code : String(error);
-  }
-}
 
 /** Loads a journal into a builder without a manager (no recovery side effects). */
 async function stateOf(journal: AttemptJournal): Promise<JournalState> {
@@ -202,46 +194,4 @@ describe('closed summaries, retention and uncertainty', () => {
   });
 });
 
-describe('damage: compaction refused, canvas read required', () => {
-  function damagedJournal(base: ReturnType<typeof createMemoryJournal>): AttemptJournal {
-    return {
-      load: async (visitor) => ({ ...(await base.load(visitor)), corruptLines: [2] }),
-      append: (e) => base.append(e),
-      compact: (s) => base.compact(s),
-    };
-  }
-
-  it('after a damaged recovery: no lease until a newer canvas read is confirmed, and compaction is refused', async () => {
-    const run = await drive(7, 60, false, false);
-    const resources = createResourceManager(R);
-    const m = createAttemptManager({ journal: damagedJournal(run.journal), history: createMemoryHistory(), resources, newAttemptId: () => 'd-1' as never });
-    const at = run.now + 10;
-    const report = await m.recover(at);
-    expect(report).toMatchObject({ damaged: true, released: [], canvasReadRequiredAfter: at });
-    expect(m.canvasReadRequiredAfter()).toBe(at);
-    resources.observe({ type: 'resource-observation', agent: AGENTS[0]!, observedAt: at + 1, energy: 10, currency: 0, unlockedColors: [RED], upgrades: { maxEnergy: 0, regenSpeed: 0, energyPacks: 0 }, availability: { status: 'available' } });
-    const lease = () => m.lease({ agent: AGENTS[0]!, projectId: PROJECT, templateId: TEMPLATE, revision: 1, writes: [{ taskId: 'q' as TaskId, point: { x: 5, y: 3 }, color: RED }], now: at + 2, ttlMs: 100 });
-    expect(await code(lease())).toBe('CANVAS_READ_REQUIRED');
-    expect(await code(m.compact(at + 2))).toBe('JOURNAL_DAMAGED');
-    const sim = new SimCanvas({ minX: 0, minY: 0, width: 6, height: 4 }, true);
-    expect(await code(m.confirmCanvasRead(sim.snapshot(at), at + 3))).toBe('STALE_SNAPSHOT');
-    await m.confirmCanvasRead(sim.snapshot(at + 1), at + 3);
-    expect(m.canvasReadRequiredAfter()).toBeNull();
-    // The requirement and its lifting are journaled: a restart (still damaged) requires a new read.
-    expect(run.journal.events.map((e) => e.type)).toContain('canvas-verified');
-  });
-
-  it('a repaired checkpoint carrying the requirement blocks leases until confirmed, then compaction works', async () => {
-    const run = await drive(8, 60, true, false);
-    const state = run.manager.state();
-    run.journal.checkpoint = { ...state, canvasReadRequiredAfter: run.now, preservedGenerations: [0] };
-    run.journal.events = [];
-    const m = createAttemptManager({ journal: run.journal, history: createMemoryHistory(), resources: createResourceManager(R), newAttemptId: () => 'r-1' as never });
-    const report = await m.recover(run.now + 5);
-    expect(report).toMatchObject({ damaged: false, canvasReadRequiredAfter: run.now });
-    const sim = new SimCanvas({ minX: 0, minY: 0, width: 6, height: 4 }, true);
-    await m.confirmCanvasRead(sim.snapshot(run.now + 6), run.now + 7);
-    const compacted = await m.compact(run.now + 8);
-    expect(run.journal.checkpoint).toMatchObject({ canvasReadRequiredAfter: null, preservedGenerations: [0], lastSeq: compacted.lastSeq });
-  });
-});
+// Damage and coverage after damage (Phase 1B.8): see damage-coverage.test.ts.

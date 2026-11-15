@@ -138,13 +138,17 @@ describe('journal repair (plan, confirmation, backup, trace)', () => {
     // The engine: not damaged any more, every open attempt to reconcile, no lease before a newer canvas read.
     const h = openHarness(lock, { idPrefix: 'after', base: 6e12 });
     const report = await h.manager.recover(++h.clock.now);
-    expect(report).toMatchObject({ damaged: false, fromCheckpoint: true, generation: 3, canvasReadRequiredAfter: 5e12 });
+    expect(report).toMatchObject({ damaged: false, fromCheckpoint: true, generation: 3, damage: { at: 5e12, reason: 'journal repaired' } });
     expect([...report.toReconcile].sort()).toEqual(open);
     h.observe();
-    const lease = h.manager.lease({ agent: AGENT, projectId: 'p' as never, templateId: 'm' as never, revision: 1, writes: [{ taskId: 'n' as never, point: { x: 63, y: 63 }, color: 0xff0000 as never }], now: ++h.clock.now, ttlMs: 10 });
-    await expect(lease).rejects.toMatchObject({ code: 'CANVAS_READ_REQUIRED' });
-    const snapshot = createArraySnapshot({ rect: { minX: 0, minY: 0, width: 1, height: 1 }, coordinateSystem: { yAxis: 'down' }, source: 'simulated', observedAt: ++h.clock.now, pixels: new Int32Array(1).fill(-1) });
-    await h.manager.confirmCanvasRead(snapshot, ++h.clock.now);
+    const writes = [{ taskId: 'n' as never, point: { x: 63, y: 63 }, color: 0xff0000 as never }];
+    const lease = (evidence?: ReturnType<typeof createArraySnapshot>) => h.manager.lease({ agent: AGENT, projectId: 'p' as never, templateId: 'm' as never, revision: 1, writes, now: ++h.clock.now, ttlMs: 10, ...(evidence === undefined ? {} : { evidence }) });
+    await expect(lease()).rejects.toMatchObject({ code: 'EVIDENCE_REQUIRED' });
+    // A recent read of another pixel does not cover the leased point; a read that covers it does.
+    const elsewhere = createArraySnapshot({ rect: { minX: 0, minY: 0, width: 1, height: 1 }, coordinateSystem: { yAxis: 'down' }, source: 'simulated', observedAt: ++h.clock.now, pixels: new Int32Array(1).fill(-1) });
+    await expect(lease(elsewhere)).rejects.toMatchObject({ code: 'EVIDENCE_REQUIRED' });
+    const covering = createArraySnapshot({ rect: { minX: 63, minY: 63, width: 1, height: 1 }, coordinateSystem: { yAxis: 'down' }, source: 'simulated', observedAt: ++h.clock.now, pixels: new Int32Array(1).fill(-1) });
+    await expect(lease(covering)).resolves.toMatchObject({ state: 'leased' });
     for (const id of report.toReconcile) expect((h.manager.get(id) as Attempt).state).toBe('needs-reconciliation');
     // Later compactions with the tightest retention never delete the preserved damaged generations.
     await h.journal.close();
@@ -190,7 +194,7 @@ describe('journal repair (plan, confirmation, backup, trace)', () => {
     const result = await applyJournalRepair(lock, plan.planId, { now: 5e12 });
     expect(result.generation).toBe(4);
     const m = openHarness(lock, { idPrefix: 'm', base: 6e12 });
-    expect(await m.manager.recover(++m.clock.now)).toMatchObject({ damaged: false, canvasReadRequiredAfter: 5e12 });
+    expect(await m.manager.recover(++m.clock.now)).toMatchObject({ damaged: false, damage: { at: 5e12 } });
     await m.journal.close();
     // Pointer removed: unreadable, then restored and repaired.
     await rm(path.join(jdir(root), 'CURRENT'));
@@ -198,7 +202,7 @@ describe('journal repair (plan, confirmation, backup, trace)', () => {
     expect(plan2.operations.map((o) => o.kind)).toEqual(['backup', 'restore-pointer', 'new-generation']);
     await applyJournalRepair(lock, plan2.planId, { now: 7e12 });
     const n = openHarness(lock, { idPrefix: 'n', base: 8e12 });
-    expect(await n.manager.recover(++n.clock.now)).toMatchObject({ damaged: false, canvasReadRequiredAfter: 7e12 });
+    expect(await n.manager.recover(++n.clock.now)).toMatchObject({ damaged: false, damage: { at: 7e12 } });
     await n.journal.close();
   });
 

@@ -5,7 +5,7 @@
  * same code, which is what makes them equivalent.
  */
 
-import type { AgentId, Attempt, AttemptId, ClosedAttempt, JournalEvent, JournalState, PixelWriteOutcome, Timestamp } from '../contracts/index.js';
+import type { AgentId, Attempt, AttemptId, ClosedAttempt, JournalDamage, JournalEvent, JournalState, PixelWriteOutcome, Timestamp } from '../contracts/index.js';
 
 export const OPEN_STATES: ReadonlySet<Attempt['state']> = new Set(['leased', 'started', 'needs-reconciliation']);
 
@@ -80,7 +80,7 @@ export class JournalStateBuilder {
   private readonly preserved = new Set<number>();
   private seq = 0;
   private purged = 0;
-  private readRequiredAfter: Timestamp | null = null;
+  private damageFloor: JournalDamage | null = null;
 
   static from(state: JournalState): JournalStateBuilder {
     const b = new JournalStateBuilder();
@@ -90,7 +90,7 @@ export class JournalStateBuilder {
     for (const g of state.preservedGenerations) b.preserved.add(g);
     b.seq = state.lastSeq;
     b.purged = state.purgedClosed;
-    b.readRequiredAfter = state.canvasReadRequiredAfter;
+    b.damageFloor = state.damage;
     return b;
   }
 
@@ -101,10 +101,9 @@ export class JournalStateBuilder {
   /** The attempt after `event` (closed or not), null for a state event, or the reason it is invalid. No change. */
   peek(event: JournalEvent): Attempt | null | string {
     if (event.type === 'canvas-read-required') return Number.isSafeInteger(event.at) ? null : 'invalid time';
-    if (event.type === 'canvas-verified') {
-      if (this.readRequiredAfter === null) return 'no canvas read is required';
-      return event.observedAt > this.readRequiredAfter ? null : `canvas read at ${event.observedAt} is not newer than ${this.readRequiredAfter}`;
-    }
+    // Phase 1B.7 event, still accepted when replayed, without effect since 1B.8:
+    // a timestamp alone never lifts the damage.
+    if (event.type === 'canvas-verified') return null;
     const id = eventAttemptId(event)!;
     if (this.closedMap.has(id)) return event.type === 'leased' ? `attempt ${id} leased twice` : `event ${event.type} for closed attempt ${id}`;
     return transition(this.openMap.get(id), event);
@@ -116,8 +115,7 @@ export class JournalStateBuilder {
     this.seq = seq ?? this.seq + 1;
     if (typeof next === 'string') return next;
     if (next === null) {
-      if (event.type === 'canvas-read-required') this.readRequiredAfter = Math.max(this.readRequiredAfter ?? event.at, event.at);
-      else this.readRequiredAfter = null;
+      if (event.type === 'canvas-read-required' && (this.damageFloor === null || event.at >= this.damageFloor.at)) this.damageFloor = { at: event.at, reason: event.reason };
       return null;
     }
     if (OPEN_STATES.has(next.state)) this.openMap.set(next.attemptId, next);
@@ -145,12 +143,17 @@ export class JournalStateBuilder {
     return this.openMap.size;
   }
 
+  get closedCount(): number {
+    return this.closedMap.size;
+  }
+
   lastSpendAt(): ReadonlyMap<AgentId, Timestamp> {
     return this.lastSpend;
   }
 
-  get canvasReadRequiredAfter(): Timestamp | null {
-    return this.readRequiredAfter;
+  /** Damage floor (null: none): never lifted by a timestamp. */
+  get damage(): JournalDamage | null {
+    return this.damageFloor;
   }
 
   preserveGeneration(generation: number): void {
@@ -170,13 +173,13 @@ export class JournalStateBuilder {
 
   toState(): JournalState {
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       lastSeq: this.seq,
       open: [...this.openMap.values()].sort(byLease),
       closed: [...this.closedMap.values()].sort(byClose),
       purgedClosed: this.purged,
       lastSpendAt: [...this.lastSpend.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([agent, at]) => ({ agent, at })),
-      canvasReadRequiredAfter: this.readRequiredAfter,
+      damage: this.damageFloor,
       preservedGenerations: [...this.preserved].sort((a, b) => a - b),
     };
   }

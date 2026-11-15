@@ -125,6 +125,10 @@ export function nextBatch(prepared: PreparedTemplate, request: PlanRequest): Pla
   const basis: ProgressBasis = { source: snapshot.source, kind: snapshot.source === 'simulated' ? 'simulation' : 'imported-observation', observedAt: snapshot.observedAt, freshness };
   if (freshness.status === 'stale') refusals.push({ code: 'STALE_SNAPSHOT', message: `the snapshot is ${freshness.ageMs} ms old, beyond the ${String(freshness.maxAgeMs)} ms policy: not the current canvas` });
   if (freshness.status === 'future') refusals.push({ code: 'FUTURE_SNAPSHOT', message: 'the snapshot is dated after now (inconsistent clocks)' });
+  const damageFloor = request.damageFloor ?? null;
+  if (damageFloor !== null && snapshot.observedAt <= damageFloor) {
+    refusals.push({ code: 'SNAPSHOT_BEFORE_DAMAGE', message: `the journal was damaged at ${damageFloor}: plan from a canvas read taken after it` });
+  }
   if (freshness.status === 'not-evaluated') warnings.push(`FRESHNESS_NOT_EVALUATED: snapshot ${freshness.ageMs} ms old, no policy for ${snapshot.source}`);
   try {
     validateState(rules, resources);
@@ -165,7 +169,8 @@ export function nextBatch(prepared: PreparedTemplate, request: PlanRequest): Pla
   const palette = new ColorIdTable(resources.unlockedColors.length);
   for (const c of resources.unlockedColors) palette.idOf(c);
   const missingColors = new Map<number, number>();
-  const includeUnknown = request.unknownPixels === 'include';
+  // While the journal is damaged, only observed pixels are proposed (a lease needs evidence for each).
+  const includeUnknown = request.unknownPixels === 'include' && damageFloor === null;
 
   // 3-4. Scan and keep the k smallest keys (max-heap on the key).
   const heapKeys = new Float64Array(Math.max(1, k));

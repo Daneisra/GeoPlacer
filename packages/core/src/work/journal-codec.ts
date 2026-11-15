@@ -152,9 +152,8 @@ export function isClosedAttempt(c: unknown): c is ClosedAttempt {
   );
 }
 
-/** Structural check of a logical state (checkpoint body). */
-export function isJournalState(s: unknown): s is JournalState {
-  if (!isObject(s) || s['schemaVersion'] !== 1 || !isCount(s['lastSeq']) || !isCount(s['purgedClosed'])) return false;
+function validStateBody(s: Record<string, unknown>): boolean {
+  if (!isCount(s['lastSeq']) || !isCount(s['purgedClosed'])) return false;
   const open = s['open'];
   const closed = s['closed'];
   const spend = s['lastSpendAt'];
@@ -163,9 +162,33 @@ export function isJournalState(s: unknown): s is JournalState {
   if (!Array.isArray(closed) || !closed.every(isClosedAttempt)) return false;
   if (!Array.isArray(spend) || !spend.every((x) => isObject(x) && isText(x['agent']) && isTime(x['at']))) return false;
   if (!Array.isArray(preserved) || !preserved.every(isCount)) return false;
-  if (!isTimeOrNull(s['canvasReadRequiredAfter'])) return false;
   const ids = [...open, ...closed].map((a) => (a as { attemptId: string }).attemptId);
   return new Set(ids).size === ids.length && new Set(spend.map((x) => (x as { agent: string }).agent)).size === spend.length;
+}
+
+/** Structural check of a logical state (checkpoint body, schema 2). */
+export function isJournalState(s: unknown): s is JournalState {
+  if (!isObject(s) || s['schemaVersion'] !== 2 || !validStateBody(s)) return false;
+  const damage = s['damage'];
+  return damage === null || (isObject(damage) && isTime(damage['at']) && typeof damage['reason'] === 'string');
+}
+
+/**
+ * Reads a state of schema 2, or converts one of schema 1 (Phase 1B.7):
+ * its canvas read requirement becomes a damage at the same time, as
+ * conservative as the 1B.8 rule (a timestamp never lifts it). Null when
+ * invalid.
+ */
+export function upgradeJournalState(s: unknown): JournalState | null {
+  if (isJournalState(s)) return s;
+  if (!isObject(s) || s['schemaVersion'] !== 1 || !validStateBody(s) || !isTimeOrNull(s['canvasReadRequiredAfter'])) return null;
+  const { canvasReadRequiredAfter, ...rest } = s;
+  const upgraded = {
+    ...rest,
+    schemaVersion: 2,
+    damage: canvasReadRequiredAfter === null ? null : { at: canvasReadRequiredAfter as number, reason: 'canvas read required (checkpoint of Phase 1B.7)' },
+  };
+  return isJournalState(upgraded) ? upgraded : null;
 }
 
 /** Structural check of a history entry. */
@@ -378,6 +401,7 @@ export async function decodeCheckpoint(bytes: Uint8Array, hasher: Hasher, expect
   } catch {
     throw new CheckpointError('BAD_STATE', 'unreadable state');
   }
-  if (!isJournalState(state) || state.lastSeq !== header.lastSeq) throw new CheckpointError('BAD_STATE', 'invalid state');
-  return { header, state };
+  const upgraded = upgradeJournalState(state);
+  if (upgraded === null || upgraded.lastSeq !== header.lastSeq) throw new CheckpointError('BAD_STATE', 'invalid state');
+  return { header, state: upgraded };
 }

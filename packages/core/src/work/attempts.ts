@@ -23,8 +23,11 @@
  *   per data directory (the directory lock is the caller's);
  * - Phase 1B.7: the state is the pure JournalStateBuilder (shared with the
  *   full replay and the checkpoints); closed attempts are kept as summaries;
- *   after damage, no lease until a newer canvas read is confirmed;
- *   compaction is refused on a damaged generation.
+ *   compaction is refused on a damaged generation;
+ * - Phase 1B.8: after damage, every lease carries its evidence (a read
+ *   newer than the damage with a valid value at each leased point); an
+ *   uncertain attempt closes only when each of its pixels was observed;
+ *   automatic compaction by policy.
  */
 
 import type {
@@ -33,17 +36,21 @@ import type {
   AttemptId,
   AttemptJournal,
   AttemptManager,
+  AutoCompactionPolicy,
   CanvasPointKey,
   CompactionReport,
+  CompactionStatus,
   CanvasSnapshot,
   HistoryEntry,
   HistoryStore,
   JournalEvent,
   JournalLoadReport,
   JournalState,
+  JournalStats,
   JournalVisitor,
   LeaseRequest,
   PixelResult,
+  PixelWrite,
   PixelWriteOutcome,
   ProjectId,
   RecoveryReport,
@@ -52,7 +59,7 @@ import type {
   TemplateId,
   Timestamp,
 } from '../contracts/index.js';
-import { TRANSPARENT, UNKNOWN } from '../contracts/index.js';
+import { TRANSPARENT } from '../contracts/index.js';
 import { JournalStateBuilder } from './journal-state.js';
 
 export type AttemptErrorCode =
@@ -66,8 +73,10 @@ export type AttemptErrorCode =
   | 'COLOR_LOCKED'
   | 'LEASE_EXPIRED'
   | 'STALE_SNAPSHOT'
-  | 'CANVAS_READ_REQUIRED'
+  | 'EVIDENCE_REQUIRED'
+  | 'INCOMPLETE_OBSERVATION'
   | 'JOURNAL_DAMAGED'
+  | 'JOURNAL_UNAVAILABLE'
   | 'INVALID_INPUT';
 
 export class AttemptError extends Error {
@@ -100,10 +109,9 @@ export function historyOf(attempt: Attempt, state: HistoryEntry['state'], at: Ti
   };
 }
 
-function observedResult(seen: number, expected: number): 'observed-correct' | 'observed-incorrect' | 'observed-unknown' {
-  if (seen === expected) return 'observed-correct';
-  const valid = seen === TRANSPARENT || (Number.isInteger(seen) && seen >= 0 && seen <= 0xffffff);
-  return seen === UNKNOWN || !valid ? 'observed-unknown' : 'observed-incorrect';
+/** A valid observed value: a 24-bit color or empty (not UNKNOWN, not garbage). */
+export function isObservedValue(seen: number): boolean {
+  return seen === TRANSPARENT || (Number.isInteger(seen) && seen >= 0 && seen <= 0xffffff);
 }
 
 export interface AttemptManagerDeps {
@@ -113,6 +121,15 @@ export interface AttemptManagerDeps {
   readonly resources: ResourceManager;
   /** Must be unique across restarts (e.g. a UUID): ids are never reused. */
   readonly newAttemptId: () => AttemptId;
+  /** Automatic compaction (Phase 1B.8); absent or disabled: manual only. */
+  readonly autoCompaction?: AutoCompactionPolicy;
+}
+
+/** Rough checkpoint size, to check the free space before compacting. */
+function estimateCheckpointBytes(state: JournalStateBuilder): number {
+  let writes = 0;
+  for (const a of state.openAttempts()) writes += a.writes.length;
+  return 4096 + writes * 120 + state.openCount * 400 + state.closedCount * 300;
 }
 
 export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
@@ -123,9 +140,13 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
   let recovered = false;
   /** The loaded generation is damaged: compaction refused (repair first). */
   let damaged = false;
+  /** False once the journal is in an unknown state (interrupted publish...). */
+  let usable = true;
+  let lastCompactionAt: Timestamp | null = null;
+  let compaction: CompactionStatus = { lastAt: null, lastReport: null, lastProblem: null, automatic: 0 };
   let queue: Promise<unknown> = Promise.resolve();
 
-  /** One operation at a time: a lease checks overlap against every committed lease. */
+  /** One operation at a time: a lease checks overlap against every committed lease; compactions never overlap. */
   function serialized<T>(operation: () => Promise<T>): Promise<T> {
     const run = queue.then(operation, operation);
     queue = run.catch(() => undefined);
@@ -140,11 +161,22 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
     throw new AttemptError('UNKNOWN_ATTEMPT', `unknown attempt ${id}`);
   }
 
+  const isUnloaded = (error: unknown): boolean => (error as { code?: string }).code === 'NOT_LOADED';
+
   /** Journal first (durable), then the in-memory state. Returns the attempt after the event (complete, even when closed). */
   async function commit(event: JournalEvent): Promise<Attempt> {
     const next = state.peek(event);
     if (typeof next === 'string') throw new AttemptError('INVALID_TRANSITION', next);
-    const seq = await journal.append(event);
+    let seq: number;
+    try {
+      seq = await journal.append(event);
+    } catch (error) {
+      if (isUnloaded(error)) {
+        usable = false;
+        throw new AttemptError('JOURNAL_UNAVAILABLE', 'the journal is in an unknown state: restart (recover) to continue');
+      }
+      throw error;
+    }
     state.apply(event, seq);
     return next as Attempt;
   }
@@ -153,12 +185,60 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
     uncertain.set(agent, Math.max(uncertain.get(agent) ?? at, at));
   }
 
-  function requireRecovered(): void {
+  function guard(): void {
     if (!recovered) throw new AttemptError('NOT_RECOVERED', 'call recover() first (journal not replayed)');
+    if (!usable) throw new AttemptError('JOURNAL_UNAVAILABLE', 'the journal is in an unknown state: restart (recover) to continue');
+  }
+
+  async function doCompact(now: Timestamp, maxClosedSummaries: number | undefined): Promise<CompactionReport> {
+    if (damaged) throw new AttemptError('JOURNAL_DAMAGED', 'the journal generation is damaged: compaction refused, repair it first (journal tool)');
+    if (maxClosedSummaries !== undefined) state.purgeClosed(maxClosedSummaries);
+    try {
+      const report = await journal.compact(state.toState());
+      lastCompactionAt = now;
+      compaction = { ...compaction, lastAt: now, lastReport: report };
+      return report;
+    } catch (error) {
+      compaction = { ...compaction, lastProblem: { at: now, kind: 'failed', reason: error instanceof Error ? error.message : String(error) } };
+      // An interrupted publish can leave the journal unloaded: no more appends until a recovery.
+      await journal.stats().catch((e: unknown) => {
+        if (isUnloaded(e)) usable = false;
+      });
+      throw error;
+    }
+  }
+
+  /** Automatic compaction, after an operation that closed attempts (its own effects already done). */
+  async function maybeCompact(now: Timestamp): Promise<void> {
+    const p = deps.autoCompaction;
+    if (p === undefined || !p.enabled || damaged || !usable) return;
+    const stats = await journal.stats();
+    const due =
+      (p.maxActiveEvents !== undefined && stats.activeEvents >= p.maxActiveEvents) ||
+      (p.maxActiveBytes !== undefined && stats.activeBytes >= p.maxActiveBytes) ||
+      (p.maxAgeMs !== undefined && lastCompactionAt !== null && now - lastCompactionAt >= p.maxAgeMs && stats.activeEvents > 0);
+    if (!due) return;
+    const skip = (reason: string): void => {
+      compaction = { ...compaction, lastProblem: { at: now, kind: 'skipped', reason } };
+    };
+    let openWrites = 0;
+    for (const a of state.openAttempts()) openWrites += a.writes.length;
+    if (p.maxOpenWrites !== undefined && openWrites > p.maxOpenWrites) return skip(`open attempts hold ${openWrites} pixels (> ${p.maxOpenWrites})`);
+    if (p.minFreeBytes !== undefined) {
+      if (stats.freeBytes === null) return skip('free disk space unknown');
+      const needed = p.minFreeBytes + 2 * estimateCheckpointBytes(state);
+      if (stats.freeBytes < needed) return skip(`not enough free disk space (${stats.freeBytes} < ${needed} bytes)`);
+    }
+    try {
+      await doCompact(now, p.maxClosedSummaries);
+      compaction = { ...compaction, automatic: compaction.automatic + 1 };
+    } catch {
+      // Recorded in the status; the operation that triggered it already succeeded.
+    }
   }
 
   async function close(id: AttemptId, outcomes: readonly PixelWriteOutcome[], now: Timestamp, failure: string | null, reported: ResourceObservation | undefined): Promise<Attempt> {
-    requireRecovered();
+    guard();
     const attempt = openOf(id);
     const tasks = new Set(attempt.writes.map((w) => w.taskId));
     if (outcomes.some((o) => !tasks.has(o.taskId)) || new Set(outcomes.map((o) => o.taskId)).size !== outcomes.length) {
@@ -189,6 +269,7 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
     // A started attempt whose every pixel is not accounted for: energy spent unknown.
     if (attempt.state === 'started' && (outcomes.some((o) => o.status === 'unknown') || outcomes.length < attempt.writes.length)) markUncertain(attempt.agent, now);
     await history.append(historyOf(closed, failure === null ? 'finished' : 'failed', now));
+    await maybeCompact(now);
     return closed;
   }
 
@@ -202,6 +283,16 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
     const changed = await commit({ type: 'needs-reconciliation', attemptId: attempt.attemptId, at: now, reason });
     markUncertain(attempt.agent, now);
     return changed;
+  }
+
+  /** Throws unless `evidence` proves every write point was observed after the damage. */
+  function checkEvidence(writes: readonly PixelWrite[], evidence: CanvasSnapshot | undefined): void {
+    const damage = state.damage;
+    if (damage === null) return;
+    if (evidence === undefined) throw new AttemptError('EVIDENCE_REQUIRED', `the journal was damaged at ${damage.at}: a lease needs the canvas read it was planned from`);
+    if (evidence.observedAt <= damage.at) throw new AttemptError('EVIDENCE_REQUIRED', `the canvas read (${evidence.observedAt}) is not newer than the damage (${damage.at})`);
+    const unseen = writes.filter((w) => !isObservedValue(evidence.get(w.point) as number)).length;
+    if (unseen > 0) throw new AttemptError('EVIDENCE_REQUIRED', `${unseen} leased point(s) have no valid value in the canvas read`);
   }
 
   const manager: AttemptManager = {
@@ -220,12 +311,15 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
         state = builder;
         uncertain.clear();
         recovered = true;
+        usable = true;
+        lastCompactionAt = now;
         // The spends recorded before the restart are gone: every agent that
         // started an attempt needs an observation newer than its last close.
         for (const [agent, at] of state.lastSpendAt()) markUncertain(agent, at);
         damaged = loaded.corruptLines.length > 0 || loaded.sequenceGaps > 0 || loaded.problems.length > 0 || inconsistent > 0;
         if (damaged) {
-          // An event may be lost (a lease, a start): no lease anywhere until the canvas is read again.
+          // An event may be lost (a lease, a start): from now on every lease
+          // needs evidence newer than this, covering its points.
           await commit({ type: 'canvas-read-required', at: now, reason: 'recovered from a damaged journal' });
         }
         const released: AttemptId[] = [];
@@ -255,22 +349,21 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
           inconsistentEvents: inconsistent,
           problems: loaded.problems,
           damaged,
-          canvasReadRequiredAfter: state.canvasReadRequiredAfter,
+          damage: state.damage,
         };
       }),
 
     lease: (request: LeaseRequest) =>
       serialized(async () => {
-        requireRecovered();
+        guard();
         const { agent, writes, now, ttlMs } = request;
         if (writes.length === 0 || !Number.isSafeInteger(ttlMs) || ttlMs <= 0 || !Number.isSafeInteger(now)) {
           throw new AttemptError('INVALID_INPUT', 'a lease needs writes, a positive integer ttl and an integer time');
         }
-        const required = state.canvasReadRequiredAfter;
-        if (required !== null) throw new AttemptError('CANVAS_READ_REQUIRED', `the journal was damaged: confirm a canvas read newer than ${required} first`);
         const points = writes.map((w) => pointKey(w.point));
         if (new Set(points).size !== points.length) throw new AttemptError('INVALID_INPUT', 'a canvas point appears twice in the batch');
         if (new Set(writes.map((w) => w.taskId)).size !== writes.length) throw new AttemptError('INVALID_INPUT', 'a task id appears twice in the batch');
+        checkEvidence(writes, request.evidence);
         const busy = manager.inFlight();
         const overlap = points.filter((p) => busy.has(p)).length;
         if (overlap > 0) throw new AttemptError('OVERLAP', `${overlap} point(s) already in flight: the whole batch is refused`);
@@ -311,7 +404,7 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
 
     start: (id, now) =>
       serialized(async () => {
-        requireRecovered();
+        guard();
         const attempt = openOf(id);
         if (attempt.state === 'leased' && now >= attempt.expiresAt) throw new AttemptError('LEASE_EXPIRED', `attempt ${id} expired at ${attempt.expiresAt}: not started`);
         return commit({ type: 'started', attemptId: id, at: now });
@@ -322,65 +415,80 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
 
     cancel: (id, reason, now) =>
       serialized(async () => {
-        requireRecovered();
+        guard();
         openOf(id);
-        return cancelOne(id, reason, now);
+        const closed = await cancelOne(id, reason, now);
+        await maybeCompact(now);
+        return closed;
       }),
 
     expire: (now) =>
       serialized(async () => {
-        requireRecovered();
+        guard();
         const changed: Attempt[] = [];
         for (const attempt of [...state.openAttempts()]) {
           if (attempt.expiresAt > now) continue;
           if (attempt.state === 'leased') changed.push(await cancelOne(attempt.attemptId, 'lease expired before start', now));
           else if (attempt.state === 'started') changed.push(await toReconciliation(attempt, 'lease expired after start: result unknown', now));
         }
+        if (changed.length > 0) await maybeCompact(now);
         return changed;
       }),
 
     revisionChanged: (projectId: ProjectId, templateId: TemplateId, revision, now) =>
       serialized(async () => {
-        requireRecovered();
+        guard();
         const changed: Attempt[] = [];
         for (const attempt of [...state.openAttempts()]) {
           if (attempt.projectId !== projectId || attempt.templateId !== templateId || attempt.revision >= revision) continue;
           if (attempt.state === 'leased') changed.push(await cancelOne(attempt.attemptId, `superseded by revision ${revision}`, now));
           else if (attempt.state === 'started') changed.push(await toReconciliation(attempt, `superseded by revision ${revision} while started`, now));
         }
+        if (changed.length > 0) await maybeCompact(now);
         return changed;
       }),
 
-    reconcile: (id, snapshot: CanvasSnapshot, now) =>
+    reconcile: (id, snapshots, now) =>
       serialized(async () => {
-        requireRecovered();
+        guard();
         const attempt = openOf(id);
         if (attempt.state !== 'started' && attempt.state !== 'needs-reconciliation') throw new AttemptError('INVALID_TRANSITION', `attempt ${id} is ${attempt.state}`);
         const after = Math.max(attempt.startedAt ?? attempt.leasedAt, attempt.needsReconciliationAt ?? 0);
-        if (snapshot.observedAt <= after) throw new AttemptError('STALE_SNAPSHOT', `reconciliation needs a canvas read taken after ${after}`);
-        const results = attempt.writes.map((w) => ({ taskId: w.taskId, result: observedResult(snapshot.get(w.point) as number, w.color) }));
+        const reads = (Array.isArray(snapshots) ? snapshots : [snapshots]) as readonly CanvasSnapshot[];
+        if (reads.length === 0) throw new AttemptError('INVALID_INPUT', 'reconciliation needs at least one canvas read');
+        const stale = reads.filter((r) => r.observedAt <= after).length;
+        if (stale > 0) throw new AttemptError('STALE_SNAPSHOT', `reconciliation needs canvas reads taken after ${after} (${stale} older)`);
+        // Newest read first: the most recent valid value of each pixel counts.
+        const newestFirst = [...reads].sort((a, b) => b.observedAt - a.observedAt);
+        const results: { taskId: PixelWrite['taskId']; result: 'observed-correct' | 'observed-incorrect' }[] = [];
+        let missing = 0;
+        for (const w of attempt.writes) {
+          let seen: number | null = null;
+          for (const r of newestFirst) {
+            const v = r.get(w.point) as number;
+            if (isObservedValue(v)) {
+              seen = v;
+              break;
+            }
+          }
+          if (seen === null) missing++;
+          else results.push({ taskId: w.taskId, result: seen === w.color ? 'observed-correct' : 'observed-incorrect' });
+        }
+        if (missing > 0) {
+          throw new AttemptError('INCOMPLETE_OBSERVATION', `${missing} of ${attempt.writes.length} pixel(s) have no valid value in the reads: the attempt stays open`);
+        }
         const closed = await commit({ type: 'reconciled', attemptId: id, at: now, results });
         // What this attempt spent is unknown: the resources must be observed again.
         markUncertain(attempt.agent, now);
         await history.append(historyOf(closed, 'reconciled', now));
+        await maybeCompact(now);
         return closed;
       }),
 
-    confirmCanvasRead: (snapshot, now) =>
+    compact: (now, options = {}) =>
       serialized(async () => {
-        requireRecovered();
-        const required = state.canvasReadRequiredAfter;
-        if (required === null) return;
-        if (snapshot.observedAt <= required) throw new AttemptError('STALE_SNAPSHOT', `the canvas read must be newer than ${required}`);
-        await commit({ type: 'canvas-verified', at: now, observedAt: snapshot.observedAt });
-      }),
-
-    compact: (_now, options = {}) =>
-      serialized(async () => {
-        requireRecovered();
-        if (damaged) throw new AttemptError('JOURNAL_DAMAGED', 'the journal generation is damaged: compaction refused, repair it first (journal tool)');
-        if (options.maxClosedSummaries !== undefined) state.purgeClosed(options.maxClosedSummaries);
-        return journal.compact(state.toState());
+        guard();
+        return doCompact(now, options.maxClosedSummaries);
       }),
 
     get: (id) => state.get(id),
@@ -397,8 +505,10 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
       return total;
     },
     resourcesUncertainSince: (agent) => uncertain.get(agent) ?? null,
-    canvasReadRequiredAfter: () => state.canvasReadRequiredAfter,
+    damage: () => state.damage,
     state: () => state.toState(),
+    compactionStatus: () => compaction,
+    usable: () => usable,
   };
   return manager;
 }
@@ -408,9 +518,10 @@ const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 /**
  * In-memory journal (tests, simulator): same contract as the file journal,
  * not durable. `events` are those of the current generation (after the
- * checkpoint); their sequence numbers follow the checkpoint's.
+ * checkpoint); their sequence numbers follow the checkpoint's. `freeBytes`
+ * is what stats() reports (default: effectively unlimited).
  */
-export function createMemoryJournal(): AttemptJournal & { events: JournalEvent[]; checkpoint: JournalState | null; generation: number } {
+export function createMemoryJournal(options: { readonly freeBytes?: number | null } = {}): AttemptJournal & { events: JournalEvent[]; checkpoint: JournalState | null; generation: number } {
   const journal = {
     events: [] as JournalEvent[],
     checkpoint: null as JournalState | null,
@@ -420,6 +531,11 @@ export function createMemoryJournal(): AttemptJournal & { events: JournalEvent[]
       if (journal.checkpoint !== null) visitor.checkpoint(copy(journal.checkpoint));
       journal.events.forEach((e, i) => visitor.event(copy(e), base + i + 1));
       return { generation: journal.generation, fromCheckpoint: journal.checkpoint !== null, lastSeq: base + journal.events.length, discardedTailBytes: 0, corruptLines: [], sequenceGaps: 0, problems: [] };
+    },
+    async stats(): Promise<JournalStats> {
+      let bytes = 0;
+      for (const e of journal.events) bytes += JSON.stringify(e).length + 30;
+      return { generation: journal.generation, activeEvents: journal.events.length, activeBytes: bytes, freeBytes: options.freeBytes === undefined ? Number.MAX_SAFE_INTEGER : options.freeBytes };
     },
     async append(event: JournalEvent): Promise<number> {
       journal.events.push(copy(event));

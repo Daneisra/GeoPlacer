@@ -75,6 +75,9 @@ export class FaultyFs implements JournalFs {
   syncDir(dir: string): Promise<'synced' | 'unsupported'> {
     return this.run('syncDir', dir, () => this.inner.syncDir(dir));
   }
+  freeBytes(dir: string): Promise<number | null> {
+    return this.run('freeBytes', dir, () => this.inner.freeBytes(dir));
+  }
   truncate(p: string, length: number): Promise<void> {
     return this.run('truncate', p, () => this.inner.truncate(p, length));
   }

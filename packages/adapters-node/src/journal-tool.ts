@@ -67,7 +67,8 @@ export interface JournalDiagnosis {
     readonly fromCheckpoint: number | null;
     readonly open: readonly { readonly attemptId: string; readonly agent: string; readonly state: string; readonly pixels: number }[];
     readonly closedSummaries: number;
-    readonly canvasReadRequiredAfter: Timestamp | null;
+    /** Damage floor of the state (null: none): leases need evidence newer than it. */
+    readonly damage: { readonly at: Timestamp; readonly reason: string } | null;
     readonly inconsistentEvents: readonly { readonly generation: number; readonly line: number; readonly attemptId: string | null }[];
   } | null;
   /** Attempts whose state is uncertain because of the damage. */
@@ -249,7 +250,7 @@ export async function diagnoseJournal(root: string, options: ToolOptions = {}): 
       fromCheckpoint,
       open: s.open.map((a) => ({ attemptId: a.attemptId, agent: a.agent, state: a.state, pixels: a.writes.length })),
       closedSummaries: s.closed.length,
-      canvasReadRequiredAfter: s.canvasReadRequiredAfter,
+      damage: s.damage,
       inconsistentEvents: inconsistent,
     };
   } else damaged = true;
@@ -401,7 +402,7 @@ export async function applyJournalRepair(lock: DataDirectoryLock, planId: string
         lastSeq: journal.status().lastSeq,
         open: state.open.map((a) => (a.state === 'needs-reconciliation' ? a : { ...a, state: 'needs-reconciliation' as const, needsReconciliationAt: options.now, reason: 'repair: journal damaged' })),
         lastSpendAt: [...agents].sort().map((agent) => ({ agent, at: Math.max(options.now, state.lastSpendAt.find((x) => x.agent === agent)?.at ?? 0) })),
-        canvasReadRequiredAfter: Math.max(options.now, state.canvasReadRequiredAfter ?? 0),
+        damage: { at: Math.max(options.now, state.damage?.at ?? 0), reason: 'journal repaired' },
         preservedGenerations: [...new Set([...state.preservedGenerations, ...op.preserve])].sort((a, b) => a - b),
       };
       const report = await journal.compact(repaired);

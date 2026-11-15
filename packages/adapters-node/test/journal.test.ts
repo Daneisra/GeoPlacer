@@ -358,6 +358,62 @@ describe('real process kills at named steps (explicit synchronisation, no timer)
   });
 });
 
+describe('file journal: concurrency and statistics (Phase 1B.8)', () => {
+  it('an append and a compaction called at once on the journal itself never overlap: no event lands in a superseded generation', async () => {
+    const { lock } = await lockedRoot();
+    const h = openHarness(lock);
+    await h.manager.recover(h.clock.now);
+    await runSteps(h, 0, 6);
+    const state = h.manager.state();
+    const events: JournalEvent[] = Array.from({ length: 10 }, (_, k) => ({ type: 'canvas-read-required', at: 2e12 + k, reason: `concurrent ${k}` }));
+    const results = await Promise.allSettled([h.journal.compact(state), ...events.map((e) => h.journal.append(e))]);
+    expect(results.map((r) => r.status)).toEqual(Array(11).fill('fulfilled'));
+    await h.journal.close();
+    const reloaded = await loadState(new FileAttemptJournal(lock));
+    expect(reloaded.lastSeq).toBe(state.lastSeq + 10);
+    expect(reloaded.damage).toEqual({ at: 2e12 + 9, reason: 'concurrent 9' });
+  });
+
+  it('statistics count the active generation from the load on; the free space is known on this disk', async () => {
+    const { lock } = await lockedRoot();
+    const h = openHarness(lock);
+    await h.manager.recover(h.clock.now);
+    await runSteps(h, 0, 5);
+    const before = await h.journal.stats();
+    expect(before.activeEvents).toBeGreaterThan(5);
+    expect(before.activeBytes).toBeGreaterThan(0);
+    expect(before.freeBytes).toBeGreaterThan(0);
+    await h.journal.close();
+    const again = new FileAttemptJournal(lock);
+    await expect(again.stats()).rejects.toMatchObject({ code: 'NOT_LOADED' });
+    await again.load({ checkpoint() {}, event() {} });
+    expect(await again.stats()).toMatchObject({ activeEvents: before.activeEvents, activeBytes: before.activeBytes, generation: 0 });
+    await again.compact(h.manager.state());
+    expect(await again.stats()).toMatchObject({ activeEvents: 0, activeBytes: 0, generation: 1 });
+    await again.close();
+  });
+
+  it('automatic compaction on disk under concurrent operations: reloads to the same state, never two at a time', async () => {
+    const { root, lock } = await lockedRoot();
+    const h = openHarness(lock, { autoCompaction: { enabled: true, maxActiveEvents: 15, minFreeBytes: 1 } });
+    await h.manager.recover(h.clock.now);
+    h.observe(); // once: the concurrent cycles below spend nothing (already-correct outcomes)
+    const cycle = async (x: number, y: number): Promise<void> => {
+      const writes = [{ taskId: `c-${x},${y}` as never, point: { x, y }, color: 0xff0000 as never }];
+      const a = await h.manager.lease({ agent: AGENT, projectId: 'p' as never, templateId: 'm' as never, revision: 1, writes, now: ++h.clock.now, ttlMs: 1e12 });
+      await h.manager.start(a.attemptId, ++h.clock.now);
+      if (x % 9 !== 4) await h.manager.finish(a.attemptId, [{ taskId: writes[0]!.taskId, status: 'already-correct' }], ++h.clock.now);
+    };
+    await Promise.all(Array.from({ length: 90 }, (_, k) => cycle(k % 30, Math.floor(k / 30))));
+    expect(h.manager.compactionStatus().automatic).toBeGreaterThan(3);
+    expect(h.manager.compactionStatus().lastProblem).toBeNull();
+    const expected = h.manager.state();
+    await h.journal.close();
+    expect(await loadState(new FileAttemptJournal(lock))).toEqual(expected);
+    expect((await fullReplay(root)).state).toEqual(expected);
+  });
+});
+
 describe('file journal: pointer format', () => {
   it('is checked by CRC', () => {
     const bytes = encodePointer(7);

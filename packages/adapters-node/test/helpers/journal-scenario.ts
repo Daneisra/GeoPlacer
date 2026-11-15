@@ -5,7 +5,7 @@
  */
 
 import path from 'node:path';
-import type { AgentId, AttemptManager, JournalEvent, JournalState, ProjectId, ResourceRules, Rgb, TaskId, TemplateId } from '@geoplacer/core';
+import type { AgentId, AttemptManager, AutoCompactionPolicy, JournalEvent, JournalState, ProjectId, ResourceRules, Rgb, TaskId, TemplateId } from '@geoplacer/core';
 import { JournalStateBuilder, createAttemptManager, createResourceManager, decodeChecksummedLines, decodeJournal, isHistoryEntry } from '@geoplacer/core';
 import type { JournalFs } from '../../src/index.js';
 import { FileAttemptJournal, FileHistoryStore, checkpointName, decodePointer, generationsIn, logName, nodeJournalFs } from '../../src/index.js';
@@ -37,7 +37,7 @@ export interface Harness {
 /** Journals and histories opened by openHarness (tests close them all at the end). */
 export const openedJournals: (FileAttemptJournal | FileHistoryStore)[] = [];
 
-export function openHarness(lock: DataDirectoryLock, options: { fs?: JournalFs; retainGenerations?: number; base?: number; idPrefix?: string } = {}): Harness {
+export function openHarness(lock: DataDirectoryLock, options: { fs?: JournalFs; retainGenerations?: number; base?: number; idPrefix?: string; autoCompaction?: AutoCompactionPolicy } = {}): Harness {
   const journal = new FileAttemptJournal(lock, { fs: options.fs ?? nodeJournalFs, retainGenerations: options.retainGenerations ?? 100 });
   // The real history on disk (Phase 1B.7: exercised with the manager and under process kills).
   const history = new FileHistoryStore(lock, { fs: options.fs ?? nodeJournalFs });
@@ -46,7 +46,7 @@ export function openHarness(lock: DataDirectoryLock, options: { fs?: JournalFs; 
   const clock = { now: options.base ?? 1_000_000 };
   let ids = 0;
   const prefix = options.idPrefix ?? 'a';
-  const manager = createAttemptManager({ journal, history, resources, newAttemptId: () => `${prefix}-${++ids}` as never });
+  const manager = createAttemptManager({ journal, history, resources, newAttemptId: () => `${prefix}-${++ids}` as never, ...(options.autoCompaction === undefined ? {} : { autoCompaction: options.autoCompaction }) });
   const observe = (): void => {
     resources.observe({ type: 'resource-observation', agent: AGENT, observedAt: ++clock.now, energy: 1_000_000, currency: 0, unlockedColors: [RED], upgrades: { maxEnergy: 0, regenSpeed: 0, energyPacks: 0 }, availability: { status: 'available' } });
   };

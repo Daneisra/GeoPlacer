@@ -38,6 +38,7 @@ import type {
   JournalEvent,
   JournalLoadReport,
   JournalState,
+  JournalStats,
   JournalVisitor,
 } from '@geoplacer/core';
 import { JournalLineScanner, crc32, decodeCheckpoint, decodeChecksummedLines, encodeCheckpoint, encodeHistoryLine, encodeJournalLine, isHistoryEntry } from '@geoplacer/core';
@@ -131,6 +132,11 @@ export class FileAttemptJournal implements AttemptJournal {
   private readonly chunkBytes: number;
   readonly dir: string;
   private loaded = false;
+  /** Events and bytes of the active generation (Phase 1B.8: automatic compaction). */
+  private activeEvents = 0;
+  private activeBytes = 0;
+  /** load, append and compact never overlap (an append during a compaction would land in the old generation). */
+  private exclusiveQueue: Promise<unknown> = Promise.resolve();
   private generation = 0;
   private lastSeq = 0;
   private orphans: string[] = [];
@@ -175,7 +181,30 @@ export class FileAttemptJournal implements AttemptJournal {
     return g;
   }
 
-  async load(visitor: JournalVisitor): Promise<JournalLoadReport> {
+  private exclusive<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this.exclusiveQueue.then(operation, operation);
+    this.exclusiveQueue = run.catch(() => undefined);
+    return run;
+  }
+
+  load(visitor: JournalVisitor): Promise<JournalLoadReport> {
+    return this.exclusive(() => this.loadNow(visitor));
+  }
+
+  append(event: JournalEvent): Promise<number> {
+    return this.exclusive(() => this.appendNow(event));
+  }
+
+  compact(state: JournalState): Promise<CompactionReport> {
+    return this.exclusive(() => this.compactNow(state));
+  }
+
+  async stats(): Promise<JournalStats> {
+    if (!this.loaded) throw new JournalOpenError('NOT_LOADED', 'the journal is not loaded (or in an unknown state after a failed publish)');
+    return { generation: this.generation, activeEvents: this.activeEvents, activeBytes: this.activeBytes, freeBytes: await this.fs.freeBytes(this.dir) };
+  }
+
+  private async loadNow(visitor: JournalVisitor): Promise<JournalLoadReport> {
     this.lock.assertHeld();
     await this.closeHandle();
     const names = await this.fs.list(this.dir);
@@ -210,6 +239,7 @@ export class FileAttemptJournal implements AttemptJournal {
     let sequenceGaps = 0;
     const corruptLines: number[] = [];
     let discardedTailBytes = 0;
+    let activeEvents = 0;
     for (const source of sources) {
       const file = this.at(logName(source));
       const active = source === g;
@@ -232,6 +262,7 @@ export class FileAttemptJournal implements AttemptJournal {
           lastSeq = Math.max(lastSeq, seq);
         }
         visitor.event(event, seq ?? lastSeq);
+        if (active) activeEvents++;
       });
       await this.fs.readChunks(file, (chunk) => scanner.push(chunk), this.chunkBytes);
       const tail = scanner.end();
@@ -240,6 +271,8 @@ export class FileAttemptJournal implements AttemptJournal {
     }
     this.generation = g;
     this.lastSeq = lastSeq;
+    this.activeEvents = activeEvents;
+    this.activeBytes = (await this.fs.size(this.at(logName(g)))) ?? 0;
     this.loaded = true;
     return { generation: g, fromCheckpoint: checkpoint !== null, lastSeq, discardedTailBytes, corruptLines, sequenceGaps, problems };
   }
@@ -285,13 +318,14 @@ export class FileAttemptJournal implements AttemptJournal {
     await handle?.close();
   }
 
-  async append(event: JournalEvent): Promise<number> {
+  private async appendNow(event: JournalEvent): Promise<number> {
     this.lock.assertHeld();
     if (!this.loaded) throw new JournalOpenError('NOT_LOADED', 'load the journal before appending');
     const seq = this.lastSeq + 1;
     const handle = await this.handleForAppend();
+    const line = enc(encodeJournalLine(event, seq));
     try {
-      await handle.write(enc(encodeJournalLine(event, seq)));
+      await handle.write(line);
       await handle.sync();
     } catch (error) {
       // The file may end with a partial line: reopen before the next append
@@ -300,6 +334,8 @@ export class FileAttemptJournal implements AttemptJournal {
       throw error;
     }
     this.lastSeq = seq;
+    this.activeEvents++;
+    this.activeBytes += line.length;
     return seq;
   }
 
@@ -320,7 +356,7 @@ export class FileAttemptJournal implements AttemptJournal {
     await this.syncDir();
   }
 
-  async compact(state: JournalState): Promise<CompactionReport> {
+  private async compactNow(state: JournalState): Promise<CompactionReport> {
     this.lock.assertHeld();
     if (!this.loaded) throw new JournalOpenError('NOT_LOADED', 'load the journal before compacting');
     if (state.lastSeq !== this.lastSeq) {
@@ -361,6 +397,8 @@ export class FileAttemptJournal implements AttemptJournal {
       if (inUse !== next) throw error;
     }
     this.generation = next;
+    this.activeEvents = 0;
+    this.activeBytes = 0;
     this.orphans = [];
     // Retention: only after the new generation is published.
     const removedGenerations: number[] = [];

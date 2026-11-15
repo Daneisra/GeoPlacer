@@ -10,7 +10,7 @@
  * process kills are tested.
  */
 
-import { open, readdir, rename, stat, unlink, mkdir, type FileHandle } from 'node:fs/promises';
+import { open, readdir, rename, stat, statfs, unlink, mkdir, type FileHandle } from 'node:fs/promises';
 
 export interface AppendHandle {
   /** Writes all the bytes (short writes completed). */
@@ -41,6 +41,8 @@ export interface JournalFs {
   openAppend(path: string): Promise<AppendHandle>;
   /** Cuts the file at `length` (separate read-write handle) and fsyncs it. */
   truncate(path: string, length: number): Promise<void>;
+  /** Free bytes for an unprivileged writer where `dir` lives; null when unknown. */
+  freeBytes(dir: string): Promise<number | null>;
 }
 
 const code = (error: unknown): string | undefined => (error as { code?: string }).code;
@@ -158,6 +160,15 @@ export const nodeJournalFs: JournalFs = {
       await handle.sync();
     } finally {
       await handle.close();
+    }
+  },
+  async freeBytes(dir) {
+    try {
+      const s = await statfs(dir);
+      const free = Number(s.bavail) * Number(s.bsize);
+      return Number.isSafeInteger(free) && free >= 0 ? free : null;
+    } catch {
+      return null;
     }
   },
 };

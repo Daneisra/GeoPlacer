@@ -29,7 +29,7 @@ function summary(d: JournalDiagnosis): string {
     );
   }
   if (d.orphans.length > 0) lines.push(`orphans: ${d.orphans.join(' ')}`);
-  if (d.state !== null) lines.push(`state: ${d.state.open.length} open attempt(s), ${d.state.closedSummaries} closed summaries, last event ${d.state.lastSeq}${d.state.canvasReadRequiredAfter === null ? '' : ', canvas read required'}`);
+  if (d.state !== null) lines.push(`state: ${d.state.open.length} open attempt(s), ${d.state.closedSummaries} closed summaries, last event ${d.state.lastSeq}${d.state.damage === null ? '' : ', damage floor (leases need evidence)'}`);
   if (d.affectedAttempts.length > 0) lines.push(`affected attempts: ${d.affectedAttempts.map((a) => `${a.attemptId} (${a.why})`).join(', ')}`);
   for (const p of d.problems) lines.push(`problem: ${p}`);
   for (const r of d.recommendations) lines.push(`recommendation: ${r}`);
@@ -47,7 +47,7 @@ function planText(plan: RepairPlan): string {
       case 'restore-pointer':
         return `${i + 1}. write the CURRENT pointer to generation ${op.generation}`;
       case 'new-generation':
-        return `${i + 1}. publish a new generation from generation ${op.from}: ${op.openToReconcile} open attempt(s) to reconcile, a fresh canvas read required before any lease, generations ${op.preserve.join(', ')} preserved${op.stateCertain ? '' : ' (WARNING: the open attempts of the damaged checkpoint cannot all be known)'}`;
+        return `${i + 1}. publish a new generation from generation ${op.from}: ${op.openToReconcile} open attempt(s) to reconcile, every later lease needing a canvas read newer than the repair that covers its points, generations ${op.preserve.join(', ')} preserved${op.stateCertain ? '' : ' (WARNING: the open attempts of the damaged checkpoint cannot all be known)'}`;
     }
   });
   return [...ops, `plan id: ${plan.planId}`, 'to apply: --apply <plan id> (the engine must be stopped)'].join('\n');

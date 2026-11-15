@@ -18,6 +18,7 @@ import type {
 } from '../src/index.js';
 import {
   AttemptError,
+  createArraySnapshot,
   createAttemptManager,
   createMemoryHistory,
   createMemoryJournal,
@@ -143,6 +144,7 @@ function decodedJournal(decoded: DecodedJournal): AttemptJournal {
       return { generation: 0, fromCheckpoint: false, lastSeq, discardedTailBytes: decoded.discardedTailBytes, corruptLines: decoded.corruptLines, sequenceGaps: 0, problems: [] };
     },
     append: async () => ++lastSeq,
+    stats: async () => ({ generation: 0, activeEvents: decoded.entries.length, activeBytes: 0, freeBytes: null }),
     compact: async () => {
       throw new Error('not supported');
     },
@@ -378,16 +380,20 @@ describe('AttemptManager: uncertain results', () => {
     expect([...w.sim.appliedAt.values()]).toEqual([1, 1, 1]);
   });
 
-  it('reconciliation needs a read taken after the start; unknown pixels stay observed-unknown', async () => {
+  it('reconciliation needs a read taken after the start; a pixel not observed keeps the attempt open (Phase 1B.8)', async () => {
     const w = new World(3, 1);
     await w.manager.recover(w.now);
     w.observe(A1);
     const leased = await w.lease(t, A1, writesOf([[0, 0], [5, 0]]));
     const a = await w.manager.start(leased.attemptId, w.tick());
     expect(await code(w.manager.reconcile(a.attemptId, w.sim.snapshot(a.startedAt!), w.tick()))).toBe('STALE_SNAPSHOT');
-    const r = await w.manager.reconcile(a.attemptId, w.sim.snapshot(w.tick()), w.tick());
-    expect(r.results.map((x) => x.result)).toEqual(['observed-incorrect', 'observed-unknown']);
-    expect(await code(w.manager.reconcile(a.attemptId, w.sim.snapshot(w.tick()), w.tick()))).toBe('INVALID_TRANSITION');
+    // (5,0) is outside the canvas read: UNKNOWN, so the attempt cannot close and its points stay reserved.
+    expect(await code(w.manager.reconcile(a.attemptId, w.sim.snapshot(w.tick()), w.tick()))).toBe('INCOMPLETE_OBSERVATION');
+    expect([...w.manager.inFlight()].sort()).toEqual(['0,0', '5,0']);
+    const wide = createArraySnapshot({ rect: { minX: 0, minY: 0, width: 6, height: 1 }, coordinateSystem: { yAxis: 'down' }, source: 'simulated', observedAt: w.tick(), pixels: new Int32Array(6).fill(-1) });
+    const r = await w.manager.reconcile(a.attemptId, wide, w.tick());
+    expect(r.results.map((x) => x.result)).toEqual(['observed-incorrect', 'observed-incorrect']);
+    expect(await code(w.manager.reconcile(a.attemptId, wide, w.tick()))).toBe('INVALID_TRANSITION');
   });
 
   it('a pixel incorrect again after processing is planned again', async () => {
@@ -422,7 +428,7 @@ describe('AttemptManager: recovery', () => {
     // Restart: a new manager over the same journal, a ResourceManager that knows nothing.
     w.manager = w.newManager();
     const report = await w.manager.recover(w.tick());
-    expect(report).toEqual({ released: [leased.attemptId], toReconcile: [started.attemptId], generation: 0, fromCheckpoint: false, discardedTailBytes: 0, corruptLines: [], sequenceGaps: 0, inconsistentEvents: 0, problems: [], damaged: false, canvasReadRequiredAfter: null });
+    expect(report).toEqual({ released: [leased.attemptId], toReconcile: [started.attemptId], generation: 0, fromCheckpoint: false, discardedTailBytes: 0, corruptLines: [], sequenceGaps: 0, inconsistentEvents: 0, problems: [], damaged: false, damage: null });
     expect(w.manager.get(leased.attemptId)?.state).toBe('cancelled');
     expect(w.manager.get(done.attemptId)?.state).toBe('finished');
     expect([...w.manager.inFlight()]).toEqual(['1,0']);
