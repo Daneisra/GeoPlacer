@@ -24,6 +24,104 @@ ses propres dépendances hors des workspaces. Il faut donc lancer
 dans `frontend` (modules `react`, `vite`… introuvables). C'est vérifié en
 Phase 1B.8 : les tests passent sans cette étape, le build la requiert.
 
+## Phase 1B.9 : serveur, toile durable, tableau de bord
+
+**Résultats** (`npm run check:logged`, machine calme) :
+- Jest : 13 suites, **122 tests** ;
+- Vitest : 40 fichiers, **488 tests** + 1 exhaustif optionnel :
+  - core 358 ;
+  - adapters-node 66 ;
+  - simulator 43 ;
+  - engine-service 21 ;
+- lint : 0 erreur (65 avertissements hérités) ;
+- lint du frontend : 17 erreurs et 3 avertissements hérités, aucun
+  ajouté ;
+- build : réussi.
+
+| Où | Fichier | Couvre |
+|---|---|---|
+| engine-service | `world-store.test.ts` | Toile durable : restauration (pixels, énergie dépensée une fois), checkpoints, échec d'enregistrement sans effet, ligne déchirée coupée, dommage et identité refusés, restes d'un checkpoint interrompu ; **vrais processus tués à 9 étapes nommées** |
+| engine-service | `service.test.ts` | Exécution complète et événements (numérotés, toile par lots), instantané et numéro de séquence, commandes concurrentes et incompatibles, arrêt pendant une écriture avec et sans abandon, révision pendant l'exécution, compactage unique, diagnostic, réglages et réinitialisation, ressources et améliorations (confirmation, refus en écriture, proposition périmée), seconde instance, redémarrage |
+| engine-service | `crash.test.ts` | Vrai processus tué en pleine simulation (3 points), reprise sans double consommation |
+| adapters-node | `adapters.test.ts` | Garde par canal nommé : nom canonique, refus dans un processus, deux processus et libération après arrêt brutal |
+| simulator | `scheduler.test.ts` | Ordonnanceur avec une horloge qui avance à chaque lecture (régression) |
+| serveur | `engine-api.test.ts` | Routes `/api/v1` (moteur factice) : commandes, codes, validation stricte, aucune fuite, 404 JSON ; protections : origine étrangère, Host étranger, origine d'extension, corps non JSON, taille ; canal WebSocket : hello, ordre, client lent, reconnexion |
+| serveur | `server-engine.test.ts` | **Vrai serveur** : API, WebSocket, déconnexion sans effet, seconde instance refusée (code 2), arrêt contrôlé par IPC, redémarrage cohérent, arrêt brutal en pleine simulation et reprise |
+
+**Défauts réels trouvés et corrigés** :
+- **Ordonnanceur de la 1B.8** : avec une horloge réelle, il demandait
+  l'état des ressources avant leur observation (`TIME_BEFORE_STATE`).
+  C'était invisible avec l'horloge virtuelle. Test de régression ajouté.
+- **Service**, trouvé par ses tests : l'abonnement à la fin de la boucle,
+  posé avant le démarrage, se résolvait aussitôt.
+- **Recette navigateur** : après une pause, « Reprendre » restait grisé
+  jusqu'au statut suivant. Après un arrêt, la réponse HTTP portait un
+  statut calculé pendant l'arrêt et masquait « Démarrer ». Corrigé, test
+  vérifié par mutation.
+- **Performance**, mesurée avant correction : `status()` recomptait les
+  4 millions de pixels du modèle à chaque appel.
+- **Keep-alive hérité** : il contactait Wplace pour les comptes
+  enregistrés. Coupé par défaut.
+
+**Erreurs de mise au point** :
+- énergie régénérée et horloge repartie en arrière dans l'enfant de test ;
+- nom de canal nommé mal échappé dans une sonde : le refus `EACCES` a
+  d'abord été attribué à tort au bac à sable ;
+- chargeur `tsx` cherché depuis un dossier temporaire ;
+- `prefer-const` ;
+- `any` dans des tests ;
+- règles React (`set-state-in-effect`, `refs`), corrigées sans
+  désactivation ;
+- noms d'états et d'améliorations du core mal recopiés dans l'interface.
+
+**Délais dépassés : suivi** (point toujours ouvert, voir 1B.8 plus
+bas). Deux échecs avant le push de la 1B.8, sur le commit déjà validé,
+journaux complets conservés hors du dépôt :
+- **propriétés multi-agents** : plus de 30 s, contre 3,9 s au repos ;
+- **réparation du journal par injection de fautes** : plus de 120 s,
+  contre 26 à 30 s au repos.
+
+Pendant ces échecs, un jeu occupait environ 9 des 12 processeurs
+logiques. La suite core prenait 47 s au lieu de 6 s, et chaque worker
+mettait 4,6 s à démarrer au lieu de 0,5 s. Le même test seul prenait
+8,1 s. Machine redevenue calme, le même commit passait entièrement.
+
+Même mécanisme que celui reproduit en 1B.8 : saturation de la machine
+par un autre programme. Ce mécanisme reste une explication plausible des
+dépassements historiques, **pas une preuve de leur cause**.
+
+**Ajout** : `scripts/run-logged.mjs` enregistre maintenant :
+- la durée ;
+- le nombre de processeurs et la mémoire ;
+- la charge de la machine, relevée toutes les 5 s (moyenne, maximum,
+  nombre de relevés à 90 % ou plus).
+
+Une saturation sera donc visible dans le journal même du contrôle. Aucune
+relance silencieuse n'est faite.
+
+**Performances** (`npm run bench:responsiveness`, toile 2048², énergie
+abondante, latence nulle) :
+
+| Mesure | Modèle 2000² | Modèle 256² |
+|---|---|---|
+| Premier lot | 510 à 650 ms | 306 ms |
+| Pixels par seconde | 4 600 → 5 070 après correction | 53 000 |
+| Durée d'un cycle | 217 → 197 ms | 18 ms |
+| Retard de la boucle d'événements : p50 / p99 / max | 12 / 204 / 216 ms | 11 / 18 / 27 ms |
+| `status()` | 12,5 ms → ≈ 0 ms | ≈ 0 ms |
+| Pause (attend l'opération en cours) | 52 → 4 ms | — |
+| Lecture de la zone du modèle (HTTP) | 42 ms, 20 Mio de JSON | 0,3 Mio |
+| Événements | 7 par seconde, 64 Kio/s pour la toile | — |
+| Checkpoint de la toile 2048² avec compactage | 148 ms | — |
+| Mémoire maximale du processus | 230 Mio | 141 Mio |
+
+Le navigateur n'est jamais bloqué : les calculs ont lieu dans le serveur.
+En 2000², une requête peut attendre jusqu'à environ 0,2 s pendant un
+cycle. La piste d'optimisation est une progression incrémentale dans
+l'ordonnanceur ; elle n'est pas faite. La vérification complète
+périodique de la toile, qui détecte les modifications extérieures, est
+conservée : chaque cycle relit la zone du modèle.
+
 ## Tests des paquets (Phase 1B.8 : Vitest, 37 fichiers, 463 tests + 1 exhaustif optionnel)
 
 | Paquet | Fichier | Objet |

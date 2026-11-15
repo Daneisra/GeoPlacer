@@ -1,6 +1,6 @@
 # Architecture de GeoPlacer
 
-État : **Phase 1B.8**. Les contrats existent depuis la 1B.0 ; la géométrie,
+État : **Phase 1B.9**. Les contrats existent depuis la 1B.0 ; la géométrie,
 les couleurs et les palettes sont implémentées en 1B.1 (voir
 [geometrie-couleurs.md](geometrie-couleurs.md)) ; le gestionnaire de
 modèles et sa persistance en 1B.2 (voir [modeles.md](modeles.md)) ; les
@@ -12,8 +12,11 @@ travail, les tentatives et la reprise après crash en 1B.6 (voir
 [planification.md](planification.md)) ; le compactage du journal, son
 diagnostic et sa réparation, et le simulateur de toile en 1B.7 (voir
 [journal.md](journal.md) et [simulateur.md](simulateur.md)) ; l'ordonnanceur
-mono-agent en 1B.8 (voir [ordonnanceur.md](ordonnanceur.md)).
-Le serveur et l'interface hérités de Wplacer fonctionnent comme avant.
+mono-agent en 1B.8 (voir [ordonnanceur.md](ordonnanceur.md)) ; le service
+d'orchestration, la toile simulée durable, l'API `/api/v1`, le WebSocket
+et le tableau de bord en 1B.9 (voir § « Serveur et moteur »).
+Les routes héritées de Wplacer fonctionnent comme avant ; leur keep-alive
+vers Wplace est coupé par défaut (1B.9).
 
 ## Arborescence
 
@@ -45,11 +48,18 @@ GeoPlacer/
 │   │                             cache d'ordre, journal des tentatives et historique (1B.6) ;
 │   │                             générations, checkpoints, diagnostic et réparation du journal (1B.7) ;
 │   │                             benchmarks bench:templates, bench:reservations, bench:journal
-│   └── simulator/                @geoplacer/simulator : toile simulée locale, horloge virtuelle (1B.7)
+│   ├── simulator/                @geoplacer/simulator : toile simulée locale, horloge virtuelle (1B.7) ;
+│   │                             changements préparés puis enregistrés avant d'être visibles (1B.9)
+│   └── engine-service/           @geoplacer/engine-service (1B.9) : service d'orchestration,
+│                                 toile simulée durable (FileWorldStore), réglages, flux d'événements
 ├── scripts/run-logged.mjs        contrôles avec journal complet dans test-logs/ (1B.4)
 ├── scripts/recette-navigateur.mjs recette automatisée dans un vrai navigateur (1B.7)
-├── src/                          serveur hérité (Express, Jest) — inchangé
-├── frontend/                     interface React héritée — inchangée
+├── src/                          serveur (Express, Jest)
+│   ├── app-base.ts               protections communes : Host, Origin, CORS, limiteur, JSON (1B.9)
+│   ├── api/v1/                   routes du moteur (Zod) et canal WebSocket (1B.9)
+│   ├── engine/bootstrap.ts       ouverture du moteur avant l'écoute (1B.9)
+│   └── routes/, services/…       code hérité
+├── frontend/                     interface React ; tableau de bord de la simulation (1B.9)
 ├── tsconfig.base.json            configuration stricte commune aux paquets
 └── tsconfig.json                 configuration du serveur hérité
 ```
@@ -97,7 +107,33 @@ est une décision séparée, qui n'est pas encore prise (ADR 0002, § 7).
 | Logique métier pure | `packages/core/src/<domaine>/` | 1B.1 (géométrie, couleurs, palettes : fait) à 1B.8 |
 | Implémentations simulées | `packages/simulator/src/` | 1B.7 |
 | Adaptateurs d'E/S Node (fichiers, PNG, SHA-256) | `packages/adapters-node/src/` | 1B.2 (modèles : fait) |
-| Branchement au serveur, WebSocket | serveur | 1B.9 |
+| Service d'orchestration, toile simulée durable | `packages/engine-service/src/` | 1B.9 |
+| Routes HTTP `/api/v1` | `src/api/v1/engine-router.ts` | 1B.9 |
+| WebSocket `/api/v1/ws` | `src/api/v1/engine-socket.ts` | 1B.9 |
+| Interface | `frontend/src/components/simulation/`, `hooks/useEngine.ts`, `lib/engine.ts` | 1B.9 |
+
+## Serveur et moteur (Phase 1B.9)
+
+```
+navigateur (React)  ──HTTP /api/v1──►  routes (Zod, codes stables)  ──►  EngineService
+        ▲                                                                   │ coordonne
+        └──WebSocket /api/v1/ws◄── canal (hello, événements, resync) ◄── flux d'événements
+                                                                            │
+   TemplateManager · AttemptManager + journal · ResourceManager · progression · ETA
+   UpgradePlanner · TaskScheduler · SimulatedCanvasProvider + FileWorldStore
+```
+
+- **Aucune règle métier** dans les routes ni dans React : les routes
+  valident et transmettent, le service décide ce que chaque état permet,
+  les composants du core font le reste.
+- `src/` ne connaît le service que par une interface structurelle
+  (`EngineApi`) ; seul `src/engine/bootstrap.ts` importe le paquet. Les
+  tests Jest des routes utilisent un moteur factice ; les tests de
+  processus utilisent le vrai.
+- **Une instance par dossier de données** : verrou dans le répertoire,
+  plus, sous Windows, un garde par canal nommé. Le moteur est ouvert avant
+  l'écoute ; un second démarrage s'arrête avec le code 2, sans écrire.
+- La toile simulée est l'**unique** fournisseur de toile de la V1.
 
 ## Principes structurants
 

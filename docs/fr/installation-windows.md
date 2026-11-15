@@ -87,9 +87,10 @@ Le dépôt contient deux ensembles de code, testés avec deux outils :
   avec **Vitest**.
 
 ```powershell
-# Serveur hérité
+# Serveur
+npm run build:packages        # nécessaire avant tsc et Jest : le serveur importe les paquets compilés
 npx tsc                       # compile le backend dans dist/
-npm run test:legacy           # Jest (identique à « npm test »)
+npm run test:legacy           # Jest (identique à « npm test » ; construit d'abord les paquets)
 npm run lint                  # ESLint backend (0 erreur attendue)
 
 # Nouveaux paquets
@@ -122,8 +123,21 @@ cd frontend; npm run build; cd ..
 npm start               # node --env-file-if-exists=.env dist/server.js
 ```
 
-Le serveur affiche `Server listening on http://127.0.0.1:3000`. L'interface
-compilée (`frontend/dist`) est servie à la même adresse.
+Le serveur affiche `Engine ready: local simulation only`, puis `Server
+listening on http://127.0.0.1:3000`. L'interface compilée
+(`frontend/dist`) est servie à la même adresse ; le tableau de bord pilote
+la simulation locale (voir [guide-utilisateur.md](guide-utilisateur.md)).
+
+Sur un **clone neuf**, `npm run build` exige aussi `cd frontend; npm ci`.
+
+**Arrêt** : une fois **Ctrl+C**. Le moteur s'arrête après l'écriture en
+cours, libère son dossier et le serveur affiche `Graceful shutdown
+completed`. Le détail est dans le guide utilisateur, § 4.
+
+**Une seule instance par dossier de moteur** : un second `npm start` sur
+le même dossier s'arrête aussitôt (code 2) avec « already used by another
+GeoPlacer instance ». Pour deux instances, donner à la seconde un autre
+dossier (`GEOPLACER_ENGINE_DIR`) **et** un autre port.
 
 ### Mode développement (corrigé en Phase 1B.3)
 
@@ -243,6 +257,8 @@ commité. Il ne doit contenir aucun secret.
 | `ALLOWED_ORIGINS` | `http://localhost:*,http://127.0.0.1:*,chrome-extension://*` | Origines navigateur autorisées |
 | `JSON_BODY_LIMIT` | `12mb` | Taille maximale d'un corps JSON (un modèle de 2000×2000 pèse environ 11,4 Mo). Format : un entier, suivi éventuellement de `b`, `kb` ou `mb` ; toute autre forme (`1gb`, `1.5mb`) est remplacée par `12mb`, avec un avertissement |
 | `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX` | `60000` / `300` | Limiteur de débit, appliqué à toutes les routes |
+| `GEOPLACER_ENGINE_DIR` | `data\engine` | Dossier du moteur : modèles, journal, toile simulée, réglages (Phase 1B.9) |
+| `LEGACY_KEEPALIVE` | *(absent)* | `1` rétablit le keep-alive hérité, qui **contacte Wplace** pour les comptes enregistrés. Laisser absent |
 
 Voir `docs/fr/securite.md` pour le détail des protections.
 

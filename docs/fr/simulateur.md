@@ -1,4 +1,4 @@
-# Simulateur de toile local (Phase 1B.7)
+# Simulateur de toile local (Phase 1B.7, durable en 1B.9)
 
 Le paquet `@geoplacer/simulator` fournit une **toile entièrement locale**,
 en mémoire, derrière les contrats du moteur (`CanvasReader`,
@@ -37,6 +37,7 @@ canvas.addAgent({ agent, energy: 20, unlockedColors: [red, green] });
 | Acteurs externes | `paint(point, color)`, `erase(point)` : un autre joueur modifie la toile |
 | Traçabilité | `events` (chaque pixel appliqué ou modifié de l'extérieur), `appliedCount(point)`, `writeCalls` |
 | Horloge virtuelle | `createManualClock` : `advance`, `set` (jamais en arrière), `sleep` sans attente réelle |
+| Monde durable (1B.9) | Option `commit` : chaque changement (écriture, acteur extérieur, agent) est préparé à part, confié au point d'enregistrement, puis seulement rendu visible ; une écriture ne répond qu'après. Tous les changements sont sérialisés. `initial` restaure un monde sauvegardé ; `withWorld` donne une vue cohérente (checkpoints) ; `editExternal`, `setAgent`, `updateAgent` en sont les formes asynchrones. `trackEvents` et `rememberResults` bornent la mémoire d'un serveur |
 
 ## 3. Scénarios de réconciliation testés
 
@@ -61,10 +62,32 @@ Deux contrôles s'ajoutent : le repère y vers le haut, et le
 **déterminisme** (le même script produit le même journal et la même
 toile).
 
-## 4. Limites
+## 4. Persistance (Phase 1B.9)
 
-- Une seule toile en mémoire, sans persistance : le simulateur sert aux
-  tests et aux scénarios contrôlés.
+`FileWorldStore` (`@geoplacer/engine-service`) enregistre le monde dans
+`data\engine\world\` :
+
+- `CURRENT` : le pointeur ;
+- `world-<n>.ckpt` : un checkpoint, avec les pixels et les agents sous
+  CRC-32 ;
+- `world-<n>.log` : une ligne par changement, avec somme de contrôle, et
+  fsync avant la réponse.
+
+À l'ouverture :
+
+- une dernière ligne déchirée est coupée ;
+- un dommage au milieu, un checkpoint abîmé ou un pointeur manquant
+  provoquent un refus (`WORLD_DAMAGED`) ;
+- un monde d'une autre taille ou d'autres règles provoque aussi un refus
+  (`WORLD_IDENTITY_MISMATCH`).
+
+Une réinitialisation n'est jamais silencieuse. Un checkpoint est écrit
+tous les 2 000 changements, et à chaque compactage. Garanties et limites :
+voir [reprise-apres-crash.md](reprise-apres-crash.md).
+
+## 5. Limites
+
+- Une seule toile ; un seul agent actif dans le serveur.
 - La boucle autonome est l'ordonnanceur mono-agent de la Phase 1B.8 :
   voir [ordonnanceur.md](ordonnanceur.md).
 - Les règles de ressources sont fournies par l'appelant. Celles des tests

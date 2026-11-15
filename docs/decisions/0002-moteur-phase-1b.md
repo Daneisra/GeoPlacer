@@ -532,3 +532,25 @@ Détails : [journal.md](../fr/journal.md), [simulateur.md](../fr/simulateur.md).
   n'abandonne jamais une tentative démarrée.
 
 Détails : [ordonnanceur.md](../fr/ordonnanceur.md), [journal.md](../fr/journal.md) § 3 et § 4.
+
+## 18. Mise en œuvre de la Phase 1B.9 : serveur, toile durable, tableau de bord
+
+Les contrats du core restent en version 9 : un seul changement de
+comportement du core, une correction de l'ordonnanceur (ci-dessous).
+
+| Élément | Décision | Raison |
+|---|---|---|
+| `@geoplacer/engine-service` | Nouveau paquet : service d'orchestration, `FileWorldStore`, réglages, flux d'événements | Séparer le moteur du serveur HTTP ; testable sous Vitest avec de vrais processus |
+| Toile simulée durable | Changement préparé, enregistré (fsync), puis visible ; une écriture répond après | Une reprise du journal sans la toile ne serait pas une reprise complète |
+| Identité du monde | Taille, repère, règles (id, version) : une différence exige une réinitialisation explicite, l'ancien monde est conservé | Jamais de perte silencieuse |
+| Instance unique | Verrou dans le répertoire (inchangé), plus un canal nommé sous Windows (`node:net`, interface documentée) | Le garde ne remplace pas le verrou : deux écritures d'un même chemin peuvent donner deux noms |
+| Serveur | Moteur ouvert avant l'écoute ; `src/` ne connaît que l'interface `EngineApi` | Refus d'une seconde instance sans écriture ; routes testées avec un moteur factice |
+| `/api/v1` | Zod strict, codes stables, origine d'extension refusée, JSON exigé pour les écritures | Protections de la 1A conservées et renforcées pour les commandes |
+| WebSocket | `hello` à la connexion, événements numérotés, regroupés (250 ms), client lent abandonné puis resynchronisé | Ne jamais bloquer le moteur ; jamais un message par pixel |
+| Horloge du service | Réelle, monotone, jamais avant le monde sauvegardé | Les états datés ne remontent jamais le temps |
+| Correction de l'ordonnanceur | Après l'observation des ressources, le cycle continue à l'heure de l'observation | `TIME_BEFORE_STATE` avec une horloge réelle (invisible avec l'horloge virtuelle) |
+| Keep-alive hérité | Coupé par défaut (`LEGACY_KEEPALIVE=1` pour le rétablir) | Il contactait Wplace pour les comptes enregistrés |
+
+Détails : [api-v1.md](../fr/api-v1.md), [websocket.md](../fr/websocket.md),
+[reprise-apres-crash.md](../fr/reprise-apres-crash.md),
+[architecture.md](../fr/architecture.md).

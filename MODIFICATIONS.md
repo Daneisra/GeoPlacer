@@ -27,6 +27,30 @@ licence. L'historique Git complet du projet d'origine est conservé.
 - `start.bat` : installation des deux projets par le chemin vérifié.
 - Documentation française (`docs/fr/`, `docs/decisions/`).
 
+## 2026-11-15 — Phase 1B.9 : serveur et tableau de bord sur la simulation locale
+
+- `packages/engine-service` (nouveau) :
+  - service d'orchestration du moteur ;
+  - toile simulée durable (checkpoint, log, reprise) ;
+  - réglages, flux d'événements, banc de réactivité.
+- `packages/simulator` : changements préparés puis enregistrés avant
+  d'être visibles ; restauration d'un monde ; mémoire bornable.
+- `packages/adapters-node` : garde d'instance par canal nommé (Windows).
+- `packages/core` : correction de l'ordonnanceur avec une horloge réelle.
+- `src/` :
+  - protections communes extraites (`app-base.ts`) ;
+  - routes `/api/v1` et WebSocket `/api/v1/ws` ;
+  - ouverture du moteur avant l'écoute ;
+  - arrêt contrôlé (signal ou IPC) ;
+  - keep-alive hérité vers Wplace coupé par défaut.
+- `frontend/` : tableau de bord de la simulation.
+- Scripts : les tests et le contrôle construisent d'abord les paquets ;
+  `bench:responsiveness`.
+- Documentation : `api-v1.md`, `websocket.md`, `guide-utilisateur.md`,
+  `reprise-apres-crash.md`, `diagnostic.md` ; ADR 0002 § 18 ; mises à
+  jour de `architecture.md`, `simulateur.md`, `installation-windows.md`,
+  `qualite.md`, `recette-navigateur.md`, README.
+
 ## 2026-11-15 — Phase 1B.8 : ordonnanceur mono-agent sur simulateur
 
 - `packages/core/src/scheduler` : ordonnanceur mono-agent (boucle, états,

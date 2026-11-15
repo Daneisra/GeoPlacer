@@ -6,7 +6,30 @@ GeoPlacer est un fork de
 pour GeoPixels, avec un moteur développé et testé **uniquement sur simulateur
 local** (voir l'ADR 0001).
 
-## État actuel : Phase 1B.8, ordonnanceur mono-agent sur simulateur
+## État actuel : Phase 1B.9, serveur et tableau de bord sur la simulation locale
+
+**La V1 est un environnement de simulation local** : aucune connexion à
+GeoPixels ou à Wplace, aucun compte.
+
+Réalisé en Phase 1B.9 :
+- **service d'orchestration** (`@geoplacer/engine-service`) qui relie
+  tous les composants du moteur à la toile simulée, sans règle métier
+  propre ;
+- **toile simulée durable** : reprise après arrêt brutal vérifiée par de
+  vrais processus (voir [reprise-apres-crash.md](reprise-apres-crash.md)) ;
+- **instance unique** par dossier de données : verrou, plus garde par
+  canal nommé sous Windows ;
+- **API `/api/v1`** (voir [api-v1.md](api-v1.md)) et **WebSocket**
+  (voir [websocket.md](websocket.md)) ;
+- **tableau de bord** : commandes, progression, toile, tentatives,
+  ressources et améliorations simulées (voir
+  [guide-utilisateur.md](guide-utilisateur.md)) ;
+- **keep-alive hérité vers Wplace coupé par défaut** ;
+- **défaut corrigé dans l'ordonnanceur** de la 1B.8 avec une horloge
+  réelle ;
+- **push de la Phase 1B.8** : branche `feat/phase1b8-single-agent-scheduler`.
+
+## Phase 1B.8, ordonnanceur mono-agent sur simulateur
 
 Réalisé en Phase 1B.8 :
 - **ordonnanceur mono-agent** (voir [ordonnanceur.md](ordonnanceur.md)) :
@@ -129,6 +152,11 @@ Le moteur de dessin hérité n'est **pas** fonctionnel et sera remplacé.
 | [journal.md](journal.md) | Compactage, checkpoints, générations, diagnostic et réparation, historique |
 | [simulateur.md](simulateur.md) | Toile simulée locale, pannes déterministes, scénarios de réconciliation |
 | [ordonnanceur.md](ordonnanceur.md) | Ordonnanceur mono-agent : boucle, états, commandes, attentes, scénarios, performances |
+| [guide-utilisateur.md](guide-utilisateur.md) | Parcours complet de la simulation dans le navigateur, arrêt par Ctrl+C |
+| [api-v1.md](api-v1.md) | Routes `/api/v1`, protections, codes d'erreur, statut |
+| [websocket.md](websocket.md) | Canal temps réel `/api/v1/ws` : messages, cohérence, fiabilité |
+| [reprise-apres-crash.md](reprise-apres-crash.md) | Garanties, procédure et limites de la reprise |
+| [diagnostic.md](diagnostic.md) | Symptômes, outils, fichiers du moteur |
 | [geometrie-couleurs.md](geometrie-couleurs.md) | Repères, projection, OKLab, palettes, quantification, performances |
 | [installation-windows.md](installation-windows.md) | Installation et lancement vérifiés sous Windows |
 | [securite.md](securite.md) | Modèle de menace, protections, limites |

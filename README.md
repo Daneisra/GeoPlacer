@@ -9,6 +9,7 @@
 
 > **GeoPlacer** : fork en cours de développement de ce projet (AGPL-3.0-only).
 > Documentation en français : [docs/fr/README.md](docs/fr/README.md) ; modifications : [MODIFICATIONS.md](MODIFICATIONS.md).
+> **GeoPlacer V1 est un environnement de simulation local** : le tableau de bord pilote un moteur sur une toile simulée, sans connexion à un service réel ([guide](docs/fr/guide-utilisateur.md)).
 
 A massively updated auto-drawing bot for [wplace.live](https://wplace.live/).
 

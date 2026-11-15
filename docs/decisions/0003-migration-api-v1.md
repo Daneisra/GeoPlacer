@@ -1,7 +1,7 @@
 # ADR 0003 : migration des routes de l'API vers `/api/v1/`
 
 - **Date** : 14/11/2026
-- **Statut** : **proposé** (plan seulement, aucune route modifiée ; inventaire complété et repli `GET`/`HEAD` validé en phase 1B.2)
+- **Statut** : **proposé** (plan seulement, aucune route modifiée ; inventaire complété et repli `GET`/`HEAD` validé en phase 1B.2). Phase 1B.9 : les **nouvelles** routes du moteur sont créées sous `/api/v1` (voir [api-v1.md](../fr/api-v1.md)) et le WebSocket du moteur sous `/api/v1/ws` ; les routes héritées n'ont pas été déplacées (étapes M1 à M4 toujours à faire)
 - **Corrige** : F13 (collision entre les pages React et l'API) ; prépare F12
 
 ## 1. Contexte

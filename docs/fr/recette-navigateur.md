@@ -1,5 +1,57 @@
 # Recette navigateur (Windows)
 
+## Recette de la simulation (Phase 1B.9)
+
+`scripts/recette-simulation.mjs` joue tout le parcours utilisateur dans un
+vrai Edge, sans fenêtre, contre le serveur compilé lancé dans un dossier
+temporaire. Il prend des captures d'écran et écrit un journal.
+
+```powershell
+$env:GEOPLACER_PLAYWRIGHT_CORE = (Resolve-Path ..\outils-recette\node_modules\playwright-core)
+npm run build
+node scripts/recette-simulation.mjs recette-simulation   # port 3917 libre
+```
+
+**Résultat du 15/11/2026** (Edge, trois passes, la dernière sur le
+commit final) : parcours complet réussi.
+
+| Étape | Résultat |
+|---|---|
+| Ouverture : bandeau « SIMULATION LOCALE », « Temps réel connecté », « Démarrer » grisé sans modèle | OK |
+| Réglages par le panneau : réinitialisation du monde demandée et confirmée | OK |
+| Import d'un PNG 48 × 48 (nom, position, stratégie), sélection automatique | OK |
+| Ressources : énergie, capacité, régénération (« 200 ms »), monnaie, couleurs, améliorations | OK après correction (noms d'amélioration, durées sous la seconde) |
+| Démarrer : « En cours », « Démarrer » grisé, progression, toile mise à jour par lots | OK |
+| Pause : « Reprendre » actif en 8 à 18 ms | OK après correction (statut émis aussitôt après un changement d'état) |
+| Reprendre, Arrêter : « Arrêté », aucune tentative ouverte, « Démarrer » de nouveau actif | OK après correction (réponse d'arrêt cohérente) |
+| Démarrer jusqu'à « Terminé » : 100 % | OK |
+| Acteur extérieur simulé : pixels effacés, détectés, repeints | OK |
+| Amélioration : confirmation, monnaie 5000 → 4900 | OK |
+| Diagnostic du journal (« healthy »), compactage | OK |
+| Serveur tué puis relancé : « Déconnecté — reconnexion… », reconnexion **sans recharger la page**, même modèle et même toile, « Terminé » à 100 % | OK |
+| Notifications : succès, informations, refus | OK (vérifiées sur les captures) |
+| Console | Deux lignes attendues : le 409 `WORLD_RESET_REQUIRED` avant la confirmation, et la connexion WebSocket refusée pendant le redémarrage |
+
+La recette de la Phase 1B.7 (§ suivant) a été rejouée, car le tableau de
+bord a changé : **28 contrôles, 0 KO**. Deux contrôles ont été adaptés :
+- le compteur de connexions WebSocket inclut maintenant le canal du
+  moteur : on vérifie qu'il augmente, au lieu d'attendre « 2 total » ;
+- la reconnexion refusée du canal du moteur pendant le redémarrage
+  volontaire est attendue.
+
+**Restent manuels** :
+- un vrai **Ctrl+C** sous Windows (voir
+  [guide-utilisateur.md](guide-utilisateur.md) § 4). L'arrêt contrôlé
+  est testé automatiquement par IPC, car Windows ne transmet pas SIGINT à
+  un processus enfant ;
+- **Firefox**, qui n'est pas installé sur la machine de développement.
+
+Vérifications manuelles proposées sous Firefox :
+1. le parcours du guide utilisateur ;
+2. la toile mise à jour en direct ;
+3. la reconnexion après un redémarrage du serveur ;
+4. les notifications.
+
 ## Recette automatisée (Phase 1B.7)
 
 `scripts/recette-navigateur.mjs` exécute cette procédure dans un **vrai
