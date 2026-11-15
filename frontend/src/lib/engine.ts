@@ -103,6 +103,11 @@ export interface CanvasRegion {
   stream: string;
   seq: number;
   rect: { minX: number; minY: number; width: number; height: number };
+  /** One canvas pixel out of `scale` in each direction; output width x height. */
+  scale: number;
+  width: number;
+  height: number;
+  yAxis: 'down' | 'up';
   observedAt: number;
   data: string;
 }

@@ -150,7 +150,7 @@ describe('the selection', () => {
     expect(service.status().selection?.templateId).toBe(t.templateId);
     const region = await service.canvasRegion();
     expect(region.rect).toMatchObject({ minX: 3, minY: 2, width: 10, height: 8 });
-    expect(region.truncated).toBe(false);
+    expect(region.scale).toBe(1);
     await service.stop();
   });
 });

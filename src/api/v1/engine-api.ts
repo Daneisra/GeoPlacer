@@ -37,7 +37,7 @@ export interface EngineApi {
   listTemplates(): Promise<unknown>;
   importTemplate(input: { readonly name: string; readonly png: Uint8Array; readonly x: number; readonly y: number; readonly strategy: string }): Promise<unknown>;
   templateInfoOf(templateId: string): Promise<unknown>;
-  templateImage(templateId: string): Promise<unknown>;
+  templateImage(templateId: string, rect?: { readonly minX: number; readonly minY: number; readonly width: number; readonly height: number }, scale?: number): Promise<unknown>;
   selectTemplate(templateId: string): Promise<CommandResultLike>;
   moveTemplate(templateId: string, x: number, y: number): Promise<unknown>;
 
@@ -50,7 +50,7 @@ export interface EngineApi {
   }): Promise<CommandResultLike>;
   resetWorld(confirm: string): Promise<CommandResultLike>;
   resetAgent(): Promise<CommandResultLike>;
-  canvasRegion(rect?: { readonly minX: number; readonly minY: number; readonly width: number; readonly height: number }): Promise<unknown>;
+  canvasRegion(rect?: { readonly minX: number; readonly minY: number; readonly width: number; readonly height: number }, scale?: number): Promise<unknown>;
   simulateExternalEdit(count: number): Promise<unknown>;
 
   resourcesView(): Promise<unknown>;

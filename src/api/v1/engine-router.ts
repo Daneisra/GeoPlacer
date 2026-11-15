@@ -50,7 +50,7 @@ const schemas = {
   reset: z.strictObject({ confirm: z.string().max(16) }),
   externalEdit: z.strictObject({ count: z.number().int().min(1).max(10_000) }),
   upgrade: z.strictObject({ proposalId: z.string().min(1).max(200), confirm: z.boolean() }),
-  canvasQuery: z.strictObject({ x: z.coerce.number().int(), y: z.coerce.number().int(), w: z.coerce.number().int().min(1), h: z.coerce.number().int().min(1) }).partial(),
+  canvasQuery: z.strictObject({ x: z.coerce.number().int(), y: z.coerce.number().int(), w: z.coerce.number().int().min(1), h: z.coerce.number().int().min(1), s: z.coerce.number().int().min(1).max(256) }).partial(),
 };
 
 function sendError(res: Response, status: number, code: string, message: string, details?: unknown): void {
@@ -89,6 +89,13 @@ function handleError(error: unknown, res: Response): void {
     return;
   }
   sendError(res, 500, 'INTERNAL_ERROR', 'the engine could not complete the request (see the server log)');
+}
+
+/** x, y, w, h: all four (a region) or none (the default area). */
+function regionOf(q: { x?: number; y?: number; w?: number; h?: number }): { minX: number; minY: number; width: number; height: number } | undefined {
+  if (q.x === undefined && q.y === undefined && q.w === undefined && q.h === undefined) return undefined;
+  if (q.x === undefined || q.y === undefined || q.w === undefined || q.h === undefined) throw new RequestValidationError([{ path: 'x,y,w,h', message: 'give all four, or none' }]);
+  return { minX: q.x, minY: q.y, width: q.w, height: q.h };
 }
 
 /** Wraps a handler: JSON result, errors mapped. */
@@ -157,7 +164,10 @@ export function createEngineRouter(api: EngineApi): Router {
     return api.importTemplate({ name: body.name, png: new Uint8Array(png), x: body.x, y: body.y, strategy: body.strategy });
   }));
   r.get('/templates/:id', route((req) => api.templateInfoOf(parse(ID, req.params.id))));
-  r.get('/templates/:id/image', route((req) => api.templateImage(parse(ID, req.params.id))));
+  r.get('/templates/:id/image', route((req) => {
+    const q = parse(schemas.canvasQuery, req.query);
+    return api.templateImage(parse(ID, req.params.id), regionOf(q), q.s);
+  }));
   r.post('/templates/:id/move', route((req) => {
     const { x, y } = parse(schemas.move, req.body);
     return api.moveTemplate(parse(ID, req.params.id), x, y);
@@ -171,9 +181,7 @@ export function createEngineRouter(api: EngineApi): Router {
   r.post('/simulator/external-edit', route((req) => api.simulateExternalEdit(parse(schemas.externalEdit, req.body).count)));
   r.get('/simulator/canvas', route((req) => {
     const q = parse(schemas.canvasQuery, req.query);
-    if (q.x === undefined && q.y === undefined && q.w === undefined && q.h === undefined) return api.canvasRegion();
-    if (q.x === undefined || q.y === undefined || q.w === undefined || q.h === undefined) throw new RequestValidationError([{ path: 'x,y,w,h', message: 'give all four, or none' }]);
-    return api.canvasRegion({ minX: q.x, minY: q.y, width: q.w, height: q.h });
+    return api.canvasRegion(regionOf(q), q.s);
   }));
 
   // Resources and simulated upgrades (never automatic).

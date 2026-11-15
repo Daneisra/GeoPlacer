@@ -126,7 +126,33 @@ const ACTIVE: ReadonlySet<SchedulerState> = new Set(['initializing', 'running', 
 /** Default: world checkpoint after this many logged changes. */
 export const WORLD_CHECKPOINT_RECORDS = 2_000;
 const RECENT_ATTEMPTS = 100;
+/** Output pixels of one read (after the scale). */
 const MAX_REGION_PIXELS = 2048 * 2048;
+/** Source pixels of one read (the largest canvas). */
+const MAX_SOURCE_PIXELS = 4096 * 4096;
+
+/** The smallest scale that keeps a w x h area within one read. */
+export function autoScale(width: number, height: number): number {
+  let s = Math.max(1, Math.ceil(Math.sqrt((width * height) / MAX_REGION_PIXELS)));
+  while (Math.ceil(width / s) * Math.ceil(height / s) > MAX_REGION_PIXELS) s++;
+  return s;
+}
+
+function checkRegion(r: CanvasRect, scale: number): void {
+  const ok =
+    Number.isSafeInteger(r.minX) &&
+    Number.isSafeInteger(r.minY) &&
+    Number.isSafeInteger(r.width) &&
+    Number.isSafeInteger(r.height) &&
+    r.width >= 1 &&
+    r.height >= 1 &&
+    r.width * r.height <= MAX_SOURCE_PIXELS &&
+    Number.isSafeInteger(scale) &&
+    scale >= 1 &&
+    scale <= 256 &&
+    Math.ceil(r.width / scale) * Math.ceil(r.height / scale) <= MAX_REGION_PIXELS;
+  if (!ok) throw new EngineServiceError('INVALID_REQUEST', 400, `invalid region or scale (at most ${MAX_REGION_PIXELS} pixels after the scale, ${MAX_SOURCE_PIXELS} before)`);
+}
 
 export interface EngineServiceOptions {
   /** Data directory of the engine (locked for the life of the service). */
@@ -190,11 +216,20 @@ export interface CanvasRegion {
   readonly stream: string;
   /** Events with a sequence number up to this one are already included. */
   readonly seq: number;
+  /** Source rectangle, in canvas coordinates. */
   readonly rect: CanvasRect;
-  /** True when the default region (the selected template) was too large for one read: its top-left part. */
-  readonly truncated: boolean;
+  /**
+   * Phase 1B.10: one pixel out of `scale` in each direction (the top-left
+   * one of each block), so that a 4096 x 4096 area is shown whole without a
+   * massive transfer. Output size: ceil(width / scale) x ceil(height / scale).
+   */
+  readonly scale: number;
+  readonly width: number;
+  readonly height: number;
+  /** Canvas axes: rows go down (V1 simulator) or up (to be flipped for display). */
+  readonly yAxis: 'down' | 'up';
   readonly observedAt: number;
-  /** Little-endian int32 per pixel (0xRRGGBB, -1 empty), row-major, base64. */
+  /** Little-endian int32 per output pixel (0xRRGGBB, -1 empty, -2 outside), row-major, base64. */
   readonly data: string;
 }
 
@@ -741,17 +776,39 @@ export class EngineService {
     return this.templateInfoOf(templateId);
   }
 
-  /** Quantized image of the current revision (0xRRGGBB, or -1 transparent), for the overlay. */
-  async templateImage(templateId: string): Promise<{ readonly width: number; readonly height: number; readonly x: number; readonly y: number; readonly data: string }> {
+  /**
+   * Quantized image of the current revision for the overlay (0xRRGGBB, -1
+   * transparent or outside the template), over a canvas region sampled
+   * EXACTLY like canvasRegion (same rect, same scale: aligned). Default: the
+   * template area, whole. `x`, `y`, `width`, `height`: the template's.
+   */
+  async templateImage(
+    templateId: string,
+    rect?: CanvasRect,
+    scale?: number
+  ): Promise<{ readonly width: number; readonly height: number; readonly x: number; readonly y: number; readonly rect: CanvasRect; readonly scale: number; readonly outWidth: number; readonly outHeight: number; readonly data: string }> {
     const t = await this.currentTemplate(this.ref(templateId)).catch(() => {
       throw new EngineServiceError('TEMPLATE_NOT_FOUND', 404, `template ${templateId} not found`);
     });
-    const out = new Int32Array(t.image.pixels.length);
-    for (let i = 0; i < out.length; i++) {
-      const p = t.image.pixels[i]!;
-      out[i] = p === 0xffffffff ? TRANSPARENT : p & 0xffffff;
+    const tx = t.placement.topLeft.x;
+    const ty = t.placement.topLeft.y;
+    const r = rect ?? { minX: tx, minY: ty, width: t.image.width, height: t.image.height };
+    const k = scale ?? autoScale(r.width, r.height);
+    checkRegion(r, k);
+    const ow = Math.ceil(r.width / k);
+    const oh = Math.ceil(r.height / k);
+    const out = new Int32Array(ow * oh).fill(TRANSPARENT);
+    for (let oy = 0; oy < oh; oy++) {
+      const iy = r.minY + oy * k - ty;
+      if (iy < 0 || iy >= t.image.height) continue;
+      for (let ox = 0; ox < ow; ox++) {
+        const ix = r.minX + ox * k - tx;
+        if (ix < 0 || ix >= t.image.width) continue;
+        const p = t.image.pixels[iy * t.image.width + ix]!;
+        out[oy * ow + ox] = p === 0xffffffff ? TRANSPARENT : p & 0xffffff;
+      }
     }
-    return { width: t.image.width, height: t.image.height, x: t.placement.topLeft.x, y: t.placement.topLeft.y, data: base64(out) };
+    return { width: t.image.width, height: t.image.height, x: tx, y: ty, rect: r, scale: k, outWidth: ow, outHeight: oh, data: base64(out) };
   }
 
   // ───────────────────────── Settings ─────────────────────────
@@ -850,35 +907,36 @@ export class EngineService {
   // ───────────────────────── Canvas ─────────────────────────
 
   /** A region of the simulated canvas with the sequence number it includes (default: the selected template's area). */
-  async canvasRegion(rect?: CanvasRect): Promise<CanvasRegion> {
+  /**
+   * A region of the simulated canvas with the sequence number it includes
+   * (default: the selected template's area, WHOLE, at the smallest scale
+   * that fits one read). `scale` s keeps one pixel out of s in each direction.
+   */
+  async canvasRegion(rect?: CanvasRect, scale?: number): Promise<CanvasRegion> {
     const world = this.requireWorld();
     const s = this.settingsValue.simulator;
     let r = rect;
-    let truncated = false;
     if (r === undefined) {
       const t = this.selectedTemplate;
       r = t !== null ? { minX: t.placement.topLeft.x, minY: t.placement.topLeft.y, width: t.image.width, height: t.image.height } : { minX: 0, minY: 0, width: s.width, height: s.height };
-      // A template larger than one read: its top-left part (the client is told by `truncated`).
-      if (r.width * r.height > MAX_REGION_PIXELS) {
-        truncated = true;
-        r = { ...r, width: Math.min(r.width, 2048), height: Math.min(r.height, Math.floor(MAX_REGION_PIXELS / Math.min(r.width, 2048))) };
-      }
     }
-    if (!Number.isSafeInteger(r.minX) || !Number.isSafeInteger(r.minY) || !Number.isSafeInteger(r.width) || !Number.isSafeInteger(r.height) || r.width < 1 || r.height < 1 || r.width * r.height > MAX_REGION_PIXELS) {
-      throw new EngineServiceError('INVALID_REQUEST', 400, `invalid region (at most ${MAX_REGION_PIXELS} pixels)`);
-    }
+    const k = scale ?? autoScale(r.width, r.height);
+    checkRegion(r, k);
     const region = r;
+    const ow = Math.ceil(region.width / k);
+    const oh = Math.ceil(region.height / k);
     return world.canvas.withWorld(async (view) => {
-      const out = new Int32Array(region.width * region.height).fill(-2);
-      for (let y = 0; y < region.height; y++) {
-        const cy = region.minY + y;
+      const out = new Int32Array(ow * oh).fill(-2);
+      for (let oy = 0; oy < oh; oy++) {
+        const cy = region.minY + oy * k;
         if (cy < 0 || cy >= view.bounds.height) continue;
-        for (let x = 0; x < region.width; x++) {
-          const cx = region.minX + x;
-          if (cx >= 0 && cx < view.bounds.width) out[y * region.width + x] = view.pixels[cy * view.bounds.width + cx]!;
+        const row = cy * view.bounds.width;
+        for (let ox = 0; ox < ow; ox++) {
+          const cx = region.minX + ox * k;
+          if (cx >= 0 && cx < view.bounds.width) out[oy * ow + ox] = view.pixels[row + cx]!;
         }
       }
-      return { stream: this.hub.stream, seq: this.hub.seq, rect: region, truncated, observedAt: this.clock.now(), data: base64(out) };
+      return { stream: this.hub.stream, seq: this.hub.seq, rect: region, scale: k, width: ow, height: oh, yAxis: 'down', observedAt: this.clock.now(), data: base64(out) };
     });
   }
 
