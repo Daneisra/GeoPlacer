@@ -190,6 +190,10 @@ export function createEngineRouter(api: EngineApi): Router {
   // Backup (Phase 1B.10): stopped only, written where the server decides (never a client path).
   r.post('/backup', route((req) => (parse(schemas.empty, req.body), api.backup())));
 
+  // Demonstration (Phase 1B.10): set up on an empty project only.
+  r.get('/demo', route(() => api.demoAvailability()));
+  r.post('/demo', route((req) => (parse(schemas.empty, req.body), api.setupDemo())));
+
   // Unknown /api/v1 route: JSON 404, never the UI.
   r.use((_req, res) => sendError(res, 404, 'NOT_FOUND', 'unknown API route'));
   return r;

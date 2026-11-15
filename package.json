@@ -42,6 +42,8 @@
     "bench:planner-focus": "node --expose-gc --import tsx packages/core/bench/planner-focus.bench.ts",
     "bench:scheduler": "npm run build:packages && node --expose-gc --import tsx packages/simulator/bench/scheduler.bench.ts",
     "bench:responsiveness": "npm run build:packages && node --expose-gc --import tsx packages/engine-service/bench/responsiveness.bench.ts",
+    "predemo": "npm run build:packages --silent",
+    "demo": "node --env-file-if-exists=.env dist/server.js --demo",
     "backup": "npm run build:packages --silent && node packages/engine-service/dist/backup-cli.js backup",
     "backup:verify": "npm run build:packages --silent && node packages/engine-service/dist/backup-cli.js verify",
     "restore": "npm run build:packages --silent && node packages/engine-service/dist/backup-cli.js restore",

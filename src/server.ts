@@ -432,7 +432,8 @@ async function startServer(): Promise<void> {
 
     // The engine is opened BEFORE listening: a data directory used by another
     // instance is refused here, explicitly, without any write.
-    const engineDir = engineDataDir(process.env, DATA_DIR);
+    const engineDir = engineDataDir(process.env, DATA_DIR, process.argv.slice(2));
+    if (process.argv.includes('--demo')) logger.info(`Demonstration mode: engine directory ${path.basename(engineDir)} (your project is not used).`);
     try {
       engine = await openEngine(engineDir, (level, message) => {
         if (level === 'error') logger.error(`[engine] ${message}`);

@@ -85,6 +85,7 @@ import {
 } from './settings.js';
 import { FileWorldStore, WorldStoreError, type FileWorldStoreOptions, type WorldIdentity } from './world-store.js';
 import { assertNoRestoreInProgress, createBackup, type BackupManifest } from './backup.js';
+import { DEMO_POSITION, DEMO_SETTINGS, DEMO_STRATEGY, DEMO_TEMPLATE_NAME, DEMO_WIDTH, DEMO_HEIGHT, demoRgba } from './demo.js';
 
 export type EngineErrorCode =
   | 'NO_TEMPLATE_SELECTED'
@@ -103,6 +104,7 @@ export type EngineErrorCode =
   | 'UPGRADE_REFUSED'
   | 'INVALID_REQUEST'
   | 'BACKUP_FAILED'
+  | 'DEMO_NEEDS_EMPTY_PROJECT'
   | 'ENGINE_CLOSED';
 
 /** A refused command: stable code, HTTP status suggestion, readable message. */
@@ -1033,6 +1035,50 @@ export class EngineService {
     } finally {
       this.compacting = false;
     }
+  }
+
+  // ───────────────────────── Demonstration ─────────────────────────
+
+  /**
+   * Whether the demonstration can be set up here: only on an EMPTY project
+   * (no template, a simulated canvas never painted, no attempt), so that it
+   * never changes someone's data. Otherwise: `npm run demo` (own directory).
+   */
+  async demoAvailability(): Promise<{ readonly available: boolean; readonly reason: string | null; readonly active: boolean }> {
+    const active = this.selectedTemplate?.name === DEMO_TEMPLATE_NAME;
+    const listing = await this.templates.list(asProjectId(SIMULATION_PROJECT));
+    if (listing.templates.length > 0 || listing.failures.length > 0) return { available: false, reason: 'the project already has templates', active };
+    if (this.attempts.open().length > 0 || this.toReconcileAtStart > 0) return { available: false, reason: 'the project has attempts in flight', active };
+    const world = this.world;
+    if (world === null) return { available: false, reason: 'the simulated world is unavailable', active };
+    const painted = await world.canvas.withWorld((view) => view.pixels.some((v) => v !== TRANSPARENT));
+    if (painted) return { available: false, reason: 'the simulated canvas is already painted', active };
+    return { available: true, reason: null, active };
+  }
+
+  /**
+   * Sets up the demonstration on an empty project: demo settings (a small
+   * canvas, fast regeneration), the simulated agent with its demo resources,
+   * the example template imported and selected. Stopped only.
+   */
+  async setupDemo(): Promise<CommandResult> {
+    this.guard();
+    this.requireIdle('the demonstration setup');
+    const availability = await this.demoAvailability();
+    if (!availability.available) {
+      throw new EngineServiceError('DEMO_NEEDS_EMPTY_PROJECT', 409, `the demonstration is set up on an empty project only (${availability.reason ?? ''}): start it in its own directory with "npm run demo"`);
+    }
+    const s = this.settingsValue.simulator;
+    const target = DEMO_SETTINGS.simulator;
+    const identity = s.width !== target.width || s.height !== target.height || s.costPerPixel !== target.costPerPixel || s.capacity !== target.capacity || s.regenIntervalMs !== target.regenIntervalMs;
+    // The canvas is empty (checked above): a reset here loses nothing.
+    await this.configure({ simulator: target, agent: DEMO_SETTINGS.agent, run: DEMO_SETTINGS.run, resetWorld: identity });
+    await this.resetAgent();
+    const png = await pngjsCodec.encode({ width: DEMO_WIDTH, height: DEMO_HEIGHT, rgba: demoRgba() });
+    const t = await this.importTemplate({ name: DEMO_TEMPLATE_NAME, png, x: DEMO_POSITION.x, y: DEMO_POSITION.y, strategy: DEMO_STRATEGY });
+    await this.selectTemplate(t.templateId);
+    this.hub.notice('info', 'demonstration ready');
+    return { changed: true, status: this.status() };
   }
 
   // ───────────────────────── Backup ─────────────────────────

@@ -61,3 +61,4 @@ export {
   type RestoreReport,
   type RestoreStep,
 } from './backup.js';
+export { DEMO_HEIGHT, DEMO_POSITION, DEMO_SETTINGS, DEMO_STRATEGY, DEMO_TEMPLATE_NAME, DEMO_WIDTH, demoPixels, demoRgba } from './demo.js';

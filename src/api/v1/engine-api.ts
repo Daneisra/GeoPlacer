@@ -61,6 +61,9 @@ export interface EngineApi {
   compact(): Promise<unknown>;
   /** Backup of the data directory, stopped only, into the server's backup directory (Phase 1B.10). */
   backup(): Promise<unknown>;
+  /** Demonstration (Phase 1B.10): availability (empty project only), and its setup. */
+  demoAvailability(): Promise<unknown>;
+  setupDemo(): Promise<CommandResultLike>;
 }
 
 /** True for an error thrown by the engine with a stable code (EngineServiceError and the like). */

@@ -39,6 +39,7 @@ const ERRORS: Record<string, (message: string) => string> = {
   STALE_PROPOSAL: () => 'L’agent a changé depuis la proposition : les ressources ont été relues, choisissez à nouveau.',
   UPGRADE_REFUSED: () => 'Amélioration impossible dans l’état actuel de l’agent.',
   BACKUP_FAILED: () => 'La sauvegarde a échoué (voir le journal du serveur).',
+  DEMO_NEEDS_EMPTY_PROJECT: () => 'La démonstration ne se prépare que sur un projet vide, pour ne jamais modifier vos données : lancez-la dans son propre dossier avec « npm run demo ».',
   ENGINE_CLOSED: () => 'Le serveur s’arrête.',
   INVALID_SETTINGS: (m) => {
     const p = /^(\w+) must be an integer in \[(\d+), (\d+)\]$/.exec(m);
@@ -108,6 +109,7 @@ const REASONS: [RegExp, (m: RegExpExecArray) => string][] = [
 
 const NOTICES: [RegExp, (m: RegExpExecArray) => string][] = [
   [/^simulated world reset$/, () => 'Monde simulé réinitialisé.'],
+  [/^demonstration ready$/, () => 'Démonstration prête : cliquez sur « Démarrer ».'],
   [/^simulated upgrade applied: (.+)$/, (m) => `Amélioration simulée appliquée : ${UPGRADE_KINDS[m[1]!] ?? m[1]}.`],
 ];
 

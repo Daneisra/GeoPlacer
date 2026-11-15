@@ -24,7 +24,13 @@ export interface OpenedEngine {
   close(graceMs: number): Promise<void>;
 }
 
-export function engineDataDir(env: NodeJS.ProcessEnv, dataDir: string): string {
+/**
+ * The engine directory: GEOPLACER_ENGINE_DIR, or data/engine. With the
+ * `--demo` argument (npm run demo): data/demo, a directory of its own, so
+ * that the demonstration never touches the user's project (Phase 1B.10).
+ */
+export function engineDataDir(env: NodeJS.ProcessEnv, dataDir: string, argv: readonly string[] = []): string {
+  if (argv.includes('--demo')) return path.resolve(dataDir, 'demo');
   const configured = env.GEOPLACER_ENGINE_DIR?.trim();
   return path.resolve(configured !== undefined && configured !== '' ? configured : path.join(dataDir, 'engine'));
 }

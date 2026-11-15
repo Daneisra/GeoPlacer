@@ -4,6 +4,7 @@ import { useEngine } from '../../hooks/useEngine';
 import { translateError, translateNotice } from '../../lib/i18n';
 import { AttemptsPanel } from './AttemptsPanel';
 import { CanvasView } from './CanvasView';
+import { DemoCard } from './DemoCard';
 import { EngineControls } from './EngineControls';
 import { EngineOverview } from './EngineOverview';
 import { ResourcesPanel } from './ResourcesPanel';
@@ -46,6 +47,7 @@ export function SimulationDashboard() {
           {connection === 'open' ? 'Temps réel connecté' : connection === 'connecting' ? 'Connexion…' : 'Déconnecté — reconnexion…'}
         </span>
       </div>
+      <DemoCard status={status} />
       <EngineControls status={status} />
       <div className="grid gap-4 lg:grid-cols-2">
         <EngineOverview status={status} connection={connection} />

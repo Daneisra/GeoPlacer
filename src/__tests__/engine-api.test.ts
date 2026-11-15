@@ -78,6 +78,8 @@ function fakeEngine() {
       throw new FakeEngineError('COMPACTION_IN_PROGRESS', 409, 'a compaction is already in progress');
     },
     backup: async () => (calls.push('backup'), { name: 'geoplacer-sauvegarde-x', files: 3, bytes: 10, createdAt: 'now' }),
+    demoAvailability: async () => ({ available: true, reason: null, active: false }),
+    setupDemo: async () => (calls.push('demo'), result(true)),
   };
   return api;
 }
