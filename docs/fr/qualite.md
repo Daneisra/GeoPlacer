@@ -165,8 +165,9 @@ dépôt) :
   - filtre d'étape qui ne testait que la fin du nom (réservations) ;
   - étapes de blob inatteignables sans nouvelle image ;
   - `prefer-const`.
-- **Délais dépassés sur un clone neuf** (suivis depuis la 1B.6) : **cause
-  établie** en 1B.8.
+- **Délais dépassés sur un clone neuf** (suivis depuis la 1B.6) :
+  **mécanisme reproduit** en 1B.8 ; son lien avec l'échec d'origine est
+  déduit, pas mesuré.
   - **Récidive** : sur le clone neuf de fin de phase, « failure at any
     call: restore » a dépassé le délai par défaut de 5 s (5,0 s, contre
     1,03 s dans le dépôt).
@@ -184,20 +185,40 @@ dépôt) :
       itération, sans blocage isolé : placement 9,7 s, re-quantize 7,7 s,
       new source 6,5 s, soit trois échecs à 5 s ;
     - dès la fin de l'installation, le temps revient à 1,03 s.
-  - **Cause** : la machine est saturée par l'installation et par l'analyse
-    antivirus qui la suit. L'analyse se prolonge un peu après la fin de
-    `npm ci`, c'est-à-dire au moment où démarre le premier passage d'un
-    clone neuf. Ce n'est ni un défaut du produit ni un blocage. La part de
-    `npm` lui-même n'a pas été séparée de celle de l'antivirus, qui est le
-    principal consommateur mesuré.
-  - **Correction** : les six boucles « failure at any call » reçoivent le
-    budget explicite de 30 s de leurs voisines (réparation, duplication,
-    création). Le test de la ligne de commande du journal, qui lance
-    quatre processus et a pris 11,7 s sous la même charge, reçoit 60 s,
-    comme les autres tests à processus. La durée de chaque itération lente
-    reste journalisée, et ce suivi couvre maintenant les six boucles.
-  - **Vérification** : toute la suite des paquets passe pendant trois
-    `npm ci` consécutifs (duplication 9,7 s, ligne de commande 4,6 s).
+  - **Mécanisme démontré** : une machine saturée (installation et analyse
+    antivirus) ralentit tous les tests de façon homogène, sans blocage,
+    jusqu'à dépasser 5 s. Ce n'est ni un défaut du produit ni un
+    interblocage. La part de `npm` lui-même n'a pas été séparée de celle
+    de l'antivirus, qui est le principal consommateur mesuré.
+  - **Lien avec l'échec d'origine : déduit, pas mesuré.** Cet échec a eu
+    lieu au premier passage après `npm ci`, la seule situation où des
+    ralentissements ont été observés. Le diagnostic lancé juste après une
+    installation montrait un ralentissement passager de 2 à 3 fois sur les
+    premiers tests seulement. Mais dans l'expérience ci-dessus, les
+    passages lancés juste après la fin de l'installation étaient déjà
+    normaux, et la charge au moment de l'échec d'origine n'a pas été
+    mesurée. Les clones neufs suivants n'ont plus reproduit de
+    ralentissement : l'antivirus garde probablement en mémoire les
+    fichiers déjà analysés, ce qui n'a pas été vérifié.
+  - **Non expliqué** : la rétention du journal a pris 2,6 s dans un
+    passage séquentiel sans installation en cours (0,6 à 0,8 s
+    d'habitude).
+  - **Remède : un budget de temps, et pourquoi c'est le bon levier.**
+    Aucun défaut du produit n'est en cause et le ralentissement est
+    homogène. Allonger un seul test ne protégerait pas les autres : le
+    budget par défaut passe donc de 5 s à **30 s dans les trois paquets**
+    (`testTimeout`). Les tests plus longs gardent leur budget propre, par
+    exemple 60 s pour le test de la ligne de commande du journal, qui
+    lance quatre processus et a pris 11,7 s sous charge. Un vrai blocage
+    échoue toujours, au bout de 30 s. La durée de chaque itération lente
+    reste journalisée, et ce suivi couvre maintenant les six boucles
+    « failure at any call » en plus de la duplication.
+  - **Vérifications** :
+    - toute la suite des paquets passe pendant trois `npm ci` consécutifs
+      (duplication 9,7 s, ligne de commande 4,6 s) ;
+    - trois clones neufs, testés juste après leur installation, sont
+      verts, mais **sans ralentissement observé** : ils ne prouvent pas le
+      correctif.
   - **Limite** : la marge est d'environ 3 fois le pire temps mesuré. Une
     charge plus lourde pourrait encore la dépasser ; les durées
     journalisées le montreraient.
@@ -278,8 +299,8 @@ Phase 1B.6, échecs rencontrés (journaux complets conservés hors du dépôt) :
   dans le dossier temporaire du clone restent une hypothèse. Délai
   explicite de 30 s pour les trois tests d'opérations interrompues ; ce
   délai ne prouve rien sur la cause.
-  Cause établie en 1B.8 : saturation de la machine par l'installation et
-  son analyse antivirus (voir plus haut).
+  Mécanisme reproduit en 1B.8 : saturation de la machine par une
+  installation et son analyse antivirus (voir plus haut).
 - Deux échecs de mise au point n'ont été conservés que sous forme
   d'extraits, pas de journal complet :
   - premier passage de `attempts.test.ts` : erreurs de rédaction du test ;
