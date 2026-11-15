@@ -1,11 +1,13 @@
 {
-  "//": "Type-checks sources and tests together (no output). @geoplacer/core resolves to its built declarations.",
+  "//": "Type-checks sources and tests together (no output). Like vitest.config.ts, @geoplacer/core maps to the core sources (the scenarios reuse helpers of packages/core/test).",
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "composite": false,
     "noEmit": true,
-    "rootDir": ".",
-    "tsBuildInfoFile": null
+    "rootDir": "..",
+    "tsBuildInfoFile": null,
+    "types": ["node"],
+    "paths": { "@geoplacer/core": ["../core/src/index.ts"] }
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "bench/**/*.ts"]
 }

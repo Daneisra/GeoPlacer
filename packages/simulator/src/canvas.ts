@@ -22,6 +22,7 @@
 
 import type {
   AbortSignalLike,
+  AgentAvailability,
   AgentId,
   AgentResourceState,
   ApplyResult,
@@ -45,6 +46,8 @@ import type {
 import { TRANSPARENT, UNKNOWN, advance, assertCoordinateSystem, assertRect, consumeEnergy, createArraySnapshot, stateFromObservation } from '@geoplacer/core';
 
 export type SimulatedFault =
+  /** No fault for this call (to place the next faults at a given write). */
+  | { readonly kind: 'none' }
   /** The call fails before touching the canvas (nothing applied). */
   | { readonly kind: 'fail-before' }
   /** The first `applied` writes are processed, then the call fails (answer lost). */
@@ -54,7 +57,14 @@ export type SimulatedFault =
   /** Every write is rejected with `reason` (nothing applied). */
   | { readonly kind: 'reject'; readonly reason: PixelRejectionReason }
   /** Everything is processed, but every outcome is reported 'unknown'. */
-  | { readonly kind: 'unknown-outcomes' };
+  | { readonly kind: 'unknown-outcomes' }
+  /**
+   * The write hangs (request sent, no answer yet) until releaseHeld() or
+   * the abort signal. `appliedBefore`: the pixels land when the hold
+   * starts (the answer is what is pending), otherwise only on release.
+   * Aborted: the call fails (answer lost), whatever was applied.
+   */
+  | { readonly kind: 'hold'; readonly appliedBefore: boolean };
 
 export class SimulatedCanvasError extends Error {
   readonly fault: SimulatedFault['kind'] | 'aborted';
@@ -80,7 +90,10 @@ export interface SimulatedCanvasOptions {
   readonly bounds: CanvasRect;
   readonly coordinateSystem: CoordinateSystem;
   readonly rules: ResourceRules;
-  readonly clock: TimeSource;
+  /** Its sleep() (a ManualClock) is needed for a write latency. */
+  readonly clock: TimeSource & { readonly sleep?: (ms: number) => Promise<void> };
+  /** Time a write takes on the (virtual) clock before it is applied (default 0). */
+  readonly writeLatencyMs?: number;
   readonly idempotentWrites?: boolean;
   readonly maxPixelsPerWrite?: number;
   /** Initial value of every pixel (default: empty). */
@@ -106,7 +119,9 @@ export class SimulatedCanvasProvider implements ReadWriteCanvasProvider {
   readonly coordinateSystem: CoordinateSystem;
   private readonly pixels: Int32Array;
   private readonly rules: ResourceRules;
-  private readonly clock: TimeSource;
+  private readonly clock: SimulatedCanvasOptions['clock'];
+  private readonly latency: number;
+  private held: (() => void) | null = null;
   private readonly agents = new Map<AgentId, AgentResourceState>();
   private readonly results = new Map<AttemptId, ApplyResult>();
   private readonly faults: SimulatedFault[] = [];
@@ -122,6 +137,9 @@ export class SimulatedCanvasProvider implements ReadWriteCanvasProvider {
     this.coordinateSystem = options.coordinateSystem;
     this.rules = options.rules;
     this.clock = options.clock;
+    this.latency = options.writeLatencyMs ?? 0;
+    if (!Number.isSafeInteger(this.latency) || this.latency < 0) throw new Error('writeLatencyMs must be a non-negative integer');
+    if (this.latency > 0 && this.clock.sleep === undefined) throw new Error('a write latency needs a clock with sleep()');
     this.pixels = new Int32Array(options.bounds.width * options.bounds.height).fill(options.fill ?? TRANSPARENT);
     const idempotentWrites = options.idempotentWrites ?? false;
     const maxPixelsPerWrite = options.maxPixelsPerWrite ?? 10_000;
@@ -169,6 +187,34 @@ export class SimulatedCanvasProvider implements ReadWriteCanvasProvider {
     const advanced = advance(this.rules, s, now, now);
     this.agents.set(agent, advanced);
     return advanced;
+  }
+
+  /** Makes an agent unavailable until `until` (null: indefinitely), or available again. */
+  setAvailability(agent: AgentId, availability: AgentAvailability): void {
+    const s = this.stateOf(agent);
+    this.agents.set(agent, { ...s, availability });
+  }
+
+  /** A ResourceSource over this provider (the scheduler's port). */
+  resourceSource(): { observe(agent: AgentId): Promise<ResourceObservation> } {
+    return { observe: async (agent) => this.observe(agent) };
+  }
+
+  /** Releases a write held by a 'hold' fault. */
+  releaseHeld(): void {
+    const release = this.held;
+    this.held = null;
+    release?.();
+  }
+
+  /** A dead caller (crashed process): its held write is forgotten and never answers. */
+  forgetHeld(): void {
+    this.held = null;
+  }
+
+  /** True while a write is held. */
+  get holding(): boolean {
+    return this.held !== null;
   }
 
   /** What the provider reports about an agent now (an observation, exact). */
@@ -250,6 +296,25 @@ export class SimulatedCanvasProvider implements ReadWriteCanvasProvider {
 
   // ───────── Writer ─────────
 
+  private applyAll(agent: AgentId, writes: readonly PixelWrite[], attemptId: AttemptId): PixelWriteOutcome[] {
+    const unlocked = new Set<number>(this.stateOf(agent).unlockedColors);
+    return writes.map((w) => this.writeOne(agent, w, unlocked, attemptId));
+  }
+
+  private async applyHeld(agent: AgentId, writes: readonly PixelWrite[], attemptId: AttemptId, appliedBefore: boolean, signal?: AbortSignalLike): Promise<ApplyResult> {
+    let outcomes = appliedBefore ? this.applyAll(agent, writes, attemptId) : null;
+    const aborted = await new Promise<boolean>((resolve) => {
+      this.held = () => resolve(false);
+      signal?.addEventListener('abort', () => resolve(true));
+    });
+    this.held = null;
+    if (aborted) throw new SimulatedCanvasError('aborted', 'write aborted while waiting for the answer');
+    outcomes ??= this.applyAll(agent, writes, attemptId);
+    const result: ApplyResult = { attemptId, outcomes, resources: this.observe(agent) };
+    this.results.set(attemptId, result);
+    return result;
+  }
+
   private writeOne(agent: AgentId, w: PixelWrite, unlocked: ReadonlySet<number>, attemptId: AttemptId): PixelWriteOutcome {
     const i = this.index(w.point);
     const reject = (reason: PixelRejectionReason): PixelWriteOutcome => ({ taskId: w.taskId, status: 'rejected', reason });
@@ -271,6 +336,7 @@ export class SimulatedCanvasProvider implements ReadWriteCanvasProvider {
     if (signal?.aborted === true) throw new SimulatedCanvasError('aborted', 'write aborted');
     if (writes.length > max) throw new Error(`at most ${max} pixels per write`);
     const fault = this.faults.shift();
+    if (this.latency > 0) await this.clock.sleep!(this.latency);
     if (fault?.kind === 'fail-before') throw new SimulatedCanvasError('fail-before', 'simulated failure before applying');
     const previous = this.results.get(attemptId);
     if (previous !== undefined && idempotent) return previous;
@@ -279,6 +345,7 @@ export class SimulatedCanvasProvider implements ReadWriteCanvasProvider {
       this.results.set(attemptId, result);
       return result;
     }
+    if (fault?.kind === 'hold') return this.applyHeld(agent, writes, attemptId, fault.appliedBefore, signal);
     const unlocked = new Set<number>(this.stateOf(agent).unlockedColors);
     const count = fault?.kind === 'partial' ? Math.max(0, Math.min(fault.applied, writes.length)) : writes.length;
     const outcomes: PixelWriteOutcome[] = [];
