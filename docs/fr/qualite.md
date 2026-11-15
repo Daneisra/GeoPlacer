@@ -163,6 +163,14 @@ les routes héritées répondent 200, sans erreur console.
   explicite ;
 - sélection jamais remplacée par la consultation d'un autre modèle.
 
+**Échec de la passe finale sur clone neuf** (journal complet conservé hors
+du dépôt) : le test des checkpoints automatiques lisait la génération de
+la toile avant `close()`. Or un checkpoint lancé par le dernier cycle
+pouvait encore être en cours : il était attendu par `close()` et donnait
+la génération suivante. C'est une course dans le test, pas dans le
+produit. Le test lit maintenant la génération sur le disque après la
+fermeture (5 passages sur 5 réussis), et la passe finale a été refaite.
+
 Côté serveur, un canal WebSocket est refusé pour une origine d'extension,
 et un client lent est resynchronisé même sans nouvel événement.
 

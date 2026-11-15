@@ -86,12 +86,14 @@ describe('automatic world checkpoints', () => {
     const { service, t } = await scarceEngine(dir, { worldCheckpointRecords: 5 });
     await service.start();
     await waitFor(service, (s) => s.state === 'completed', 30_000);
-    const generation = service.status().world.generation!;
-    expect(generation).toBeGreaterThan(2);
     const energy = (await service.resourcesView()).energy;
+    // close() waits for a checkpoint still in progress (the last cycle may have started one):
+    // the generation is read from the files afterwards.
     await service.close();
     opened.splice(opened.indexOf(service), 1);
     const files = (await readdir(path.join(dir, 'world'))).sort();
+    const generation = Number(/^world-(\d+)\.ckpt$/.exec(files[1]!)?.[1]);
+    expect(generation).toBeGreaterThan(2);
     expect(files).toEqual(['CURRENT', `world-${generation}.ckpt`, `world-${generation}.log`]);
     const again = await open(dir);
     expect(again.service.status().world.generation).toBe(generation);
