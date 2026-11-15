@@ -31,9 +31,9 @@ export function Sidebar() {
         <div className={`connection-toast ${status}`}>
           <span className={`connection-dot ${status}`} />
           <span className="connection-text">
-            {status === 'connected' && 'Connected'}
-            {status === 'disconnected' && 'Disconnected'}
-            {status === 'checking' && 'Connecting...'}
+            {status === 'connected' && 'Serveur connecté'}
+            {status === 'disconnected' && 'Serveur déconnecté'}
+            {status === 'checking' && 'Connexion…'}
           </span>
         </div>
         <p className="sidebar-credits">Made by Arknight</p>

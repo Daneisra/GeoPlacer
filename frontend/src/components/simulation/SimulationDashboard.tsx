@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useToast } from '../ui';
 import { useEngine } from '../../hooks/useEngine';
+import { translateError, translateNotice } from '../../lib/i18n';
 import { AttemptsPanel } from './AttemptsPanel';
 import { CanvasView } from './CanvasView';
 import { EngineControls } from './EngineControls';
@@ -24,13 +25,13 @@ export function SimulationDashboard() {
       const key = `e:${e.at}:${e.code}`;
       if (seen.current.has(key)) continue;
       seen.current.add(key);
-      toast.warning(`Moteur : ${e.code}`, e.message);
+      toast.warning('Moteur', translateError(e.code, e.message));
     }
     for (const n of [...notices].reverse()) {
       const key = `n:${n.at}:${n.message}`;
       if (seen.current.has(key)) continue;
       seen.current.add(key);
-      toast.info('Simulation', n.message);
+      toast.info('Simulation', translateNotice(n.message));
     }
   }, [errors, notices, toast]);
 

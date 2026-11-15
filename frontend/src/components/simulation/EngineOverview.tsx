@@ -1,5 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from '../ui';
 import { STATE_LABELS, formatDuration, formatTime, type EngineStatus } from '../../lib/engine';
+import { translateError, translateEta, translateReason } from '../../lib/i18n';
 import type { Connection } from '../../hooks/useEngine';
 
 const STATE_COLORS: Record<string, string> = {
@@ -35,7 +36,7 @@ export function EngineOverview({ status, connection }: { status: EngineStatus | 
   }
   const s = status.scheduler;
   const percent = s?.progressPercent ?? null;
-  const etaText = s?.eta === null || s?.eta === undefined ? '—' : s.eta.durationMs !== null ? `${formatDuration(s.eta.durationMs)} (fin vers ${formatTime(s.eta.finishAt)})` : s.eta.unavailable.map((u) => u.message).join(' ; ') || '—';
+  const etaText = s?.eta === null || s?.eta === undefined ? '—' : s.eta.durationMs !== null ? `${formatDuration(s.eta.durationMs)} (fin vers ${formatTime(s.eta.finishAt)})` : s.eta.unavailable.map((u) => translateEta(u.code, u.message)).join(' ; ') || '—';
   return (
     <Card id="engineOverview">
       <CardHeader className="pb-2">
@@ -50,7 +51,11 @@ export function EngineOverview({ status, connection }: { status: EngineStatus | 
             </span>
           )}
         </div>
-        {status.reason !== null && <p className="text-sm text-muted-foreground">{status.reason}</p>}
+        {status.reason !== null && (
+          <p className="text-sm text-muted-foreground" id="engineReason">
+            {translateReason(status.reason)}
+          </p>
+        )}
       </CardHeader>
       <CardContent className="space-y-4">
         <div>
@@ -86,7 +91,7 @@ export function EngineOverview({ status, connection }: { status: EngineStatus | 
         )}
         {!status.world.available && (
           <p className="rounded border border-red-600 p-2 text-sm text-red-300">
-            Toile simulée indisponible ({status.world.error?.code}) : {status.world.error?.message}
+            Toile simulée indisponible : {translateError(status.world.error?.code ?? '', status.world.error?.message ?? '')} Voir le guide de reprise.
           </p>
         )}
         {(s?.recentErrors.length ?? 0) > 0 && (
@@ -95,7 +100,7 @@ export function EngineOverview({ status, connection }: { status: EngineStatus | 
             <ul className="mt-1 space-y-1">
               {s!.recentErrors.slice(-8).reverse().map((e) => (
                 <li key={`${e.at}-${e.code}`} className="font-mono text-xs">
-                  {formatTime(e.at)} {e.code} — {e.message}
+                  {formatTime(e.at)} — {translateError(e.code, e.message)}
                 </li>
               ))}
             </ul>

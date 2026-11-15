@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Button, Card, CardContent, CardHeader, CardTitle } from '../ui';
 import { UPGRADE_LABELS, engineHttp, errorCode, formatDuration, formatTime, rgbHex, type EngineStatus, type ResourcesView, type UpgradeProposal } from '../../lib/engine';
 import { useCommand } from './useCommand';
+import { translateProposalsUnavailable, translateUpgradeImpossible } from '../../lib/i18n';
 
 const BENEFITS: Record<string, string> = {
   'enables-estimate': 'rend l’estimation possible',
@@ -102,7 +103,7 @@ export function ResourcesPanel({ status }: { status: EngineStatus | null }) {
             </div>
             <div>
               <div className="mb-1 font-medium">Améliorations simulables</div>
-              {view.proposalsUnavailable !== null && <p className="text-muted-foreground">{view.proposalsUnavailable}</p>}
+              {view.proposalsUnavailable !== null && <p className="text-muted-foreground">{translateProposalsUnavailable(view.proposalsUnavailable)}</p>}
               {writing && <p className="text-xs text-yellow-300">Mettez la simulation en pause ou arrêtez-la pour appliquer une amélioration.</p>}
               <ul className="space-y-1" id="upgradeList">
                 {view.proposals.slice(0, 12).map((p) => (
@@ -111,7 +112,7 @@ export function ResourcesPanel({ status }: { status: EngineStatus | null }) {
                       {p.recommended && <span className="mr-1 text-green-400">★</span>}
                       {proposalTitle(p)} · coût {p.cost ?? '—'} · {BENEFITS[p.benefit] ?? p.benefit}
                       {p.savedMs !== null && p.savedMs > 0 && <span className="text-green-300"> (−{formatDuration(p.savedMs)})</span>}
-                      {!p.possible && <span className="text-xs text-muted-foreground"> — {p.impossible.map((i) => i.message).join(' ; ')}</span>}
+                      {!p.possible && <span className="text-xs text-muted-foreground"> — {p.impossible.map((i) => translateUpgradeImpossible(i.code, i.message)).join(' ; ')}</span>}
                     </span>
                     <Button size="sm" variant="outline" disabled={!p.possible || writing || pending !== null} onClick={() => void apply(p)}>
                       Appliquer…

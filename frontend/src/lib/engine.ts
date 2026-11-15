@@ -5,6 +5,7 @@
  */
 
 import axios, { AxiosError } from 'axios';
+import { translateError } from './i18n';
 
 export const engineHttp = axios.create({ baseURL: '/api/v1', headers: { 'Content-Type': 'application/json' } });
 
@@ -114,13 +115,17 @@ export interface AttemptSummary {
   at: number;
 }
 
-/** A readable message for a failed call: the server's stable code and message. */
+/** A readable (French) message for a failed call, with the server's stable code. */
 export function errorText(error: unknown): { code: string; message: string } {
-  const e = error as AxiosError<{ error?: { code?: string; message?: string } }>;
-  const body = e.response?.data?.error;
-  if (body?.code !== undefined) return { code: body.code, message: body.message ?? body.code };
-  if (e.response === undefined) return { code: 'NETWORK', message: 'Serveur injoignable.' };
-  return { code: `HTTP_${e.response.status}`, message: e.message };
+  const e = error as AxiosError<{ error?: { code?: string; message?: string } | string; code?: string }>;
+  const data = e.response?.data;
+  const body = typeof data?.error === 'object' ? data.error : undefined;
+  if (body?.code !== undefined) return { code: body.code, message: translateError(body.code, body.message ?? body.code) };
+  // Inherited routes answer { error: string, code }.
+  if (typeof data?.code === 'string') return { code: data.code, message: translateError(data.code, typeof data.error === 'string' ? data.error : data.code) };
+  if (e.response === undefined) return { code: 'NETWORK', message: translateError('NETWORK', '') };
+  const code = `HTTP_${e.response.status}`;
+  return { code, message: translateError(code, e.message) };
 }
 
 export function errorCode(error: unknown): string {

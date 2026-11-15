@@ -3,6 +3,7 @@ import { Button, Card, CardContent, CardHeader, CardTitle } from '../ui';
 import { engineHttp, errorCode, type EngineSettings, type EngineStatus } from '../../lib/engine';
 import { applyStatus } from '../../hooks/useEngine';
 import { useCommand } from './useCommand';
+import { translateVerdict } from '../../lib/i18n';
 
 type Editable = {
   width: number;
@@ -89,7 +90,11 @@ export function SimulatorPanel({ status }: { status: EngineStatus | null }) {
     run('Diagnostic du journal', async () => {
       const r = await engineHttp.get<{ mode: string; diagnosis: { verdict?: string; stats?: { activeEvents: number }; problems?: string[] } }>('/journal/diagnosis');
       const d = r.data.diagnosis;
-      setDiagnosis(r.data.mode === 'full' ? `Verdict : ${d.verdict ?? '?'}${(d.problems?.length ?? 0) > 0 ? ` — ${d.problems!.join(' ; ')}` : ''}` : `Simulation en cours : statistiques seulement (${d.stats?.activeEvents ?? '?'} événements actifs). Arrêtez pour un diagnostic complet.`);
+      setDiagnosis(
+        r.data.mode === 'full'
+          ? `Journal : ${translateVerdict(d.verdict ?? '?')}${(d.problems?.length ?? 0) > 0 ? ` — ${d.problems!.length} problème(s) détaillé(s) par « npm run journal:diagnose » (voir le guide de diagnostic)` : ''}`
+          : `Simulation en cours : statistiques seulement (${d.stats?.activeEvents ?? '?'} événements actifs). Arrêtez pour un diagnostic complet.`
+      );
     });
 
   const compact = () => run('Compactage', () => engineHttp.post('/journal/compact', {}), 'Journal compacté, toile simulée enregistrée (checkpoint).');
