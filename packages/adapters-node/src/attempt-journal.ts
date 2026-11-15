@@ -389,6 +389,19 @@ export class FileAttemptJournal implements AttemptJournal {
     };
   }
 
+  /**
+   * Repair tool only: when `load` refuses (checkpoint unusable and no
+   * earlier generation), declares the generation and the last sequence
+   * number the repair rebuilt by itself, so that it can publish a new
+   * generation through `compact`.
+   */
+  prepareRepair(generation: number, lastSeq: number): void {
+    this.lock.assertHeld();
+    this.generation = generation;
+    this.lastSeq = lastSeq;
+    this.loaded = true;
+  }
+
   close(): Promise<void> {
     return this.closeHandle();
   }

@@ -34,6 +34,18 @@ export {
   type JournalOpenErrorCode,
 } from './attempt-journal.js';
 export { nodeJournalFs, type AppendHandle, type JournalFs } from './journal-fs.js';
+export {
+  JournalRepairError,
+  applyJournalRepair,
+  diagnoseJournal,
+  planJournalRepair,
+  type GenerationDiagnosis,
+  type JournalDiagnosis,
+  type JournalVerdict,
+  type RepairOperation,
+  type RepairPlan,
+  type RepairResult,
+} from './journal-tool.js';
 export { FileOrderCacheStore } from './order-cache.js';
 export { pngjsCodec } from './png-codec.js';
 export { NodeTemplateStorage, type NodeTemplateStorageOptions } from './storage.js';
