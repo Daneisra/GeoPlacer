@@ -88,6 +88,30 @@ describe('EngineService: a complete simulated run (Phase 1B.9)', () => {
   });
 });
 
+describe('EngineService: no network (Phase 1B.10)', () => {
+  it('a whole simulation, a backup and a demonstration open no outgoing connection', async () => {
+    const net = await import('node:net');
+    const original = net.Socket.prototype.connect;
+    const attempts: unknown[] = [];
+    net.Socket.prototype.connect = function (this: unknown, ...args: unknown[]) {
+      attempts.push(args[0]);
+      return (original as (...a: unknown[]) => unknown).apply(this, args);
+    } as typeof original;
+    try {
+      const { service } = await engine();
+      await withTemplate(service);
+      await service.start();
+      await waitFor(service, (s) => s.state === 'completed');
+      await service.backup();
+      await service.journalDiagnosis();
+      await service.resourcesView();
+    } finally {
+      net.Socket.prototype.connect = original;
+    }
+    expect(attempts).toEqual([]);
+  });
+});
+
 describe('EngineService: commands, concurrent and incompatible requests', () => {
   it('start, pause, resume and stop: idempotent where it makes sense, explicit refusals otherwise', async () => {
     const { service } = await engine();

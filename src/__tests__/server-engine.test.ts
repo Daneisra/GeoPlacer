@@ -178,6 +178,12 @@ describe('server with the engine (real processes)', () => {
     expect(a.output()).toContain('local simulation only');
     expect(a.output()).toContain('LEGACY_KEEPALIVE is ignored');
     expect(a.output()).toContain('Inherited keep-alive disabled');
+    // Phase 1B.10 security: listening on the loopback only by default; no file outside the served folders.
+    expect(a.output()).toMatch(/Server listening on http:\/\/127\.0\.0\.1:\d+/);
+    for (const p of ['/../package.json', '/%2e%2e/%2e%2e/package.json', '/assets/..%2f..%2f..%2fpackage.json', '/..%5c..%5cpackage.json', '/data/engine/engine.json', '/sauvegardes/']) {
+      const r = await call(a.port, 'GET', p);
+      expect(`${p} ${r.status} ${JSON.stringify(r.body)}`).not.toMatch(/"name":\s*"wplacer"|"schemaVersion"|AGPL-3.0-only/);
+    }
     // An inherited route that logged an account into Wplace is refused by the real server.
     const legacy = await call(a.port, 'POST', '/user', { cookies: { j: 'x' } });
     expect(legacy.status).toBe(410);
