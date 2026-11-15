@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info';
 
@@ -53,7 +53,7 @@ export function ToastContainer({ toasts, onClose }: ToastContainerProps) {
   if (toasts.length === 0) return null;
 
   return (
-    <div className="toast-container">
+    <div className="toast-container" role="status" aria-live="polite">
       {toasts.map((toast) => (
         <ToastItem key={toast.id} {...toast} onClose={onClose} />
       ))}
@@ -61,20 +61,38 @@ export function ToastContainer({ toasts, onClose }: ToastContainerProps) {
   );
 }
 
+// Shared toast store (module level): every component that calls useToast()
+// adds to, and reads from, the same list. Before (inherited code), each call
+// had its own useState, so the toasts of Settings, Users and Add Template
+// were never rendered by the container of App.
+let current: Toast[] = [];
+const listeners = new Set<() => void>();
+
+function setToasts(next: Toast[]): void {
+  current = next;
+  for (const listener of listeners) listener();
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+const snapshot = (): Toast[] => current;
+
+function addToast(type: ToastType, title: string, message: string): string {
+  const id = `${Date.now()}-${Math.random()}`;
+  setToasts([...current, { id, type, title, message }]);
+  return id;
+}
+
+function removeToast(id: string): void {
+  setToasts(current.filter((t) => t.id !== id));
+}
+
 // Hook for managing toasts
 export function useToast() {
-  const [toasts, setToasts] = useState<Toast[]>([]);
-
-  const addToast = (type: ToastType, title: string, message: string) => {
-    const id = `${Date.now()}-${Math.random()}`;
-    setToasts((prev) => [...prev, { id, type, title, message }]);
-    return id;
-  };
-
-  const removeToast = (id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  };
-
+  const toasts = useSyncExternalStore(subscribe, snapshot, snapshot);
   return {
     toasts,
     addToast,

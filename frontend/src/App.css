@@ -382,3 +382,77 @@ input[type="number"] {
   font-size: 0.75rem;
   color: hsl(var(--muted-foreground));
 }
+
+/* Notifications (toasts): fixed at the bottom right, above the content. */
+.toast-container {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: min(24rem, calc(100vw - 2rem));
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+  background: hsl(var(--card));
+  color: hsl(var(--card-foreground));
+  border: 1px solid hsl(var(--border));
+  box-shadow: 0 4px 12px hsl(0 0% 0% / 0.35);
+}
+
+.toast-icon {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.15rem 0.35rem;
+  border-radius: calc(var(--radius) - 2px);
+}
+
+.toast-content {
+  flex: 1;
+}
+
+.toast-title {
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.toast-message {
+  font-size: 0.8rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.toast-close {
+  background: none;
+  border: none;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.toast-success .toast-icon {
+  background: hsl(142 76% 36% / 0.2);
+  color: hsl(142 76% 46%);
+}
+
+.toast-error .toast-icon {
+  background: hsl(0 84% 60% / 0.2);
+  color: hsl(0 84% 60%);
+}
+
+.toast-warning .toast-icon {
+  background: hsl(38 92% 50% / 0.2);
+  color: hsl(38 92% 50%);
+}
+
+.toast-info .toast-icon {
+  background: hsl(210 80% 55% / 0.2);
+  color: hsl(210 80% 65%);
+}

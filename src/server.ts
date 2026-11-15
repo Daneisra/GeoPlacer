@@ -35,7 +35,7 @@ import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 // Import services and utilities
 import { networkInterfaces } from 'node:os';
 import { isWildcardHost } from './config/network.js';
-import { detectFrontend, isUiNavigation, FRONTEND_NOT_BUILT_MESSAGE } from './config/frontend.js';
+import { detectFrontend, isUiNavigation, uiDocumentMiddleware, FRONTEND_NOT_BUILT_MESSAGE } from './config/frontend.js';
 import {
   buildAllowedHostnames,
   compileOriginPatterns,
@@ -182,6 +182,11 @@ app.use(express.static('public'));
 app.use(express.json({ limit: JSON_LIMIT }));
 
 // Mount routes
+// F13: browser navigations (address bar, F5) to a UI page get the UI, even
+// when the address is also an API route; API calls are unaffected.
+const frontend = detectFrontend(path.join(__dirname, '../frontend/dist'));
+app.use(uiDocumentMiddleware(frontend));
+
 app.use(logsRouter);
 app.use(tokensRouter);
 app.use(usersRouter);
@@ -219,7 +224,6 @@ const swaggerSpec = swaggerJsdoc(swaggerOptions);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 // Serve the compiled UI whenever it exists (independent of NODE_ENV)
-const frontend = detectFrontend(path.join(__dirname, '../frontend/dist'));
 if (frontend.available) {
   app.use(express.static(frontend.distDir));
 }

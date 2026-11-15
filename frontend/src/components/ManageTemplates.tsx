@@ -11,6 +11,8 @@ interface Template {
   coords: { tx: number; ty: number; px: number; py: number };
 }
 
+const START_DISABLED = 'Starting is disabled in GeoPlacer: the inherited drawing engine is not used (the new engine runs on the local simulator only).';
+
 const POLLING_INTERVAL_ACTIVE = 10000; // 10 seconds when templates are running
 const POLLING_INTERVAL_IDLE = 30000; // 30 seconds when all templates are stopped
 
@@ -57,34 +59,27 @@ export default function ManageTemplates() {
     }
   };
 
-  const handleStartAll = async () => {
-    try {
-      await axios.post('/templates/start-all');
-      fetchTemplates();
-    } catch (error) {
-      console.error('Failed to start all templates:', error);
-    }
-  };
+  // F12 (GeoPlacer): starting a template would run the inherited drawing
+  // engine against a real service, which this project does not do: starting
+  // is disabled. Stopping stays possible (the safe direction), through the
+  // route the server really has: PUT /template/:id { running: false }.
+  const stopTemplate = (templateId: string) => axios.put(`/template/${templateId}`, { running: false });
 
   const handleStopAll = async () => {
     try {
-      await axios.post('/templates/stop-all');
+      await Promise.all(Object.values(templates).filter((t) => t.running).map((t) => stopTemplate(t.id)));
       fetchTemplates();
     } catch (error) {
       console.error('Failed to stop all templates:', error);
     }
   };
 
-  const handleToggleTemplate = async (templateId: string, start: boolean) => {
+  const handleStopTemplate = async (templateId: string) => {
     try {
-      if (start) {
-        await axios.post(`/template/${templateId}/start`);
-      } else {
-        await axios.post(`/template/${templateId}/stop`);
-      }
+      await stopTemplate(templateId);
       fetchTemplates();
     } catch (error) {
-      console.error('Failed to toggle template:', error);
+      console.error('Failed to stop template:', error);
     }
   };
 
@@ -105,7 +100,7 @@ export default function ManageTemplates() {
         <button className="bg-primary text-primary-foreground px-4 py-2 rounded-md hover:bg-primary/90" onClick={() => navigate('/templates/add')}>
           Add Template
         </button>
-        <button className="bg-secondary text-secondary-foreground px-4 py-2 rounded-md hover:bg-secondary/80" onClick={handleStartAll}>
+        <button className="bg-secondary text-secondary-foreground px-4 py-2 rounded-md opacity-50 cursor-not-allowed" disabled title={START_DISABLED}>
           Start All
         </button>
         <button className="bg-secondary text-secondary-foreground px-4 py-2 rounded-md hover:bg-secondary/80" onClick={handleStopAll}>
@@ -115,6 +110,7 @@ export default function ManageTemplates() {
           Return
         </button>
       </div>
+      <p className="text-sm text-muted-foreground" id="startDisabledNotice">{START_DISABLED}</p>
       <div id="templateList" className="grid grid-cols-2 gap-4">
         {Object.entries(templates).map(([id, template]) => (
           <Card key={id}>
@@ -126,12 +122,15 @@ export default function ManageTemplates() {
               <p className="text-sm text-muted-foreground">Users: {template.userIds.length}</p>
               <p className="text-sm font-medium">Status: {template.running ? 'Running' : 'Stopped'}</p>
               <div className="flex flex-wrap gap-2 pt-2">
-                <button
-                  className={template.running ? 'bg-secondary text-secondary-foreground px-3 py-1 rounded-md hover:bg-secondary/80' : 'bg-primary text-primary-foreground px-3 py-1 rounded-md hover:bg-primary/90'}
-                  onClick={() => handleToggleTemplate(id, !template.running)}
-                >
-                  {template.running ? 'Stop' : 'Start'}
-                </button>
+                {template.running ? (
+                  <button className="bg-secondary text-secondary-foreground px-3 py-1 rounded-md hover:bg-secondary/80" onClick={() => handleStopTemplate(id)}>
+                    Stop
+                  </button>
+                ) : (
+                  <button className="bg-primary text-primary-foreground px-3 py-1 rounded-md opacity-50 cursor-not-allowed" disabled title={START_DISABLED}>
+                    Start
+                  </button>
+                )}
                 <button
                   className="bg-secondary text-secondary-foreground px-3 py-1 rounded-md hover:bg-secondary/80"
                   onClick={() => navigate('/templates/add')}
