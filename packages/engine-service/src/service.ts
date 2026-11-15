@@ -443,9 +443,18 @@ export class EngineService {
 
   // ───────────────────────── Status ─────────────────────────
 
+  /** Paintable pixels per template revision (a revision never changes: safe to keep). */
+  private readonly paintableCache = new Map<string, number>();
+
   private templateInfo(t: Template): TemplateInfo {
-    let paintable = 0;
-    for (const p of t.image.pixels) if (p !== 0xffffffff) paintable++;
+    const key = `${t.id}:${t.revision}`;
+    let paintable = this.paintableCache.get(key);
+    if (paintable === undefined) {
+      paintable = 0;
+      for (const p of t.image.pixels) if (p !== 0xffffffff) paintable++;
+      if (this.paintableCache.size > 64) this.paintableCache.clear();
+      this.paintableCache.set(key, paintable);
+    }
     return {
       templateId: t.id,
       name: t.name,
