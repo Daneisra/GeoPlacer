@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { AgentId, AttemptJournal, AttemptManager, AutoCompactionPolicy, JournalEvent, PixelWrite, ProjectId, TaskId, TemplateId } from '../src/index.js';
-import { AttemptError, createAttemptManager, createMemoryHistory, createMemoryJournal, createResourceManager, replayJournal } from '../src/index.js';
+import { AttemptError, DEFAULT_AUTO_COMPACTION, createAttemptManager, createMemoryHistory, createMemoryJournal, createResourceManager, replayJournal } from '../src/index.js';
 import { RED, SIMULATED_RULES as R, observation } from './helpers/resources.js';
 
 const A = 'agent-1' as AgentId;
@@ -149,6 +149,15 @@ describe('automatic compaction: policy', () => {
     await cycle(lost, 0);
     expect(lost.manager.usable()).toBe(false);
     expect(await code(lost.manager.lease({ agent: A, projectId: P, templateId: T, revision: 1, writes: w(5), now: lost.now++, ttlMs: 10 }))).toBe('JOURNAL_UNAVAILABLE');
+  });
+});
+
+describe('automatic compaction: defaults', () => {
+  it('the documented defaults are enabled, finite and checked before compacting', async () => {
+    expect(DEFAULT_AUTO_COMPACTION).toEqual({ enabled: true, maxActiveEvents: 10_000, maxActiveBytes: 64 * 1024 * 1024, maxAgeMs: 3_600_000, maxOpenWrites: 200_000, minFreeBytes: 256 * 1024 * 1024 });
+    const r = await rig({ ...DEFAULT_AUTO_COMPACTION, maxActiveEvents: 6 });
+    for (let x = 0; x < 6; x++) await cycle(r, x);
+    expect(r.manager.compactionStatus().automatic).toBeGreaterThan(0);
   });
 });
 
