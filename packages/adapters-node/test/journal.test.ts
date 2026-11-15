@@ -8,7 +8,7 @@ import type { HistoryEntry, JournalEvent } from '@geoplacer/core';
 import { AttemptError, crc32, encodeHistoryLine } from '@geoplacer/core';
 import { FileAttemptJournal, FileHistoryStore, JournalOpenError, acquireDataDirectoryLock, encodePointer, nodeJournalFs, type DataDirectoryLock } from '../src/index.js';
 import { FaultyFs, type FaultMode } from './helpers/faulty-fs.js';
-import { AGENT, checkpointName, fullReplay, journalFiles, loadState, logName, openHarness, openedJournals, runSteps } from './helpers/journal-scenario.js';
+import { AGENT, checkpointName, fullReplay, historyOnDisk, journalFiles, loadState, logName, openHarness, openedJournals, runSteps } from './helpers/journal-scenario.js';
 
 const temps: string[] = [];
 const locks: DataDirectoryLock[] = [];
@@ -327,6 +327,7 @@ describe('real process kills at named steps (explicit synchronisation, no timer)
     const { root, lock } = await lockedRoot();
     await lock.release();
     locks.splice(locks.indexOf(lock), 1);
+    let historyEntries = 0;
     for (const [round, step] of steps.entries()) {
       const { reached, output } = await killAt(root, round, step);
       expect({ step, reached, output: reached ? '' : output }).toEqual({ step, reached: true, output: '' });
@@ -340,12 +341,20 @@ describe('real process kills at named steps (explicit synchronisation, no timer)
         const journal = new FileAttemptJournal(relock);
         const report = await journal.load({ checkpoint() {}, event() {} });
         expect({ step, corrupt: report.corruptLines, gaps: report.sequenceGaps, problems: report.problems }).toEqual({ step, corrupt: [], gaps: 0, problems: [] });
-        expect(await loadState(new FileAttemptJournal(relock))).toEqual(reference.state);
+        const state = await loadState(new FileAttemptJournal(relock));
+        expect(state).toEqual(reference.state);
+        // The history on disk survives the kills too: readable, and every entry is a closed attempt.
+        const history = await historyOnDisk(root);
+        expect({ step, corrupt: history.corruptLines }).toEqual({ step, corrupt: 0 });
+        const closed = new Set<string>(state.closed.map((c) => c.attemptId));
+        expect({ step, notClosed: history.attemptIds.filter((id) => !closed.has(id)) }).toEqual({ step, notClosed: [] });
+        historyEntries += history.attemptIds.length;
         await journal.close();
       } finally {
         await relock.release();
       }
     }
+    expect(historyEntries).toBeGreaterThan(0);
   });
 });
 

@@ -6,9 +6,9 @@
 
 import path from 'node:path';
 import type { AgentId, AttemptManager, JournalEvent, JournalState, ProjectId, ResourceRules, Rgb, TaskId, TemplateId } from '@geoplacer/core';
-import { JournalStateBuilder, createAttemptManager, createMemoryHistory, createResourceManager, decodeJournal } from '@geoplacer/core';
+import { JournalStateBuilder, createAttemptManager, createResourceManager, decodeChecksummedLines, decodeJournal, isHistoryEntry } from '@geoplacer/core';
 import type { JournalFs } from '../../src/index.js';
-import { FileAttemptJournal, checkpointName, decodePointer, generationsIn, logName, nodeJournalFs } from '../../src/index.js';
+import { FileAttemptJournal, FileHistoryStore, checkpointName, decodePointer, generationsIn, logName, nodeJournalFs } from '../../src/index.js';
 import type { DataDirectoryLock } from '../../src/lock.js';
 
 export const RED = 0xff0000 as Rgb;
@@ -34,17 +34,19 @@ export interface Harness {
   readonly observe: () => void;
 }
 
-/** Journals opened by openHarness (tests close them all at the end). */
-export const openedJournals: FileAttemptJournal[] = [];
+/** Journals and histories opened by openHarness (tests close them all at the end). */
+export const openedJournals: (FileAttemptJournal | FileHistoryStore)[] = [];
 
 export function openHarness(lock: DataDirectoryLock, options: { fs?: JournalFs; retainGenerations?: number; base?: number; idPrefix?: string } = {}): Harness {
   const journal = new FileAttemptJournal(lock, { fs: options.fs ?? nodeJournalFs, retainGenerations: options.retainGenerations ?? 100 });
-  openedJournals.push(journal);
+  // The real history on disk (Phase 1B.7: exercised with the manager and under process kills).
+  const history = new FileHistoryStore(lock, { fs: options.fs ?? nodeJournalFs });
+  openedJournals.push(journal, history);
   const resources = createResourceManager(RULES);
   const clock = { now: options.base ?? 1_000_000 };
   let ids = 0;
   const prefix = options.idPrefix ?? 'a';
-  const manager = createAttemptManager({ journal, history: createMemoryHistory(), resources, newAttemptId: () => `${prefix}-${++ids}` as never });
+  const manager = createAttemptManager({ journal, history, resources, newAttemptId: () => `${prefix}-${++ids}` as never });
   const observe = (): void => {
     resources.observe({ type: 'resource-observation', agent: AGENT, observedAt: ++clock.now, energy: 1_000_000, currency: 0, unlockedColors: [RED], upgrades: { maxEnergy: 0, regenSpeed: 0, energyPacks: 0 }, availability: { status: 'available' } });
   };
@@ -105,6 +107,23 @@ export async function fullReplay(root: string): Promise<{ state: JournalState; i
     }
   }
   return { state: builder.toState(), inconsistent, events };
+}
+
+/** Every history entry on disk (all segments), with the damaged lines found. */
+export async function historyOnDisk(root: string): Promise<{ attemptIds: string[]; corruptLines: number; tornTails: number }> {
+  const { readFile, readdir } = await import('node:fs/promises');
+  const dir = path.join(root, 'journal');
+  const names = (await readdir(dir)).filter((n) => /^history(-\d{12})?\.log$/.test(n)).sort();
+  const attemptIds: string[] = [];
+  let corruptLines = 0;
+  let tornTails = 0;
+  for (const n of names) {
+    const decoded = decodeChecksummedLines(new Uint8Array(await readFile(path.join(dir, n))), isHistoryEntry);
+    attemptIds.push(...decoded.values.map((e) => e.attemptId));
+    corruptLines += decoded.corruptLines.length;
+    if (decoded.discardedTailBytes > 0) tornTails++;
+  }
+  return { attemptIds, corruptLines, tornTails };
 }
 
 export async function journalFiles(root: string): Promise<{ names: string[]; pointer: number | null; gens: ReturnType<typeof generationsIn> }> {

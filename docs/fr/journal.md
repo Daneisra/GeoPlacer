@@ -127,11 +127,23 @@ reconstruit pas l'énergie de lui-même : il exige une observation plus
 récente que la dernière dépense journalisée.
 
 **Journal endommagé** : comme une ligne perdue a pu être un bail, la
-reprise exige une **lecture de la toile postérieure** à elle avant **tout**
-bail, sur tous les points (`CANVAS_READ_REQUIRED`, levé par
-`confirmCanvasRead`, qui est journalisé). Les points lus au mieux dans les
-lignes endommagées ne sont qu'un détail du rapport : ils ne servent jamais
-de garantie.
+reprise refuse **tout** bail (`CANVAS_READ_REQUIRED`) tant qu'une lecture
+de la toile **plus récente** que le dommage n'a pas été présentée à
+`confirmCanvasRead`, qui la journalise.
+
+**Ce que la règle garantit exactement** : la date de la lecture, qui doit
+suivre le dommage. Elle ne garantit **pas** sa couverture : une lecture
+d'un seul pixel lève l'exigence. Lire toute la zone utile, puis planifier
+à partir d'une lecture postérieure, reste à la charge de l'appelant.
+
+Le `WorkPlanner` ne propose que des points observés dans l'instantané
+fourni : un point hors de l'instantané est inconnu, donc ignoré par la
+politique `skip`. Lier la planification à une lecture postérieure au
+dommage, avec un plancher de date appliqué par `nextBatch`, est prévu
+avec l'ordonnanceur.
+
+Les points lus au mieux dans les lignes endommagées ne sont qu'un détail
+du rapport : ils ne servent jamais de garantie.
 
 ## 5. Durabilité : ce qui est démontré, ce qui ne l'est pas
 
@@ -206,7 +218,7 @@ d'échec) : il n'expose aucun secret.
 | Fin déchirée seule | La mettre de côté puis la couper (même règle que l'ajout) |
 | Journal endommagé | Nouvelle génération : toute tentative ouverte passe **à réconcilier**, une lecture de la toile est exigée avant tout bail, les ressources de chaque agent sont incertaines, et la génération endommagée et la précédente sont **préservées** (jamais supprimées par la rétention) |
 | Pointeur absent ou illisible | Rétablir le pointeur vers la plus haute génération au checkpoint valide, puis réparer comme un journal endommagé |
-| Checkpoint inutilisable, rien avant | Reconstruire depuis les seuls événements de la génération ; le plan l'annonce (`stateCertain: false`), car les tentatives ouvertes du checkpoint perdu ne peuvent pas toutes être connues. La lecture de la toile exigée protège tous les points |
+| Checkpoint inutilisable, rien avant | Reconstruire depuis les seuls événements de la génération ; le plan l'annonce (`stateCertain: false`), car les tentatives ouvertes du checkpoint perdu ne peuvent pas toutes être connues. Aucun bail n'est accepté avant une lecture de la toile postérieure, dont la couverture reste à la charge de l'appelant (§ 4) |
 
 Une corruption au milieu du journal n'est **jamais ignorée
 automatiquement** : seule la réparation confirmée la traite, et la
@@ -229,7 +241,9 @@ génération endommagée est conservée.
   rechargement). Un compactage ultérieur réussit, sans fichier temporaire
   restant. Chaque étape a été interrompue au moins une fois.
 - **Processus réels arrêtés** aux 10 étapes nommées (§ 5), synchronisés
-  explicitement : l'enfant s'arrête lui-même, sans minuteur.
+  explicitement : l'enfant s'arrête lui-même, sans minuteur. Le gestionnaire
+  y écrit aussi l'historique sur disque, qui reste lisible après chaque
+  arrêt et ne contient que des tentatives closes.
 - **Diagnostic** : journal sain, endommagé (aucun contenu ni chemin
   exposé), orphelins, pointeur absent, checkpoint invalide.
 - **Réparation** :
@@ -312,6 +326,10 @@ l'ordonnanceur, qui n'est pas fait.
 - La durabilité n'est pas démontrée contre une coupure électrique, et le
   chemin Linux (fsync du répertoire) n'est pas exécuté ici.
 - Aucun outil ne reconstruit l'historique.
+- La lecture de la toile exigée après un dommage est contrôlée par sa date,
+  pas par sa couverture (§ 4) : un plancher de date dans `nextBatch` est
+  prévu avec l'ordonnanceur.
 - La réparation d'un checkpoint inutilisable, sans génération antérieure,
   ne peut pas retrouver les tentatives ouvertes perdues. Elle l'annonce,
-  et la lecture de la toile exigée protège tous les points.
+  et aucun bail n'est accepté avant une lecture postérieure (dont la
+  couverture reste à la charge de l'appelant).

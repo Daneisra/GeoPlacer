@@ -67,7 +67,8 @@ export default function ManageTemplates() {
 
   const handleStopAll = async () => {
     try {
-      await Promise.all(Object.values(templates).filter((t) => t.running).map((t) => stopTemplate(t.id)));
+      // Ids from the keys of the map, as the cards below.
+      await Promise.all(Object.entries(templates).filter(([, t]) => t.running).map(([id]) => stopTemplate(id)));
       fetchTemplates();
     } catch (error) {
       console.error('Failed to stop all templates:', error);

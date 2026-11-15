@@ -176,11 +176,14 @@ Il est hors de `npm run check`. Les corrections de la recette n'en ajoutent
 aucun : le compte est vérifié avant et après.
 
 **Tests de processus** : le test du journal arrête l'enfant à des étapes
-nommées, sans minuteur. Les tests de modèles des phases 1B.2 et 1B.5
-attendent une poignée de main explicite (« ready »), puis tuent l'enfant
-après un délai qui ne sert qu'à **tirer au hasard l'instant du crash**.
-Aucune assertion ne dépend de ce délai, sauf « au moins une écriture sur
-8 passages ».
+nommées, sans minuteur.
+
+**Écart ouvert** (demande de la 1B.7, § 9) : les tests de modèles des
+phases 1B.2 et 1B.5 attendent une poignée de main explicite (« ready »),
+puis tuent l'enfant après un délai. Ce délai sert à choisir l'instant du
+crash, mais c'est bien un minuteur. Aucune assertion n'en dépend, sauf
+« au moins une écriture sur 8 passages ». Leur passage aux étapes nommées
+est à faire.
 
 Phase 1B.6, échecs rencontrés (journaux complets conservés hors du dépôt) :
 - **test des processus tués pendant les ajouts au journal**, deux échecs :
