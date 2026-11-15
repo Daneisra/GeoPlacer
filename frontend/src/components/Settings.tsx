@@ -82,6 +82,10 @@ export default function Settings() {
   return (
     <div className="max-w-4xl mx-auto p-6">
       <h2 className="text-3xl font-bold mb-4">Settings</h2>
+      <p id="legacySettingsNotice" className="mb-4 rounded border border-yellow-600 p-2 text-sm text-yellow-300">
+        Paramètres hérités de Wplacer : ils concernent l’ancien moteur, désactivé dans GeoPlacer V1, et n’ont aucun effet sur la simulation locale.
+        Les réglages de la simulation se trouvent dans le tableau de bord (panneau « Simulateur »).
+      </p>
 
       <div className="flex flex-col md:flex-row gap-4">
         <div className="flex-1 space-y-4">

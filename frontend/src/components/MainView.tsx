@@ -7,29 +7,15 @@ export default function MainView() {
 
   const quickActions = [
     {
-      title: 'Manage Users',
-      description: 'Add, remove, and manage user accounts',
-      icon: '/icons/manageUsers.svg',
-      path: '/users',
-      color: 'border-blue-500',
-    },
-    {
-      title: 'Manage Templates',
-      description: 'View and manage existing templates',
-      icon: '/icons/manageTemplates.svg',
-      path: '/templates',
-      color: 'border-purple-500',
-    },
-    {
-      title: 'View Logs',
-      description: 'Monitor system logs and errors',
+      title: 'Journaux',
+      description: 'Journaux et erreurs du serveur',
       icon: '/icons/code.svg',
       path: '/logs',
       color: 'border-orange-500',
     },
     {
-      title: 'Settings',
-      description: 'Configure application settings',
+      title: 'Paramètres hérités',
+      description: 'Réglages de l’ancien Wplacer (sans effet sur la simulation)',
       icon: '/icons/settings.svg',
       path: '/settings',
       color: 'border-gray-500',
@@ -38,10 +24,10 @@ export default function MainView() {
 
   return (
     <>
-      <h1 className="text-3xl font-bold">Dashboard</h1>
+      <h1 className="text-3xl font-bold">Tableau de bord</h1>
       <p className="text-muted-foreground mb-4">GeoPlacer V1 : moteur sur une toile simulée locale.</p>
       <SimulationDashboard />
-      <h2 className="mt-8 mb-3 text-xl font-semibold">Other pages</h2>
+      <h2 className="mt-8 mb-3 text-xl font-semibold">Autres pages</h2>
       <div className="grid grid-cols-2 gap-4">
         {quickActions.map((action) => (
           <Card

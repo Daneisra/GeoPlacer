@@ -42,11 +42,11 @@ interface Server {
 }
 
 /** Starts the server in `cwd` (its ./data); resolves once it listens (IPC message), or when it exits first. */
-async function startServer(cwd: string): Promise<Server> {
+async function startServer(cwd: string, extraEnv: Record<string, string> = {}): Promise<Server> {
   const port = await freePort();
   const proc = spawn(process.execPath, ['--import', tsxLoader, serverEntry], {
     cwd,
-    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', LOG_LEVEL: 'info', NODE_ENV: 'test' },
+    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', LOG_LEVEL: 'info', NODE_ENV: 'test', ...extraEnv },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
   let out = '';
@@ -171,10 +171,17 @@ async function prepare(port: number, w: number): Promise<{ id: string; paintable
 describe('server with the engine (real processes)', () => {
   it('runs a simulation from the API, streams it over the WebSocket, survives a disconnection, refuses a second instance, restarts consistently', async () => {
     const dir = await workDir();
-    const a = await startServer(dir);
+    // Phase 1B.10: even when asked for, the inherited keep-alive does not exist.
+    const a = await startServer(dir, { LEGACY_KEEPALIVE: '1' });
     servers.push(a);
     assertRunning(a);
     expect(a.output()).toContain('local simulation only');
+    expect(a.output()).toContain('LEGACY_KEEPALIVE is ignored');
+    expect(a.output()).toContain('Inherited keep-alive disabled');
+    // An inherited route that logged an account into Wplace is refused by the real server.
+    const legacy = await call(a.port, 'POST', '/user', { cookies: { j: 'x' } });
+    expect(legacy.status).toBe(410);
+    expect(legacy.body.code).toBe('LEGACY_DISABLED');
     const { id, paintable } = await prepare(a.port, 24);
 
     // A second server on the same data directory is refused explicitly, without writing.

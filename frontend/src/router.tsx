@@ -3,10 +3,8 @@ import App from './App';
 import { Sidebar } from './components/Sidebar';
 import MainView from './components/MainView';
 import LogsViewer from './components/LogsViewer';
-import ManageUsers from './components/ManageUsers';
-import AddTemplate from './components/AddTemplate';
-import ManageTemplates from './components/ManageTemplates';
 import Settings from './components/Settings';
+import LegacyDisabled from './components/LegacyDisabled';
 
 function Layout() {
   return (
@@ -32,20 +30,22 @@ export const router = createBrowserRouter([
         path: 'logs',
         element: <LogsViewer />,
       },
+      // Phase 1B.10: inherited pages of real accounts and of the inherited engine, disabled
+      // (their server routes are refused too). The components stay in the code (traceability).
       {
         path: 'users',
-        element: <ManageUsers />,
+        element: <LegacyDisabled page="Comptes (Users)" />,
       },
       {
         path: 'templates',
         children: [
           {
             index: true,
-            element: <ManageTemplates />,
+            element: <LegacyDisabled page="Modèles de l’ancien moteur (Templates)" />,
           },
           {
             path: 'add',
-            element: <AddTemplate />,
+            element: <LegacyDisabled page="Ajout d’un modèle de l’ancien moteur" />,
           },
         ],
       },
@@ -62,9 +62,7 @@ export const router = createBrowserRouter([
 ]);
 
 export const navItems = [
-  { path: '/', label: 'Dashboard', icon: '/icons/icon.png' },
-  { path: '/users', label: 'Users', icon: '/icons/manageUsers.svg' },
-  { path: '/templates', label: 'Templates', icon: '/icons/manageTemplates.svg' },
-  { path: '/logs', label: 'Logs', icon: '/icons/code.svg' },
-  { path: '/settings', label: 'Settings', icon: '/icons/settings.svg' },
+  { path: '/', label: 'Tableau de bord', icon: '/icons/icon.png' },
+  { path: '/logs', label: 'Journaux', icon: '/icons/code.svg' },
+  { path: '/settings', label: 'Paramètres hérités', icon: '/icons/settings.svg' },
 ];

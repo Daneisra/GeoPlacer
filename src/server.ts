@@ -30,6 +30,7 @@ import overlayRouter from './routes/overlay.js';
 // Import middleware
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 import { applyBaseProtections } from './app-base.js';
+import { legacyGuard } from './middleware/legacy-guard.js';
 // New engine (Phase 1B.9): local simulation only
 import { createEngineRouter, isEngineOriginAllowed } from './api/v1/engine-router.js';
 import { ENGINE_WS_PATH, attachEngineSocket } from './api/v1/engine-socket.js';
@@ -167,6 +168,14 @@ applyBaseProtections(app, {
   },
 });
 app.use(express.static('public'));
+
+// Phase 1B.10: the inherited routes that could reach Wplace or run the inherited engine are
+// refused before their handlers (local simulation only).
+app.use(
+  legacyGuard((route, req) => {
+    logger.warn(`Refused inherited route (${route.feature}): ${req.method} ${req.path}`);
+  })
+);
 
 // New engine API (Phase 1B.9), filled once the engine is open (before listening).
 const apiV1 = Router();
@@ -571,16 +580,13 @@ async function startServer(): Promise<void> {
       });
     }, WS_PING_INTERVAL_MS);
 
-    // GeoPlacer (Phase 1B.9): the inherited keep-alive logs every stored account into Wplace on a
-    // timer, an automated access to a real service. It is OFF unless explicitly enabled
-    // (LEGACY_KEEPALIVE=1); the new engine never uses it (local simulation only).
-    if (process.env.LEGACY_KEEPALIVE === '1') {
-      logger.warn('LEGACY_KEEPALIVE=1: the inherited keep-alive will contact Wplace for the stored accounts.');
-      const keepAliveInterval = setInterval(runKeepAlive, KEEP_ALIVE_INTERVAL_MS);
-      serverState.intervals.push(keepAliveInterval);
-    } else {
-      logger.info('Inherited keep-alive disabled (no automated access to a real service).');
-    }
+    // GeoPlacer V1: the inherited keep-alive (it logged every stored account into Wplace on a timer)
+    // is never scheduled, whatever the configuration (Phase 1B.10 removed the LEGACY_KEEPALIVE
+    // opt-in); its client refuses any request anyway (services/http-client.ts).
+    void runKeepAlive;
+    void KEEP_ALIVE_INTERVAL_MS;
+    if (process.env.LEGACY_KEEPALIVE !== undefined) logger.warn('LEGACY_KEEPALIVE is ignored: the inherited keep-alive does not exist in GeoPlacer V1.');
+    logger.info('Inherited keep-alive disabled (no automated access to a real service).');
 
     // Register graceful shutdown handlers
     process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

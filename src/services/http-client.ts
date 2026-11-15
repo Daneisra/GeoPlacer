@@ -1,5 +1,12 @@
 /**
  * HTTP client wrapper for WPlace API calls
+ *
+ * GeoPlacer V1 (Phase 1B.10): the inherited network access is DISABLED. This
+ * client is the single path of every inherited outgoing request (account
+ * login and checks, painting, tiles): it refuses to start a browser session
+ * and to send any request, whatever calls it. The rest of the inherited code
+ * is kept for the traceability of the fork; the routes that used it are also
+ * refused (middleware/legacy-guard.ts).
  */
 
 import { Impit } from 'impit';
@@ -10,6 +17,18 @@ import { WPLACE_BASE } from '../config/constants.js';
 
 /** No options yet. TLS verification is always enabled for security. */
 export type HttpClientOptions = Record<string, never>;
+
+/** Thrown by every network operation of the inherited client (GeoPlacer V1: local simulation only). */
+export class LegacyNetworkDisabledError extends Error {
+  readonly code = 'LEGACY_NETWORK_DISABLED';
+  constructor(operation: string) {
+    super(`Inherited network access is disabled in GeoPlacer V1 (local simulation only): ${operation} refused`);
+    this.name = 'LegacyNetworkDisabledError';
+  }
+}
+
+/** Always true in V1: there is no switch to turn the inherited network access back on. */
+export const LEGACY_NETWORK_DISABLED = true;
 
 export class WPlaceHttpClient {
   private browser: Impit | null = null;
@@ -24,6 +43,7 @@ export class WPlaceHttpClient {
    * Initialize the HTTP client with cookies
    */
   async initialize(cookies: Cookies): Promise<void> {
+    if (LEGACY_NETWORK_DISABLED) throw new LegacyNetworkDisabledError('session start');
     this.cookies = cookies;
     const jar = new CookieJar();
     for (const k of Object.keys(this.cookies)) {
@@ -43,6 +63,7 @@ export class WPlaceHttpClient {
    * Make a fetch request with default headers
    */
   async fetch(url: string, options: RequestInit = {}): Promise<any> {
+    if (LEGACY_NETWORK_DISABLED || this.browser === null) throw new LegacyNetworkDisabledError('request');
     try {
       const defaultHeaders: Record<string, string> = {
         'User-Agent':
@@ -88,6 +109,7 @@ export class WPlaceHttpClient {
    * Switch to a different user
    */
   async switchUser(cookies: Cookies): Promise<void> {
+    if (LEGACY_NETWORK_DISABLED) throw new LegacyNetworkDisabledError('account switch');
     this.cookies = cookies;
     const jar = new CookieJar();
     for (const k of Object.keys(this.cookies)) {
