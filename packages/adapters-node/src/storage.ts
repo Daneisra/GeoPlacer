@@ -36,9 +36,18 @@ const BACKUP = 'manifest.json.bak';
 const ADDRESS = /^[0-9a-f]{64}$/;
 const RETRYABLE = new Set(['EPERM', 'EBUSY', 'EACCES']);
 
+/** Points of a write where a crash test can stop the process (Phase 1B.8). */
+export type StorageStep = 'temp-created' | 'temp-written' | 'renamed' | 'reserved';
+
 export interface NodeTemplateStorageOptions {
   /** Rename attempts on transient Windows errors (antivirus, indexer). Default 8. */
   readonly renameAttempts?: number;
+  /**
+   * Test hook: called at each step of a write with the target file name
+   * (temp file created empty, written and fsynced, renamed into place;
+   * reservation written). Crash tests stop the process there.
+   */
+  readonly onStep?: (step: StorageStep, fileName: string) => void;
 }
 
 function errorCode(error: unknown): string | undefined {
@@ -60,6 +69,7 @@ export class NodeTemplateStorage implements TemplateStorage {
   readonly root: string;
   private readonly lock: DataDirectoryLock;
   private readonly renameAttempts: number;
+  private readonly onStep: NodeTemplateStorageOptions['onStep'];
   private readonly locks = new Map<string, Promise<unknown>>();
 
   /** The storage writes only under a held data directory lock (acquireDataDirectoryLock). */
@@ -68,6 +78,7 @@ export class NodeTemplateStorage implements TemplateStorage {
     this.lock = lock;
     this.root = lock.root;
     this.renameAttempts = options.renameAttempts ?? 8;
+    this.onStep = options.onStep;
   }
 
   // ───────────── paths (validated, always under root) ─────────────
@@ -118,12 +129,15 @@ export class NodeTemplateStorage implements TemplateStorage {
     try {
       const handle = await open(temp, 'wx');
       try {
+        this.onStep?.('temp-created', path.basename(target));
         await handle.writeFile(data);
         await handle.sync();
       } finally {
         await handle.close();
       }
+      this.onStep?.('temp-written', path.basename(target));
       await this.renameWithRetry(temp, target);
+      this.onStep?.('renamed', path.basename(target));
     } catch (error) {
       await rm(temp, { force: true });
       throw error;
@@ -226,6 +240,7 @@ export class NodeTemplateStorage implements TemplateStorage {
     } finally {
       await handle.close();
     }
+    this.onStep?.('reserved', path.basename(file));
     await this.syncDirectory(dir);
   }
 

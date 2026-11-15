@@ -220,81 +220,85 @@ describe('NodeTemplateStorage', () => {
   });
 });
 
-describe('real process kill during writes', () => {
+describe('real process kill during writes (named steps, Phase 1B.8)', () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const child = path.join(here, 'fixtures', 'kill-child.ts');
   const repoRoot = path.resolve(here, '..', '..', '..');
+  const childEnv = { ...process.env, TSX_TSCONFIG_PATH: path.join(here, 'fixtures', 'tsconfig.child.json') };
 
-  function runAndKill(root: string, templateId: string | undefined, delayMs: number): Promise<string> {
+  /**
+   * Runs kill-child, which kills itself at `step` (explicit synchronisation:
+   * no timer). Resolves with the template id once the child is dead.
+   */
+  function runUntilStep(root: string, templateId: string | undefined, step: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      const proc = spawn(process.execPath, ['--import', 'tsx', child, root, ...(templateId === undefined ? [] : [templateId])], {
-        cwd: repoRoot,
-        env: { ...process.env, TSX_TSCONFIG_PATH: path.join(here, 'fixtures', 'tsconfig.child.json') },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
+      const proc = spawn(process.execPath, ['--import', 'tsx', child, root, templateId ?? '-', step], { cwd: repoRoot, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
       let out = '';
       let err = '';
-      let id = templateId;
-      proc.stdout.on('data', (chunk: Buffer) => {
-        out += chunk.toString();
-        const match = /ready (\S+)/.exec(out);
-        if (match && id === undefined) id = match[1];
-        if (match) setTimeout(() => proc.kill('SIGKILL'), delayMs);
-      });
+      proc.stdout.on('data', (chunk: Buffer) => (out += chunk.toString()));
       proc.stderr.on('data', (chunk: Buffer) => (err += chunk.toString()));
-      proc.on('exit', (code, signal) => {
-        if (id === undefined) reject(new Error(`child failed (code ${String(code)}): ${err}`));
-        else if (signal === null && code !== null && code !== 0 && code !== 1) reject(new Error(`unexpected exit ${code}: ${err}`));
-        else if (err.length > 0 && signal === null) reject(new Error(`child error: ${err}`));
+      proc.on('exit', () => {
+        const id = /ready (\S+)/.exec(out)?.[1];
+        if (id === undefined) reject(new Error(`child failed before ready: ${err}`));
+        else if (!out.includes(`reached ${step}`)) reject(new Error(`step ${step} never reached: ${out} ${err}`));
         else resolve(id);
       });
     });
   }
 
-  it('always reopens to a complete, verified revision', { timeout: 120_000 }, async () => {
+  // Each step once: the temp file created empty, written and fsynced, renamed; reservations; blobs.
+  const steps = [
+    'temp-created:manifest.json#1',
+    'temp-written:manifest.json#2',
+    'renamed:manifest.json#3',
+    'reserved:revision-#1',
+    'reserved:generation-#2',
+    'temp-written:.png#1',
+    'renamed:.png#1',
+    'temp-created:manifest.json#4',
+  ];
+
+  it('always reopens to a complete, verified revision after a kill at each write step', { timeout: 180_000 }, async () => {
     const root = await tempRoot();
     let id: string | undefined;
-    const delays = [40, 75, 120, 180, 260, 33, 90, 150];
-    for (const delayMs of delays) {
-      // runAndKill resolves on the child's exit: the kernel has released its lock.
-      id = await runAndKill(root, id, delayMs);
+    let generation = 0;
+    for (const step of steps) {
+      // Resolves on the child's exit: the kernel has released its lock.
+      id = await runUntilStep(root, id, step);
       const handle = await openNodeTemplateManager(root);
       try {
         const ref = { projectId: asProjectId('projet-kill'), templateId: id as TemplateId };
         const loaded = await handle.manager.load(ref);
-        expect(loaded.report.problems).toEqual([]);
+        expect({ step, problems: loaded.report.problems }).toEqual({ step, problems: [] });
         const report = await handle.manager.verify(ref);
-        expect(report.manifestSource).toBe('current');
-        expect(report.revisions.every((r) => r.ok)).toBe(true);
+        expect({ step, source: report.manifestSource, ok: report.revisions.every((r) => r.ok) }).toEqual({ step, source: 'current', ok: true });
+        const manifest = await handle.manager.manifest(ref);
+        expect(manifest.generation).toBeGreaterThanOrEqual(generation);
+        generation = manifest.generation;
       } finally {
         await handle.close();
       }
     }
-    const last = await openNodeTemplateManager(root);
-    const final = await last.manager.manifest({ projectId: asProjectId('projet-kill'), templateId: id as TemplateId });
-    await last.close();
-    // The children really wrote (not timing-sensitive: one write over the 8 runs is enough).
-    expect(final.generation).toBeGreaterThan(1);
+    expect(generation).toBeGreaterThan(steps.length);
   });
 
-  /** Runs repair-child and kills it after `delayMs` (it may finish first). */
-  function repairAndKill(root: string, templateId: string, delayMs: number): Promise<void> {
+  /** Runs repair-child, which kills itself at `step` of the repair (or completes it with 'none'). */
+  function repairUntilStep(root: string, templateId: string, step: string): Promise<'reached' | 'completed'> {
     return new Promise((resolve, reject) => {
-      const proc = spawn(process.execPath, ['--import', 'tsx', path.join(here, 'fixtures', 'repair-child.ts'), root, templateId], {
-        cwd: repoRoot,
-        env: { ...process.env, TSX_TSCONFIG_PATH: path.join(here, 'fixtures', 'tsconfig.child.json') },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
+      const proc = spawn(process.execPath, ['--import', 'tsx', path.join(here, 'fixtures', 'repair-child.ts'), root, templateId, step], { cwd: repoRoot, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+      let out = '';
       let err = '';
-      proc.stdout.on('data', (chunk: Buffer) => {
-        if (chunk.toString().includes('ready')) setTimeout(() => proc.kill('SIGKILL'), delayMs);
-      });
+      proc.stdout.on('data', (chunk: Buffer) => (out += chunk.toString()));
       proc.stderr.on('data', (chunk: Buffer) => (err += chunk.toString()));
-      proc.on('exit', (code, signal) => (signal === null && code !== 0 ? reject(new Error(`repair child failed (${String(code)}): ${err}`)) : resolve()));
+      proc.on('exit', (code) => {
+        if (out.includes(`reached ${step}`)) resolve('reached');
+        else if (code === 0 && out.includes('repaired')) resolve('completed');
+        else reject(new Error(`repair child failed (${String(code)}): ${out} ${err}`));
+      });
     });
   }
 
-  it('never gives a revision number to two contents across kills, corruption and repairs killed midway', { timeout: 240_000 }, async () => {
+  it('never gives a revision number to two contents across kills, corruption and repairs killed at each step', { timeout: 300_000 }, async () => {
     const root = await tempRoot();
     const P_KILL = asProjectId('projet-kill');
     const contentOf = new Map<number, string>();
@@ -310,9 +314,15 @@ describe('real process kill during writes', () => {
         contentOf.set(r.revision, key);
       }
     };
-    const delays = [60, 140, 35, 220, 90, 170];
-    for (const [round, delayMs] of delays.entries()) {
-      id = await runAndKill(root, id, delayMs); // writes revisions until killed
+    const rounds: { write: string; repair: string }[] = [
+      { write: 'renamed:manifest.json#2', repair: 'reserved:generation-#1' },
+      { write: 'temp-written:manifest.json#3', repair: 'temp-created:manifest.json#1' },
+      { write: 'reserved:revision-#2', repair: 'temp-written:manifest.json#1' },
+      { write: 'renamed:.png#1', repair: 'renamed:manifest.json#1' },
+      { write: 'temp-created:manifest.json#2', repair: 'none' },
+    ];
+    for (const { write, repair } of rounds) {
+      id = await runUntilStep(root, id, write); // writes revisions until it kills itself
       const ref = { projectId: P_KILL, templateId: id as TemplateId };
       let handle = await openNodeTemplateManager(root);
       await record(handle.manager, ref);
@@ -320,7 +330,8 @@ describe('real process kill during writes', () => {
       // Lose the current manifest (and the revision that may live only there).
       const manifestPath = path.join(root, 'projects', 'projet-kill', 'templates', id, 'manifest.json');
       await writeFile(manifestPath, '{"corrupt');
-      await repairAndKill(root, id, [0, 2, 5, 10, 20, 50][round % 6]!); // repair, possibly killed midway
+      const outcome = await repairUntilStep(root, id, repair); // the repair, killed at a named step
+      expect({ repair, outcome }).toEqual({ repair, outcome: repair === 'none' ? 'completed' : 'reached' });
       handle = await openNodeTemplateManager(root);
       if ((await readFile(manifestPath, 'utf8')) === '{"corrupt') await handle.manager.repair(ref, { apply: true }); // finish it
       const loaded = await handle.manager.load(ref);

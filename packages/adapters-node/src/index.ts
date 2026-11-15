@@ -7,7 +7,7 @@ import { createTemplateManager, type TemplateLimits, type TemplateManager } from
 import { nodeSha256Hasher } from './hasher.js';
 import { acquireDataDirectoryLock, type DataDirectoryLock, type LockMechanism } from './lock.js';
 import { pngjsCodec } from './png-codec.js';
-import { NodeTemplateStorage } from './storage.js';
+import { NodeTemplateStorage, type NodeTemplateStorageOptions } from './storage.js';
 import { randomIdSource, systemClock } from './system.js';
 
 export { nodeSha256Hasher } from './hasher.js';
@@ -48,7 +48,7 @@ export {
 } from './journal-tool.js';
 export { FileOrderCacheStore } from './order-cache.js';
 export { pngjsCodec } from './png-codec.js';
-export { NodeTemplateStorage, type NodeTemplateStorageOptions } from './storage.js';
+export { NodeTemplateStorage, type NodeTemplateStorageOptions, type StorageStep } from './storage.js';
 export { randomIdSource, systemClock } from './system.js';
 
 export interface NodeTemplateManagerHandle {
@@ -65,11 +65,11 @@ export interface NodeTemplateManagerHandle {
  */
 export async function openNodeTemplateManager(
   root: string,
-  options: { readonly limits?: TemplateLimits; readonly lockMechanism?: LockMechanism } = {}
+  options: { readonly limits?: TemplateLimits; readonly lockMechanism?: LockMechanism; readonly storage?: NodeTemplateStorageOptions } = {}
 ): Promise<NodeTemplateManagerHandle> {
   const lock = await acquireDataDirectoryLock(root, options.lockMechanism === undefined ? {} : { mechanism: options.lockMechanism });
   const manager = createTemplateManager({
-    storage: new NodeTemplateStorage(lock),
+    storage: new NodeTemplateStorage(lock, options.storage ?? {}),
     hasher: nodeSha256Hasher,
     codec: pngjsCodec,
     ids: randomIdSource,
