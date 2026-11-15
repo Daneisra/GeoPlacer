@@ -141,8 +141,6 @@ async function main() {
     return { ok: expectText.test(text), text: text.slice(0, 80).replace(/\s+/g, ' ') };
   };
   for (const [id, href, re] of [
-    ['3.1', '/users', /user/i],
-    ['3.2', '/templates', /template/i],
     ['3.4', '/logs', /log/i],
     ['3.5', '/settings', /setting/i],
     ['3.0', '/', /./],
@@ -150,26 +148,29 @@ async function main() {
     const r = await visit(href, re);
     record(id, `menu → ${href}`, r.ok, r.text);
   }
-  await page.click('a[href="/templates"]');
-  await page.waitForURL(`${BASE}/templates`);
-  const addButton = page.getByRole('button', { name: /add template/i });
-  await addButton.click();
-  await page.waitForURL(`${BASE}/templates/add`);
-  record('3.3', 'Templates → Add affiche le formulaire (sans créer de modèle)', (await page.locator('form, input').count()) > 0);
-
-  // F12: actions toward routes the server does not have.
-  await page.click('a[href="/templates"]');
-  await page.waitForURL(`${BASE}/templates`);
-  const startAll = page.getByRole('button', { name: /start all/i });
-  const startAllShown = (await startAll.count()) > 0 && (await startAll.first().isEnabled());
-  if (startAllShown) {
-    const response = page.waitForResponse((r) => new URL(r.url()).pathname === '/templates/start-all', { timeout: 5_000 }).catch(() => null);
-    await startAll.first().click(); // no template exists: harmless either way
-    const r = await response;
-    record('F12', '« Start All » n’appelle pas une route absente', r !== null && r.status() < 400, r === null ? 'aucune requête' : `POST /templates/start-all -> ${r.status()}`);
-  } else {
-    record('F12', '« Start All » n’appelle pas une route absente', true, 'actions désactivées et expliquées dans l’interface');
+  // Phase 1B.10: the inherited account and template pages are no longer in the menu; a direct address
+  // shows the explicit « désactivé » page (their server routes are refused too).
+  record('3.1', 'Users et Templates ne sont plus dans le menu', (await page.locator('a[href="/users"], a[href="/templates"]').count()) === 0);
+  for (const [id, href] of [
+    ['3.2', '/users'],
+    ['3.3', '/templates'],
+    ['3.6', '/templates/add'],
+  ]) {
+    await page.goto(`${BASE}${href}`);
+    const shown = await page.locator('#legacyDisabled').waitFor({ timeout: 10_000 }).then(
+      () => true,
+      () => false
+    );
+    record(id, `accès direct à ${href} : page « désactivé dans GeoPlacer V1 »`, shown && (await page.locator('form, input[type="text"], button:has-text("Start")').count()) === 0);
   }
+  // F12 (now): no start of the inherited engine is offered anywhere; the server refuses it anyway.
+  const refused = await page.evaluate(async () => {
+    const r = await fetch('/template/x', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ running: true }) });
+    return `${r.status} ${(await r.json()).code}`;
+  });
+  record('F12', 'démarrage de l’ancien moteur refusé par le serveur (410 LEGACY_DISABLED)', refused === '410 LEGACY_DISABLED', refused);
+  await page.goto(`${BASE}/`);
+  await page.waitForLoadState('networkidle');
 
   // 4. Settings: save, refused value, persistence.
   await page.click('a[href="/settings"]');
@@ -262,13 +263,16 @@ async function main() {
   // The refused save of check 4.2 logs its 400 on purpose: those two lines are expected, nothing else is.
   // Phase 1B.9: during the restart of check 5.2, the dashboard's engine WebSocket reconnects: refused while the server is down.
   const expected = (e) =>
+    /status of 410 \(Gone\)/.test(e) ||
     /status of 400 \(Bad Request\)/.test(e) ||
     /Failed to save settings: AxiosError: Request failed with status code 400/.test(e) ||
-    /ws:\/\/127\.0\.0\.1:3000\/api\/v1\/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED/.test(e);
+    /ws:\/\/127\.0\.0\.1:3000\/api\/v1\/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED/.test(e) ||
+    // Phase 1B.10: a periodic read of the dashboard (every 3 s) can fall in the same restart.
+    /Failed to load resource: net::ERR_CONNECTION_REFUSED$/.test(e);
   const unexpected = consoleErrors.filter((e) => !expected(e));
   record('7', 'aucune erreur ni avertissement en console (hors refus voulu du contrôle 4.2)', unexpected.length === 0, unexpected.join(' | '));
   record('7a', 'erreurs console attendues (refus 400 du contrôle 4.2)', null, `${consoleErrors.length - unexpected.length} ligne(s)`);
-  record('7b', 'aucune requête en erreur (hors refus attendus)', failed.filter((f) => !/PUT \/settings -> 400/.test(f) && !f.includes('autre-site')).length === 0, failed.join(' | '));
+  record('7b', 'aucune requête en erreur (hors refus attendus)', failed.filter((f) => !/PUT \/settings -> 400/.test(f) && !/PUT \/template\/x -> 410/.test(f) && !f.includes('autre-site')).length === 0, failed.join(' | '));
 
   await browser.close();
   running.browser = null;
