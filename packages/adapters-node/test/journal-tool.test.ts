@@ -249,7 +249,9 @@ describe('journal repair (plan, confirmation, backup, trace)', () => {
 });
 
 describe('journal command line', () => {
-  it('diagnose is read-only and prints names relative to the data directory; repair without --apply changes nothing', async () => {
+  // Explicit budget, like every other test that starts child processes: four cold `node --import tsx`
+  // starts take about 2.7 s on an idle machine, 11.7 s measured while an install saturated the CPU.
+  it('diagnose is read-only and prints names relative to the data directory; repair without --apply changes nothing', { timeout: 60_000 }, async () => {
     const { root, lock } = await damagedJournal();
     await lock.release();
     locks.splice(locks.indexOf(lock), 1);

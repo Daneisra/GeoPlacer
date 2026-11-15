@@ -165,9 +165,42 @@ dépôt) :
   - filtre d'étape qui ne testait que la fin du nom (réservations) ;
   - étapes de blob inatteignables sans nouvelle image ;
   - `prefer-const`.
-- **Délai de la duplication interrompue** : toujours suivi par la mesure
-  de chaque itération lente. Pas de récidive en 1B.8, et la cause reste
-  non établie.
+- **Délais dépassés sur un clone neuf** (suivis depuis la 1B.6) : **cause
+  établie** en 1B.8.
+  - **Récidive** : sur le clone neuf de fin de phase, « failure at any
+    call: restore » a dépassé le délai par défaut de 5 s (5,0 s, contre
+    1,03 s dans le dépôt).
+  - **Premières mesures** : juste après `npm ci`, les premiers tests sont
+    2 à 3 fois plus lents, et une relance est normale. Exécuter les
+    fichiers de test l'un après l'autre ne change ces tests que de 20 à
+    25 %, moins que le bruit d'un passage à l'autre. L'hypothèse d'une
+    concurrence entre fichiers de test est donc **écartée**.
+  - **Reproduction dans le dépôt**, sans clone : trois passages de
+    référence donnent 1,03 s. Pendant un `npm ci` lancé dans un autre
+    dossier :
+    - l'antivirus (`MsMpEng`) consomme environ 9 des 12 processeurs
+      logiques et le processeur est saturé à 100 % ;
+    - les tests ralentissent de 5 à 9 fois, de façon homogène à chaque
+      itération, sans blocage isolé : placement 9,7 s, re-quantize 7,7 s,
+      new source 6,5 s, soit trois échecs à 5 s ;
+    - dès la fin de l'installation, le temps revient à 1,03 s.
+  - **Cause** : la machine est saturée par l'installation et par l'analyse
+    antivirus qui la suit. L'analyse se prolonge un peu après la fin de
+    `npm ci`, c'est-à-dire au moment où démarre le premier passage d'un
+    clone neuf. Ce n'est ni un défaut du produit ni un blocage. La part de
+    `npm` lui-même n'a pas été séparée de celle de l'antivirus, qui est le
+    principal consommateur mesuré.
+  - **Correction** : les six boucles « failure at any call » reçoivent le
+    budget explicite de 30 s de leurs voisines (réparation, duplication,
+    création). Le test de la ligne de commande du journal, qui lance
+    quatre processus et a pris 11,7 s sous la même charge, reçoit 60 s,
+    comme les autres tests à processus. La durée de chaque itération lente
+    reste journalisée, et ce suivi couvre maintenant les six boucles.
+  - **Vérification** : toute la suite des paquets passe pendant trois
+    `npm ci` consécutifs (duplication 9,7 s, ligne de commande 4,6 s).
+  - **Limite** : la marge est d'environ 3 fois le pire temps mesuré. Une
+    charge plus lourde pourrait encore la dépasser ; les durées
+    journalisées le montreraient.
 
 Phase 1B.7, mutations vérifiées (chacune fait échouer au moins un test) :
 - reprise depuis un checkpoint sans `lastSpendAt` (3 tests) ; `lastSpendAt`
@@ -245,6 +278,8 @@ Phase 1B.6, échecs rencontrés (journaux complets conservés hors du dépôt) :
   dans le dossier temporaire du clone restent une hypothèse. Délai
   explicite de 30 s pour les trois tests d'opérations interrompues ; ce
   délai ne prouve rien sur la cause.
+  Cause établie en 1B.8 : saturation de la machine par l'installation et
+  son analyse antivirus (voir plus haut).
 - Deux échecs de mise au point n'ont été conservés que sous forme
   d'extraits, pas de journal complet :
   - premier passage de `attempts.test.ts` : erreurs de rédaction du test ;

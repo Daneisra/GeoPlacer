@@ -149,10 +149,16 @@ export function storageConformance(target: ConformanceTarget): void {
       ];
 
       for (const [label, op, needsSecondRevision] of ops) {
-        it(`leaves the old or the new state after a failure at any call: ${label}`, async () => {
+        // Explicit budget, like the repair, duplication and creation loops below: each test runs an
+        // open-ended number of real-filesystem scenarios. About 1 s on an idle machine, but up to
+        // 9.7 s measured while the CPU was saturated by an install and its antivirus scan.
+        it(`leaves the old or the new state after a failure at any call: ${label}`, { timeout: 30_000 }, async () => {
           let scenarios = 0;
+          // Same tracking as the duplication test below: slow iterations are logged as they happen.
+          const started = performance.now();
           for (let k = 0; ; k++) {
             let reachedAny = false;
+            const iteration = performance.now();
             for (const after of [false, true]) {
               const storage = await target.make();
               const t = await create(manager(storage));
@@ -183,8 +189,12 @@ export function storageConformance(target: ConformanceTarget): void {
               expect(reserved.revision ?? 0, where).toBeGreaterThanOrEqual(now.revisions[now.revisions.length - 1]!.revision);
               scenarios++;
             }
+            const ms = performance.now() - iteration;
+            if (ms > 250) console.log(`[${label} ${target.name}] iteration ${k}: ${Math.round(ms)} ms (total ${Math.round(performance.now() - started)} ms)`);
             if (!reachedAny) break; // the operation completed before call k: every call index is covered
           }
+          const total = performance.now() - started;
+          if (total > 2500) console.log(`[${label} ${target.name}] total ${Math.round(total)} ms`);
           expect(scenarios).toBeGreaterThan(4);
         });
       }
