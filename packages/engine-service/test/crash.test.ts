@@ -12,9 +12,10 @@ const child = path.join(here, 'fixtures', 'engine-child.ts');
 const repoRoot = path.resolve(here, '..', '..', '..');
 const childEnv = { ...process.env, TSX_TSCONFIG_PATH: path.join(here, 'fixtures', 'tsconfig.child.json') };
 
-function runChild(dir: string, step: string): Promise<string> {
+function runChild(dir: string, step: string, checkpointEvery?: number): Promise<string> {
   return new Promise((resolve, reject) => {
-    const proc = spawn(process.execPath, ['--import', 'tsx', child, dir, step], { cwd: repoRoot, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+    const env = checkpointEvery === undefined ? childEnv : { ...childEnv, GP_WORLD_CHECKPOINT: String(checkpointEvery) };
+    const proc = spawn(process.execPath, ['--import', 'tsx', child, dir, step], { cwd: repoRoot, env, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     let err = '';
     proc.stdout.on('data', (c: Buffer) => (out += c.toString()));
@@ -27,12 +28,20 @@ function runChild(dir: string, step: string): Promise<string> {
 describe('EngineService: a real process killed during a simulation, then a restart (Phase 1B.9)', () => {
   // Kills right after the n-th durable change of the world (before it becomes visible and before
   // the write answers), at several points of the run.
-  const steps = ['appended#1', 'appended#4', 'appended#9'];
+  // Then, with a world checkpoint every 6 changes, at the steps of an automatic checkpoint.
+  const steps: [string, number | undefined][] = [
+    ['appended#1', undefined],
+    ['appended#4', undefined],
+    ['appended#9', undefined],
+    ['checkpoint-written#1', 6],
+    ['pointer-renamed#1', 6],
+    ['old-removed#2', 6],
+  ];
 
   it('the restarted engine reconciles the interrupted write, finishes the template, and never spends energy twice', { timeout: 300_000 }, async () => {
-    for (const step of steps) {
+    for (const [step, checkpointEvery] of steps) {
       const dir = await tempDir();
-      const out = await runChild(dir, step);
+      const out = await runChild(dir, step, checkpointEvery);
       expect(out, step).toContain(`reached ${step}`);
       const [, templateId, paintable] = /ready (\S+) (\d+)/.exec(out)!;
       const service = await EngineService.open({ dataDir: dir, eventIntervalMs: 20 });

@@ -119,8 +119,8 @@ export class EngineServiceError extends Error {
 
 /** Scheduler states in which the loop is alive. */
 const ACTIVE: ReadonlySet<SchedulerState> = new Set(['initializing', 'running', 'paused', 'waiting-resources', 'waiting-reconciliation']);
-/** World checkpoint after this many logged changes. */
-const WORLD_CHECKPOINT_RECORDS = 2_000;
+/** Default: world checkpoint after this many logged changes. */
+export const WORLD_CHECKPOINT_RECORDS = 2_000;
 const RECENT_ATTEMPTS = 100;
 const MAX_REGION_PIXELS = 2048 * 2048;
 
@@ -134,6 +134,8 @@ export interface EngineServiceOptions {
   readonly log?: (level: 'info' | 'warn' | 'error', message: string) => void;
   /** Test hook: options of the world store (named steps of the crash tests). */
   readonly worldStore?: FileWorldStoreOptions;
+  /** World checkpoint after this many logged changes (default WORLD_CHECKPOINT_RECORDS). */
+  readonly worldCheckpointRecords?: number;
 }
 
 export interface CommandResult {
@@ -183,6 +185,8 @@ export interface CanvasRegion {
   /** Events with a sequence number up to this one are already included. */
   readonly seq: number;
   readonly rect: CanvasRect;
+  /** True when the default region (the selected template) was too large for one read: its top-left part. */
+  readonly truncated: boolean;
   readonly observedAt: number;
   /** Little-endian int32 per pixel (0xRRGGBB, -1 empty), row-major, base64. */
   readonly data: string;
@@ -242,9 +246,11 @@ export class EngineService {
   private lastActivityAt: number | null = null;
   private readonly recent: AttemptRecord[] = [];
   private proposalBase: { readonly state: ReturnType<SimulatedCanvasProvider['agentState']>; readonly proposals: readonly UpgradeProposal[] } | null = null;
-  private templateCache: Template | null = null;
   private closed = false;
   private readonly worldStoreOptions: FileWorldStoreOptions;
+  private readonly checkpointRecords: number;
+  /** Decoded templates by id (current revision only), a few at most. */
+  private readonly templateCache = new Map<string, Template>();
 
   private constructor(root: string, lock: DataDirectoryLock, settings: EngineSettings, clock: MonotonicClock, options: EngineServiceOptions) {
     this.root = root;
@@ -254,6 +260,7 @@ export class EngineService {
     this.clock = clock;
     this.log = options.log ?? (() => undefined);
     this.worldStoreOptions = options.worldStore ?? {};
+    this.checkpointRecords = options.worldCheckpointRecords ?? WORLD_CHECKPOINT_RECORDS;
     this.hub = new EngineEventHub({ intervalMs: options.eventIntervalMs ?? 250, now: () => this.clock.now() });
     this.templates = createTemplateManager({ storage: new NodeTemplateStorage(lock), hasher: nodeSha256Hasher, codec: pngjsCodec, ids: randomIdSource, clock: systemClock });
     this.journal = new FileAttemptJournal(lock);
@@ -334,7 +341,7 @@ export class EngineService {
   /** A checkpoint of the world when its log grows (never two at a time). */
   private maybeCheckpoint(): void {
     const w = this.world;
-    if (w === null || this.checkpointing !== null || w.store.recordsSinceCheckpoint < WORLD_CHECKPOINT_RECORDS) return;
+    if (w === null || this.checkpointing !== null || w.store.recordsSinceCheckpoint < this.checkpointRecords) return;
     this.checkpointing = w.canvas
       .withWorld((view) => w.store.checkpoint(view))
       .catch((error: unknown) => this.log('error', `world checkpoint failed: ${String(error)}`))
@@ -380,10 +387,21 @@ export class EngineService {
   /** The current revision, decoded once per revision (the scheduler asks at every cycle). */
   private async currentTemplate(ref: TemplateRef): Promise<Template> {
     const manifest = await this.templates.manifest(ref);
-    if (this.templateCache !== null && this.templateCache.id === ref.templateId && this.templateCache.revision === manifest.currentRevision) return this.templateCache;
+    const cached = this.templateCache.get(ref.templateId);
+    if (cached !== undefined && cached.revision === manifest.currentRevision) return cached;
     const loaded = await this.templates.load(ref);
-    this.templateCache = loaded.template;
+    if (this.templateCache.size >= 4) {
+      const selected = this.settingsValue.selection?.templateId;
+      for (const id of this.templateCache.keys()) if (id !== selected) this.templateCache.delete(id);
+    }
+    this.templateCache.set(ref.templateId, loaded.template);
     return loaded.template;
+  }
+
+  /** The selected template as last loaded (null: none selected, or not loaded yet). */
+  private get selectedTemplate(): Template | null {
+    const id = this.settingsValue.selection?.templateId;
+    return id === undefined ? null : (this.templateCache.get(id) ?? null);
   }
 
   /** Time per pixel of a write, for the ETA (the simulated latency spread over a batch). */
@@ -479,7 +497,7 @@ export class EngineService {
       reason: sched?.reason ?? (this.worldError !== null ? `simulated world unavailable: ${this.worldError.code}` : null),
       stream: this.hub.stream,
       seq: this.hub.seq,
-      selection: selected !== null && this.templateCache !== null && this.templateCache.id === selected.templateId ? this.templateInfo(this.templateCache) : null,
+      selection: this.selectedTemplate === null ? null : this.templateInfo(this.selectedTemplate),
       commands: {
         start: ended && selected !== null && this.world !== null && this.stopping === null && this.starting === null,
         pause: !ended && state !== 'paused' && this.stopping === null,
@@ -691,6 +709,7 @@ export class EngineService {
     this.requireIdle('changing the template');
     this.assertInsideCanvas(info.width, info.height, info.placement?.x ?? 0, info.placement?.y ?? 0);
     await this.saveSettingsValue({ ...this.settingsValue, selection: { templateId } });
+    await this.currentTemplate(this.ref(templateId));
     this.scheduler = null;
     this.schedulerEnded = true;
     this.lastProgress = null;
@@ -824,9 +843,15 @@ export class EngineService {
     const world = this.requireWorld();
     const s = this.settingsValue.simulator;
     let r = rect;
+    let truncated = false;
     if (r === undefined) {
-      const t = this.templateCache;
-      r = t !== null && this.settingsValue.selection?.templateId === t.id ? { minX: t.placement.topLeft.x, minY: t.placement.topLeft.y, width: t.image.width, height: t.image.height } : { minX: 0, minY: 0, width: s.width, height: s.height };
+      const t = this.selectedTemplate;
+      r = t !== null ? { minX: t.placement.topLeft.x, minY: t.placement.topLeft.y, width: t.image.width, height: t.image.height } : { minX: 0, minY: 0, width: s.width, height: s.height };
+      // A template larger than one read: its top-left part (the client is told by `truncated`).
+      if (r.width * r.height > MAX_REGION_PIXELS) {
+        truncated = true;
+        r = { ...r, width: Math.min(r.width, 2048), height: Math.min(r.height, Math.floor(MAX_REGION_PIXELS / Math.min(r.width, 2048))) };
+      }
     }
     if (!Number.isSafeInteger(r.minX) || !Number.isSafeInteger(r.minY) || !Number.isSafeInteger(r.width) || !Number.isSafeInteger(r.height) || r.width < 1 || r.height < 1 || r.width * r.height > MAX_REGION_PIXELS) {
       throw new EngineServiceError('INVALID_REQUEST', 400, `invalid region (at most ${MAX_REGION_PIXELS} pixels)`);
@@ -842,7 +867,7 @@ export class EngineService {
           if (cx >= 0 && cx < view.bounds.width) out[y * region.width + x] = view.pixels[cy * view.bounds.width + cx]!;
         }
       }
-      return { stream: this.hub.stream, seq: this.hub.seq, rect: region, observedAt: this.clock.now(), data: base64(out) };
+      return { stream: this.hub.stream, seq: this.hub.seq, rect: region, truncated, observedAt: this.clock.now(), data: base64(out) };
     });
   }
 
@@ -850,7 +875,7 @@ export class EngineService {
   async simulateExternalEdit(count: number): Promise<{ readonly changed: number }> {
     this.guard();
     const world = this.requireWorld();
-    const t = this.templateCache;
+    const t = this.selectedTemplate;
     if (t === null) throw new EngineServiceError('NO_TEMPLATE_SELECTED', 409, 'select a template first');
     const candidates: { point: { x: number; y: number }; color: number }[] = [];
     for (let iy = 0; iy < t.image.height; iy++) {
@@ -1023,6 +1048,8 @@ export class EngineService {
     this.hub.close();
     await this.checkpointing;
     await this.world?.store.close();
+    await this.journal.close();
+    await this.history.close();
     await this.lock.release();
   }
 }

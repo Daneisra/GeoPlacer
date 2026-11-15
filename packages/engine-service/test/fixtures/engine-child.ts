@@ -20,6 +20,8 @@ let seen = 0;
 
 const service = await EngineService.open({
   dataDir: dir,
+  // A low threshold puts automatic world checkpoints inside the run (GP_WORLD_CHECKPOINT).
+  worldCheckpointRecords: Number(process.env.GP_WORLD_CHECKPOINT ?? 2000),
   worldStore: {
     onStep: (s: WorldStoreStep) => {
       if (!armed || s !== kind) return;
