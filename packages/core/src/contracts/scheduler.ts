@@ -1,54 +1,165 @@
 /**
- * Scheduler and engine events. Layer 4 (top).
+ * Single-agent scheduler (Phase 1B.8). Layer 5 (top).
+ *
+ * The scheduler only COORDINATES the existing components: templates
+ * (current revision), the WorkPlanner (next batch), the AttemptManager and
+ * its journal (leases, starts, closes, reconciliation), the ResourceManager
+ * (the only energy model), progress and ETA, and a read-write canvas
+ * provider (the local simulator in this phase). It never re-implements
+ * their rules.
+ *
+ * V1 runs ONE active agent; the configuration keeps a list of agents so
+ * that the multi-agent case stays expressible, but a scheduler refuses
+ * more than `maxActiveAgents` (1 in production).
  */
 
-import type { AccountManager, AccountStatus } from './accounts.js';
+import type { CanvasPoint } from './geometry.js';
 import type { ReadWriteCanvasProvider } from './canvas.js';
-import type { EngineConfig } from './config.js';
-import type { Clock, AgentId, Timestamp } from './primitives.js';
-import type { EtaEstimator, ProgressCalculator, ProgressSnapshot } from './progress.js';
-import type { AgentResourceState, ResourceManager } from './resources.js';
-import type { TemplateManager } from './template.js';
-import type { AttemptManager, HistoryEntry, HistoryStore, WorkPlanner } from './work.js';
+import type { AbortSignalLike, AgentId, AttemptId, Clock, ProjectId, TemplateId, Timestamp } from './primitives.js';
+import type { CanvasSource } from './canvas.js';
+import type { EtaPause, EtaUnavailableReason, FreshnessPolicy, ProgressSnapshot } from './progress.js';
+import type { Hasher } from './ports.js';
+import type { OrderCacheStore } from './strategy.js';
+import type { ResourceManager, ResourceObservation } from './resources.js';
+import type { Template, TemplateRef } from './template.js';
+import type { AttemptManager, UnknownPixelPolicy } from './work.js';
 
-export type EngineEvent =
-  | { readonly type: 'progress'; readonly progress: ProgressSnapshot; readonly etaMs: number | null }
-  | { readonly type: 'resources'; readonly agent: AgentId; readonly resources: AgentResourceState }
-  | { readonly type: 'agent-status'; readonly agent: AgentId; readonly status: AccountStatus }
-  | { readonly type: 'attempt'; readonly entry: HistoryEntry }
-  | { readonly type: 'error'; readonly message: string };
+/**
+ * stopped: not running (initial and final); initializing: journal recovery
+ * and first reads; running: planning and writing; paused: on request, no
+ * new attempt; waiting-resources: not enough energy, or the agent is
+ * unavailable, until a computed time; waiting-reconciliation: uncertain
+ * attempts wait for a canvas read that covers them; completed: the canvas
+ * matches the template (full coverage, no incorrect pixel, no open
+ * attempt); error: needs an intervention (blocked work, unusable journal,
+ * failing provider...).
+ */
+export type SchedulerState = 'stopped' | 'initializing' | 'running' | 'paused' | 'waiting-resources' | 'waiting-reconciliation' | 'completed' | 'error';
 
-export interface EventSink {
-  emit(event: EngineEvent): void;
+/** The current revision of a template (a TemplateManager: `(await load(ref)).template`). */
+export interface TemplateSource {
+  current(ref: TemplateRef): Promise<Template>;
+}
+
+/** What the provider reports about an agent now (the simulator in this phase). */
+export interface ResourceSource {
+  observe(agent: AgentId, signal?: AbortSignalLike): Promise<ResourceObservation>;
+}
+
+export interface SchedulerConfig {
+  readonly projectId: ProjectId;
+  readonly templateId: TemplateId;
+  /** V1: exactly one. Kept as a list for the multi-agent case (not activated). */
+  readonly agents: readonly AgentId[];
+  /** EngineConfig.maxActiveAgents: 1 in production V1. */
+  readonly maxActiveAgents: number;
+  readonly maxBatchSize: number;
+  /** Wait until the energy allows min(minBatchSize, pixels left) before leasing (>= 1). */
+  readonly minBatchSize: number;
+  readonly leaseTtlMs: number;
+  readonly unknownPixels: UnknownPixelPolicy;
+  readonly freshness?: Readonly<Partial<Record<CanvasSource, FreshnessPolicy>>>;
+  /** Resources older than this are observed again before planning. */
+  readonly maxResourceAgeMs: number;
+  readonly eta: { readonly msPerPixel: number; readonly minCoveragePercent: number; readonly pauses?: readonly EtaPause[] };
+  /** Wait before retrying a reconciliation whose reads were not new enough or incomplete. */
+  readonly reconcileRetryMs: number;
+  /** Longest single wait (the revision and the canvas are re-checked at least this often). */
+  readonly maxWaitMs: number;
+  /** Errors kept in the status. */
+  readonly maxRecentErrors: number;
+  /** Safety net: the loop stops in error after this many cycles (tests; null: unlimited). */
+  readonly maxCycles: number | null;
 }
 
 export interface SchedulerDependencies {
-  readonly config: EngineConfig;
   readonly clock: Clock;
   /** Must be writable: a read-only snapshot provider is rejected at compile time. */
   readonly canvas: ReadWriteCanvasProvider;
-  readonly accounts: AccountManager;
+  readonly templates: TemplateSource;
+  readonly resourceSource: ResourceSource;
   readonly resources: ResourceManager;
-  readonly templates: TemplateManager;
-  readonly planner: WorkPlanner;
   readonly attempts: AttemptManager;
-  readonly progress: ProgressCalculator;
-  readonly eta: EtaEstimator;
-  readonly history: HistoryStore;
-  readonly events: EventSink;
+  /** To prepare the random order (and its verified cache); optional. */
+  readonly hasher?: Hasher;
+  readonly orderCache?: OrderCacheStore;
 }
 
-export interface TickReport {
+export interface SchedulerError {
   readonly at: Timestamp;
-  readonly attempts: number;
-  readonly applied: number;
-  /** When the scheduler should run again (earliest agent readiness), or null when idle. */
-  readonly nextTickAt: Timestamp | null;
+  readonly code: string;
+  readonly message: string;
 }
 
-/** Works on a collection of agents; the active count is bounded by EngineConfig.maxActiveAgents. */
-export interface TaskScheduler {
-  tick(): Promise<TickReport>;
-  start(): void;
-  stop(): Promise<void>;
+/** Structured state of a cycle (also the payload of the future WebSocket events). */
+export interface SchedulerStatus {
+  readonly at: Timestamp;
+  readonly state: SchedulerState;
+  /** Why the scheduler waits, is paused, completed or failed. */
+  readonly reason: string | null;
+  readonly projectId: ProjectId;
+  readonly templateId: TemplateId;
+  readonly revision: number | null;
+  readonly agent: AgentId;
+  readonly cycles: number;
+  /** Estimated work queue: pixels to paint (incorrect + unknown counted as work). */
+  readonly workPixels: number | null;
+  readonly correct: number | null;
+  readonly incorrect: number | null;
+  readonly unknown: number | null;
+  /** Conformity of the eligible pixels, in percent (null: nothing eligible or no read yet). */
+  readonly progressPercent: number | null;
+  readonly openAttempts: number;
+  /** Attempts whose result is still uncertain (started or to reconcile). */
+  readonly uncertainAttempts: readonly AttemptId[];
+  readonly energy: number | null;
+  /** When the next batch is expected to be possible (energy or availability), null when not waiting. */
+  readonly nextAvailabilityAt: Timestamp | null;
+  readonly eta: { readonly durationMs: number | null; readonly finishAt: Timestamp | null; readonly unavailable: readonly EtaUnavailableReason[] } | null;
+  /** Date and origin of the observations behind this status. */
+  readonly observations: {
+    readonly canvas: { readonly at: Timestamp; readonly source: CanvasSource } | null;
+    readonly resources: { readonly at: Timestamp; readonly kind: string } | null;
+  };
+  /** Pixels applied and attempts closed since start. */
+  readonly applied: number;
+  readonly attemptsClosed: number;
+  readonly recentErrors: readonly SchedulerError[];
 }
+
+export type SchedulerEvent =
+  | { readonly type: 'state'; readonly at: Timestamp; readonly from: SchedulerState; readonly to: SchedulerState; readonly reason: string | null }
+  | { readonly type: 'cycle'; readonly status: SchedulerStatus }
+  | { readonly type: 'attempt'; readonly at: Timestamp; readonly attemptId: AttemptId; readonly state: string; readonly pixels: number; readonly applied: number }
+  | { readonly type: 'progress'; readonly at: Timestamp; readonly progress: ProgressSnapshot }
+  | { readonly type: 'error'; readonly error: SchedulerError };
+
+export interface StopOptions {
+  /**
+   * Abort the operation in progress (the write is signalled). A started
+   * attempt is never abandoned silently: it is reconciled when a covering
+   * read is possible, otherwise reported open in the status.
+   */
+  readonly abort?: boolean;
+}
+
+/** Control interface, independent of any UI. */
+export interface TaskScheduler {
+  /** Recovers the journal, then runs the loop in the background (resolves once started). */
+  start(): Promise<void>;
+  /** No new attempt after the current one; resolves when paused. */
+  pause(): Promise<void>;
+  resume(): void;
+  /** Stops after (or, with abort, during) the current operation; resolves when stopped. */
+  stop(options?: StopOptions): Promise<SchedulerStatus>;
+  status(): SchedulerStatus;
+  /** Events (state changes, cycles, attempts, progress, errors); the returned callback unsubscribes. */
+  subscribe(listener: (event: SchedulerEvent) => void): () => void;
+  /** Resolves when the loop ends (completed, error or stopped). */
+  done(): Promise<SchedulerStatus>;
+  /** One cycle without the loop (tests and diagnostics); recovers first when needed. */
+  step(): Promise<SchedulerStatus>;
+}
+
+/** Points of a canvas region (tests). */
+export type CanvasPoints = readonly CanvasPoint[];

@@ -18,3 +18,4 @@ export * from './progress/index.js';
 export * from './resources/index.js';
 export * from './upgrades/index.js';
 export * from './work/index.js';
+export * from './scheduler/index.js';

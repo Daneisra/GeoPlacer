@@ -91,6 +91,8 @@ describe('@geoplacer/core architecture', () => {
       // Work planning, attempts and recovery: pure, over the other domains; I/O through ports.
       // (template: the shared crc32 of the journal lines only.)
       work: ['contracts', 'geometry', 'strategy', 'progress', 'resources', 'template', 'work'],
+      // Phase 1B.8: the single-agent scheduler coordinates the domains below it; no I/O (ports and clock).
+      scheduler: ['contracts', 'geometry', 'progress', 'work', 'scheduler'],
     };
     for (const file of sourceFiles(srcDir)) {
       const folder = path.relative(srcDir, file).split(path.sep)[0] ?? '';
