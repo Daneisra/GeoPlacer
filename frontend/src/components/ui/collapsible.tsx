@@ -12,11 +12,8 @@ const Collapsible = React.forwardRef<
       {...props}
     >
       {React.Children.map(children, (child) => {
-        if (React.isValidElement(child)) {
-          return React.cloneElement(child, { 
-            open,
-            onOpenChange 
-          } as any)
+        if (React.isValidElement<{ open?: boolean; onOpenChange?: (open: boolean) => void }>(child)) {
+          return React.cloneElement(child, { open, onOpenChange })
         }
         return child
       })}
@@ -65,6 +62,8 @@ const CollapsibleContent = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement> & { open?: boolean; onOpenChange?: (open: boolean) => void }
 >(({ className, open, onOpenChange, children, ...props }, ref) => {
+  // Taken out of the DOM props on purpose (the trigger uses it, not the content).
+  void onOpenChange
   return (
     <div
       ref={ref}

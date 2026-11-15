@@ -17,35 +17,25 @@ export function useServerStatus(pollInterval = 5000) {
   });
   const mounted = useRef(true);
 
-  const checkConnection = useCallback(async () => {
-    if (!mounted.current) return;
-
-    setServerStatus((prev) => ({ ...prev, status: 'checking' }));
-
-    try {
-      await axios.get('/settings', { timeout: 3000 });
-      if (mounted.current) {
-        setServerStatus({
-          status: 'connected',
-          lastChecked: new Date(),
-          error: null,
-        });
-      }
-    } catch (err) {
-      if (mounted.current) {
-        setServerStatus({
-          status: 'disconnected',
-          lastChecked: new Date(),
-          error: err instanceof Error ? err.message : 'Server unreachable',
-        });
-      }
-    }
-  }, []);
+  // The last known status stays shown until the answer (the initial one is 'checking'); the state is
+  // only set in the promise callbacks.
+  const checkConnection = useCallback(
+    () =>
+      axios.get('/settings', { timeout: 3000 }).then(
+        () => {
+          if (mounted.current) setServerStatus({ status: 'connected', lastChecked: new Date(), error: null });
+        },
+        (err: unknown) => {
+          if (mounted.current) setServerStatus({ status: 'disconnected', lastChecked: new Date(), error: err instanceof Error ? err.message : 'Server unreachable' });
+        }
+      ),
+    []
+  );
 
   useEffect(() => {
     mounted.current = true;
 
-    checkConnection();
+    void checkConnection();
 
     const interval = setInterval(checkConnection, pollInterval);
 

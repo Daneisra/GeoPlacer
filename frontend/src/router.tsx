@@ -1,21 +1,9 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom';
-import App from './App';
-import { Sidebar } from './components/Sidebar';
+import Layout from './components/Layout';
 import MainView from './components/MainView';
 import LogsViewer from './components/LogsViewer';
 import Settings from './components/Settings';
 import LegacyDisabled from './components/LegacyDisabled';
-
-function Layout() {
-  return (
-    <div style={{ display: 'flex', minHeight: '100vh' }}>
-      <Sidebar />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-        <App />
-      </div>
-    </div>
-  );
-}
 
 export const router = createBrowserRouter([
   {
@@ -60,9 +48,3 @@ export const router = createBrowserRouter([
     ],
   },
 ]);
-
-export const navItems = [
-  { path: '/', label: 'Tableau de bord', icon: '/icons/icon.png' },
-  { path: '/logs', label: 'Journaux', icon: '/icons/code.svg' },
-  { path: '/settings', label: 'Paramètres hérités', icon: '/icons/settings.svg' },
-];

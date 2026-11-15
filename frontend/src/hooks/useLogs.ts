@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 
 export type LogsMode = 'logs' | 'errors';
 
@@ -51,6 +51,20 @@ export function useLogs() {
     setLogs([]);
   }, []);
 
+  const filteredLogs = useMemo(
+    () =>
+      logs.filter((log) => {
+        if (filterText && !log.toLowerCase().includes(filterText.toLowerCase())) {
+          return false;
+        }
+        if (filterType && !log.toLowerCase().includes(filterType.toLowerCase())) {
+          return false;
+        }
+        return true;
+      }),
+    [logs, filterText, filterType]
+  );
+
   const exportLogs = useCallback(() => {
     const filtered = filteredLogs.join('\n');
     const blob = new Blob([filtered], { type: 'text/plain' });
@@ -60,17 +74,7 @@ export function useLogs() {
     a.download = `wplacer-${logsMode}-${new Date().toISOString()}.txt`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [logs, filterText, filterType, logsMode]);
-
-  const filteredLogs = logs.filter((log) => {
-    if (filterText && !log.toLowerCase().includes(filterText.toLowerCase())) {
-      return false;
-    }
-    if (filterType && !log.toLowerCase().includes(filterType.toLowerCase())) {
-      return false;
-    }
-    return true;
-  });
+  }, [filteredLogs, logsMode]);
 
   return {
     logs,

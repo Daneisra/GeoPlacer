@@ -65,7 +65,7 @@ export function useSettings() {
       // Reset to idle after 3 seconds
       setTimeout(() => setSaveStatus('idle'), 3000);
       return true;
-    } catch (err) {
+    } catch {
       setSaveStatus('error');
       return false;
     }
@@ -75,9 +75,26 @@ export function useSettings() {
     setFormState((prev) => ({ ...prev, [field]: value }));
   }, []);
 
+  // First load: the state is only set once the answer is there (no synchronous update in the effect).
   useEffect(() => {
-    fetchSettings();
-  }, [fetchSettings]);
+    let cancelled = false;
+    axios.get<Settings>('/settings').then(
+      (response) => {
+        if (cancelled) return;
+        setSettings(response.data);
+        setFormState((prev) => ({ ...prev, ...response.data }));
+        setIsLoading(false);
+      },
+      (err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'Failed to fetch settings');
+        setIsLoading(false);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return {
     settings,

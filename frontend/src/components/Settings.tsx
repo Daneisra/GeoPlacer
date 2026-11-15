@@ -1,7 +1,24 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { useToast, Collapsible, CollapsibleTrigger, CollapsibleContent } from './ui';
+
+/** Inherited settings as the server stores them (milliseconds, ratios). */
+interface StoredSettings {
+  openBrowserOnStart?: boolean;
+  drawingDirection?: string;
+  drawingOrder?: string;
+  pixelSkip?: number | string;
+  accountCooldown?: number;
+  purchaseCooldown?: number;
+  accountCheckCooldown?: number;
+  dropletReserve?: number | string;
+  antiGriefStandby?: number;
+  chargeThreshold?: number;
+  proxyEnabled?: boolean;
+  proxyRotationMode?: string;
+  logProxyUsage?: boolean;
+}
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -22,14 +39,8 @@ export default function Settings() {
 
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
 
-  useEffect(() => {
-    fetchSettings();
-  }, []);
-
-  const fetchSettings = async () => {
-    try {
-      const response = await axios.get('/settings');
-      const settings = response.data;
+  // The state setters are stable: one function for the life of the page.
+  const applySettings = useCallback((settings: StoredSettings) => {
       setOpenBrowserOnStart(settings.openBrowserOnStart || false);
       setDrawingDirection(settings.drawingDirection || 'ttb');
       setDrawingOrder(settings.drawingOrder || 'linear');
@@ -43,10 +54,14 @@ export default function Settings() {
       setProxyEnabled(settings.proxyEnabled || false);
       setProxyRotationMode(settings.proxyRotationMode || 'sequential');
       setLogProxyUsage(settings.logProxyUsage || false);
-    } catch (error) {
-      console.error('Failed to fetch settings:', error);
-    }
-  };
+  }, []);
+
+  useEffect(() => {
+    void axios.get<StoredSettings>('/settings').then(
+      (response) => applySettings(response.data),
+      (error: unknown) => console.error('Failed to fetch settings:', error)
+    );
+  }, [applySettings]);
 
   const handleSaveSettings = async () => {
     try {

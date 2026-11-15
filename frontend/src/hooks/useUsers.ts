@@ -64,9 +64,25 @@ export function useUsers() {
     }
   }, [fetchUsers]);
 
+  // First load: the state is only set once the answer is there (no synchronous update in the effect).
   useEffect(() => {
-    fetchUsers();
-  }, [fetchUsers]);
+    let cancelled = false;
+    axios.get<Record<string, User>>('/users').then(
+      (response) => {
+        if (cancelled) return;
+        setUsers(response.data);
+        setIsLoading(false);
+      },
+      (err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'Failed to fetch users');
+        setIsLoading(false);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return {
     users,

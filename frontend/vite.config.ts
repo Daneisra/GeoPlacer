@@ -13,7 +13,7 @@ export default defineConfig(({ mode }) => {
   const apiProxy = () => ({
     target: `http://${backendHost}:${backendPort}`,
     changeOrigin: true,
-    bypass(req: any) {
+    bypass(req: { headers: { accept?: string } }) {
       if (req.headers.accept?.includes('text/html')) {
         return '/index.html'
       }

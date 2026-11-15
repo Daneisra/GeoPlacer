@@ -32,18 +32,15 @@ export default function AddTemplate() {
 
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
 
-  useEffect(() => {
-    fetchUsers();
-  }, []);
+  const fetchUsers = () =>
+    axios.get('/users').then(
+      (response) => setUsers(response.data),
+      (error: unknown) => console.error('Failed to fetch users:', error)
+    );
 
-  const fetchUsers = async () => {
-    try {
-      const response = await axios.get('/users');
-      setUsers(response.data);
-    } catch (error) {
-      console.error('Failed to fetch users:', error);
-    }
-  };
+  useEffect(() => {
+    void fetchUsers();
+  }, []);
 
   const handleSelectAllUsers = () => {
     setSelectedUsers(new Set(Object.keys(users)));

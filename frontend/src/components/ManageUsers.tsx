@@ -17,19 +17,21 @@ export default function ManageUsers() {
   const [users, setUsers] = useState<Record<string, User>>({});
   const [jCookie, setJCookie] = useState('');
   const [sCookie, setSCookie] = useState('');
+  // Time of the last read (suspensions are compared with it, never with Date.now() during render).
+  const [readAt, setReadAt] = useState(0);
+
+  const fetchUsers = () =>
+    axios.get('/users').then(
+      (response) => {
+        setUsers(response.data);
+        setReadAt(Date.now());
+      },
+      (error: unknown) => console.error('Failed to fetch users:', error)
+    );
 
   useEffect(() => {
-    fetchUsers();
+    void fetchUsers();
   }, []);
-
-  const fetchUsers = async () => {
-    try {
-      const response = await axios.get('/users');
-      setUsers(response.data);
-    } catch (error) {
-      console.error('Failed to fetch users:', error);
-    }
-  };
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -113,7 +115,7 @@ export default function ManageUsers() {
               {user.droplets !== undefined && (
                 <span className="text-sm text-muted-foreground">Droplets: {user.droplets}</span>
               )}
-              {user.suspendedUntil && user.suspendedUntil > Date.now() && (
+              {user.suspendedUntil && user.suspendedUntil > readAt && (
                 <span className="text-sm text-destructive">Suspended until {new Date(user.suspendedUntil).toLocaleString()}</span>
               )}
             </div>

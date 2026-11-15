@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from 'react-router-dom';
-import { navItems } from '../router';
+import { navItems } from '../navigation';
 import { useServerStatus } from '../hooks';
 
 export function Sidebar() {

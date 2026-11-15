@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardContent } from './ui';
@@ -19,45 +19,23 @@ const POLLING_INTERVAL_IDLE = 30000; // 30 seconds when all templates are stoppe
 export default function ManageTemplates() {
   const navigate = useNavigate();
   const [templates, setTemplates] = useState<Record<string, Template>>({});
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const getPollingInterval = () => {
-    const templateList = Object.values(templates);
-    const hasRunningTemplates = templateList.some(t => t.running);
-    return hasRunningTemplates ? POLLING_INTERVAL_ACTIVE : POLLING_INTERVAL_IDLE;
-  };
+  const fetchTemplates = useCallback(
+    () =>
+      axios.get('/templates').then(
+        (response) => setTemplates(response.data),
+        (error: unknown) => console.error('Failed to fetch templates:', error)
+      ),
+    []
+  );
 
-  const setupPolling = () => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-    }
-    const interval = getPollingInterval();
-    intervalRef.current = setInterval(fetchTemplates, interval);
-  };
-
+  // Polling, faster while a template runs; the interval follows the running state.
+  const hasRunningTemplates = Object.values(templates).some((t) => t.running);
   useEffect(() => {
-    fetchTemplates();
-    setupPolling();
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-    };
-  }, []);
-
-  // Update polling interval when template running states change
-  useEffect(() => {
-    setupPolling();
-  }, [templates]);
-
-  const fetchTemplates = async () => {
-    try {
-      const response = await axios.get('/templates');
-      setTemplates(response.data);
-    } catch (error) {
-      console.error('Failed to fetch templates:', error);
-    }
-  };
+    void fetchTemplates();
+    const interval = setInterval(fetchTemplates, hasRunningTemplates ? POLLING_INTERVAL_ACTIVE : POLLING_INTERVAL_IDLE);
+    return () => clearInterval(interval);
+  }, [fetchTemplates, hasRunningTemplates]);
 
   // F12 (GeoPlacer): starting a template would run the inherited drawing
   // engine against a real service, which this project does not do: starting
