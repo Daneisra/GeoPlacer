@@ -149,6 +149,12 @@ export class EngineEventHub {
     this.schedule();
   }
 
+  /** Sends the status now (after a state change: the allowed commands must not lag behind). */
+  statusNow(status: unknown): void {
+    this.pendingStatus = undefined;
+    this.emit({ type: 'status', status });
+  }
+
   attempt(summary: AttemptEventSummary): void {
     if (this.pendingAttempts.length < this.maxAttempts) this.pendingAttempts.push(summary);
     else this.droppedAttempts++;

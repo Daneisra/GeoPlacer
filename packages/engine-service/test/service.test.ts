@@ -110,6 +110,8 @@ describe('EngineService: commands, concurrent and incompatible requests', () => 
     expect(s1).toBe(s2);
     expect(s1.status.state).toBe('stopped');
     expect(s1.status.journal.openAttempts).toBe(0);
+    // The answer of a stop offers the commands of the stopped state (found by the browser acceptance).
+    expect(s1.status.commands).toMatchObject({ start: true, pause: false, resume: false, stop: false });
     expect((await service.stop()).changed).toBe(false);
   });
 

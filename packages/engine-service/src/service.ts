@@ -417,7 +417,7 @@ export class EngineService {
     switch (e.type) {
       case 'state':
         this.hub.state(e.from, e.to, e.reason);
-        this.hub.status(this.status());
+        this.hub.statusNow(this.status());
         break;
       case 'cycle':
         this.lastActivityAt = e.status.at;
@@ -570,7 +570,7 @@ export class EngineService {
       (final) => {
         if (this.scheduler === scheduler) this.schedulerEnded = true;
         this.log(final.state === 'error' ? 'error' : 'info', `simulation ended: ${final.state}${final.reason === null ? '' : ` (${final.reason})`}`);
-        this.hub.status(this.status());
+        this.hub.statusNow(this.status());
       },
       (error: unknown) => {
         if (this.scheduler === scheduler) this.schedulerEnded = true;
@@ -614,11 +614,13 @@ export class EngineService {
       try {
         await scheduler.stop({ abort: options.abort === true });
         this.schedulerEnded = true;
-        return { changed: true, status: this.status() };
       } finally {
         this.stopping = null;
-        this.hub.status(this.status());
       }
+      // Computed once the stop is over: the answer and the event offer the same commands.
+      const status = this.status();
+      this.hub.statusNow(status);
+      return { changed: true, status };
     })();
     return this.stopping;
   }
