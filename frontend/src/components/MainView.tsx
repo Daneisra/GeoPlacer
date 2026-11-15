@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardDescription } from './ui';
+import { SimulationDashboard } from './simulation/SimulationDashboard';
 
 export default function MainView() {
   const navigate = useNavigate();
@@ -38,9 +39,9 @@ export default function MainView() {
   return (
     <>
       <h1 className="text-3xl font-bold">Dashboard</h1>
-      <p className="text-muted-foreground mb-6">
-        Welcome to wplacer. Select an action below to get started.
-      </p>
+      <p className="text-muted-foreground mb-4">GeoPlacer V1 : moteur sur une toile simulée locale.</p>
+      <SimulationDashboard />
+      <h2 className="mt-8 mb-3 text-xl font-semibold">Other pages</h2>
       <div className="grid grid-cols-2 gap-4">
         {quickActions.map((action) => (
           <Card

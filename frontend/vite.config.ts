@@ -25,6 +25,12 @@ export default defineConfig(({ mode }) => {
     server: {
       port: parseInt(frontendPort, 10),
       proxy: {
+        // New engine API and its WebSocket (Phase 1B.9)
+        '/api': {
+          target: `http://${backendHost}:${backendPort}`,
+          changeOrigin: true,
+          ws: true,
+        },
         '/users': apiProxy(),
         '/user': apiProxy(),
         '/templates': apiProxy(),
