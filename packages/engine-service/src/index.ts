@@ -15,3 +15,33 @@ export {
   type WorldStoreErrorCode,
   type WorldStoreStep,
 } from './world-store.js';
+export { monotonicClock, type MonotonicClock } from './clock.js';
+export { EngineEventHub, type AttemptEventSummary, type EngineEvent, type EngineEventEnvelope, type EventHubOptions } from './events.js';
+export {
+  DEFAULT_SETTINGS,
+  DEMO_COLORS,
+  DEMO_PALETTE,
+  LIMITS,
+  SETTINGS_FILE,
+  SIMULATED_AGENT,
+  SIMULATION_PROJECT,
+  STRATEGIES,
+  SettingsError,
+  rulesOf,
+  validateSettings,
+  type AgentSettings,
+  type EngineSettings,
+  type RunSettings,
+  type SimulatorSettings,
+} from './settings.js';
+export {
+  EngineService,
+  EngineServiceError,
+  type CanvasRegion,
+  type CommandResult,
+  type EngineErrorCode,
+  type EngineServiceOptions,
+  type EngineStatus,
+  type ResourcesView,
+  type TemplateInfo,
+} from './service.js';
