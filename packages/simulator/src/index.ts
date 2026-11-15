@@ -14,4 +14,4 @@ import { CORE_CONTRACT_VERSION } from '@geoplacer/core';
 export const SIMULATOR_TARGET_CORE_CONTRACT = CORE_CONTRACT_VERSION;
 
 export { createManualClock, type ManualClock } from './clock.js';
-export { SimulatedCanvasError, SimulatedCanvasProvider, type CanvasEvent, type SimulatedAgent, type SimulatedCanvasOptions, type SimulatedFault } from './canvas.js';
+export { SimulatedCanvasError, SimulatedCanvasProvider, type CanvasEvent, type SimulatedAgent, type SimulatedCanvasOptions, type SimulatedFault, type WorldCommit, type WorldPixel, type WorldView } from './canvas.js';

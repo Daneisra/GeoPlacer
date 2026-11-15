@@ -1,0 +1,28 @@
+{
+  "//": "Type-checks sources and tests together (no output). Like vitest.config.ts, the workspace packages map to their sources.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "noEmit": true,
+    "rootDir": "..",
+    "tsBuildInfoFile": null,
+    "types": [
+      "node"
+    ],
+    "paths": {
+      "@geoplacer/core": [
+        "../core/src/index.ts"
+      ],
+      "@geoplacer/simulator": [
+        "../simulator/src/index.ts"
+      ],
+      "@geoplacer/adapters-node": [
+        "../adapters-node/src/index.ts"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts"
+  ]
+}

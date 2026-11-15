@@ -1,0 +1,13 @@
+{
+  "//": "Lets the crash children run the TypeScript sources with tsx (no build needed).",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "paths": {
+      "@geoplacer/core": ["../../../core/src/index.ts"],
+      "@geoplacer/simulator": ["../../../simulator/src/index.ts"],
+      "@geoplacer/adapters-node": ["../../../adapters-node/src/index.ts"]
+    }
+  }
+}
