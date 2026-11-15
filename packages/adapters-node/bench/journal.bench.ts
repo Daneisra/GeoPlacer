@@ -1,28 +1,34 @@
 /**
- * Phase 1B.6: cost of the attempt journal on disk.
+ * Phase 1B.7: cost of the attempt journal, before and after compaction.
  *
  *   npm run bench:journal
  *
- * - append: one event (fsync) for leases of 1, 100 and 1 000 writes, and
- *   the full cycle lease + start + finish (+ history) of a 1 000-write
- *   attempt through the AttemptManager;
- * - recovery: load + replay + recover of journals holding 100 and 1 000
- *   attempts of 1 000 writes and 10 000 attempts of 10 writes (written in
- *   bulk with the same line format; the last 5 attempts left open), with
- *   the file size and the extra memory.
- * The resource rules are synthetic (not a real service).
+ * Scenario (as measured in Phase 1B.6): 1 000 attempts of 1 000 pixels,
+ * the last 5 left open, written in bulk with the journal line format
+ * (about 146 MiB). Measured:
+ * - append of one event (fsync) and a full attempt cycle;
+ * - recovery BEFORE compaction: cold (a new process: start, load, replay,
+ *   recover; peak resident memory) and warm (a second recovery in the same
+ *   process: retained memory);
+ * - the compaction: duration (writes are blocked during all of it: the
+ *   manager is serialized), checkpoint size, active journal size;
+ * - recovery AFTER compaction, cold and warm.
+ * "Cold" means a new process: the OS file cache cannot be purged here, so
+ * the file may already be in memory. The resource rules are synthetic.
  */
 
+import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, mkdtempSync, openSync, rmSync, statSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { AgentId, Attempt, JournalEvent, PixelWrite, ProjectId, ResourceRules, Rgb, TaskId, TemplateId } from '@geoplacer/core';
-import { createAttemptManager, createResourceManager, encodeJournalLine } from '@geoplacer/core';
+import { createAttemptManager, createMemoryHistory, createResourceManager, encodeJournalLine } from '@geoplacer/core';
 import { FileAttemptJournal, FileHistoryStore, acquireDataDirectoryLock } from '../src/index.js';
 
 const median = (v: number[]): number => [...v].sort((a, b) => a - b)[v.length >> 1] ?? 0;
-const used = (): number => process.memoryUsage().heapUsed + process.memoryUsage().arrayBuffers;
+const mib = (bytes: number): number => +(bytes / 1048576).toFixed(1);
 const RED = 0xff0000 as Rgb;
 const agent = 'agent-1' as AgentId;
 const rules: ResourceRules = {
@@ -45,99 +51,113 @@ function writes(n: number, offset: number): PixelWrite[] {
 }
 
 function attempt(id: string, w: PixelWrite[], at: number): Attempt {
-  return { attemptId: id as never, agent, projectId: 'projet' as ProjectId, templateId: 'modele' as TemplateId, revision: 3, writes: w, energyCost: w.length, state: 'leased', leasedAt: at, expiresAt: at + 60_000, startedAt: null, needsReconciliationAt: null, closedAt: null, results: [], reason: null };
+  return { attemptId: id as never, agent, projectId: 'projet' as ProjectId, templateId: 'modele' as TemplateId, revision: 3, writes: w, energyCost: w.length, state: 'leased', leasedAt: at, expiresAt: at + 1e12, startedAt: null, needsReconciliationAt: null, closedAt: null, results: [], reason: null };
 }
 
-const roots: string[] = [];
-const newRoot = (): string => {
-  const r = mkdtempSync(path.join(tmpdir(), 'geoplacer-journal-'));
-  roots.push(r);
-  return r;
-};
+/** Writes the scenario journal (generation 0) in bulk. */
+function prepare(root: string, attempts: number, size: number): number {
+  const file = path.join(root, 'journal', 'attempts.log');
+  mkdirSync(path.dirname(file), { recursive: true });
+  const fd = openSync(file, 'w');
+  let seq = 0;
+  let at = 1;
+  const put = (e: JournalEvent): void => void writeSync(fd, encodeJournalLine(e, ++seq));
+  for (let k = 0; k < attempts; k++) {
+    const id = `a-${k}`;
+    const w = writes(size, (k * size) % (4096 * 4096));
+    put({ type: 'leased', attempt: attempt(id, w, at++) });
+    put({ type: 'started', attemptId: id as never, at: at++ });
+    if (k >= attempts - 5) continue; // left open (started: kept open across recoveries, to reconcile)
+    put({ type: 'finished', attemptId: id as never, at: at++, outcomes: w.map((x) => ({ taskId: x.taskId, status: 'applied' })) });
+  }
+  closeSync(fd);
+  return statSync(file).size;
+}
 
-try {
-  console.log(`Node ${process.version}, ${process.platform}/${process.arch}`);
-  {
-    const lock = await acquireDataDirectoryLock(newRoot());
-    const journal = new FileAttemptJournal(lock);
-    for (const n of [1, 100, 1000]) {
-      const times: number[] = [];
-      for (let k = 0; k < 30; k++) {
-        const event: JournalEvent = { type: 'leased', attempt: attempt(randomUUID(), writes(n, k * n), k) };
-        const t = performance.now();
-        await journal.append(event);
-        times.push(performance.now() - t);
-      }
-      console.log(JSON.stringify({ append: `lease of ${n} writes`, lineBytes: encodeJournalLine({ type: 'leased', attempt: attempt(randomUUID(), writes(n, 0), 0) }).length, medianMs: +median(times).toFixed(2) }));
-    }
-    await journal.close();
-    await lock.release();
-  }
-  {
-    const lock = await acquireDataDirectoryLock(newRoot());
-    const journal = new FileAttemptJournal(lock);
-    const history = new FileHistoryStore(lock);
-    const resources = createResourceManager(rules);
-    const manager = createAttemptManager({ journal, history, resources, newAttemptId: () => randomUUID() as never });
-    let now = 1;
-    await manager.recover(now++);
-    resources.observe({ type: 'resource-observation', agent, observedAt: now++, energy: 1_000_000, currency: 0, unlockedColors: [RED], upgrades: { maxEnergy: 0, regenSpeed: 0, energyPacks: 0 }, availability: { status: 'available' } });
-    const times: number[] = [];
-    for (let k = 0; k < 20; k++) {
-      const w = writes(1000, k * 1000);
-      const t = performance.now();
-      const a = await manager.lease({ agent, projectId: 'projet' as ProjectId, templateId: 'modele' as TemplateId, revision: 3, writes: w, now: now++, ttlMs: 60_000 });
-      await manager.start(a.attemptId, now++);
-      await manager.finish(a.attemptId, w.map((x) => ({ taskId: x.taskId, status: 'applied' as const })), now++);
-      times.push(performance.now() - t);
-    }
-    console.log(JSON.stringify({ cycle: 'lease + start + finish + history, 1 000 writes', medianMs: +median(times).toFixed(2) }));
-    await journal.close();
-    await history.close();
-    await lock.release();
-  }
-  for (const [attempts, size] of [
-    [100, 1000],
-    [1000, 1000],
-    [10_000, 10],
-  ] as const) {
-    const root = newRoot();
-    const file = path.join(root, 'journal', 'attempts.log');
-    mkdirSync(path.dirname(file), { recursive: true });
-    const parts: string[] = [];
-    let at = 1;
-    for (let k = 0; k < attempts; k++) {
-      const id = `a-${k}`;
-      const w = writes(size, (k * size) % (4096 * 4096));
-      parts.push(encodeJournalLine({ type: 'leased', attempt: attempt(id, w, at++) }));
-      if (k >= attempts - 5) continue; // left open
-      parts.push(encodeJournalLine({ type: 'started', attemptId: id as never, at: at++ }));
-      parts.push(encodeJournalLine({ type: 'finished', attemptId: id as never, at: at++, outcomes: w.map((x) => ({ taskId: x.taskId, status: 'applied' })) }));
-    }
-    writeFileSync(file, parts.join(''));
-    parts.length = 0;
+async function recoverOnce(root: string, now: number): Promise<{ ms: number; open: number; generation: number; fromCheckpoint: boolean; retainedMib: number }> {
+  const gc = (globalThis as { gc?: () => void }).gc;
+  gc?.();
+  const base = process.memoryUsage().heapUsed + process.memoryUsage().arrayBuffers;
+  const lock = await acquireDataDirectoryLock(root);
+  const journal = new FileAttemptJournal(lock);
+  const history = new FileHistoryStore(lock);
+  const manager = createAttemptManager({ journal, history, resources: createResourceManager(rules), newAttemptId: () => randomUUID() as never });
+  const t = performance.now();
+  const report = await manager.recover(now);
+  const ms = performance.now() - t;
+  gc?.();
+  const retained = process.memoryUsage().heapUsed + process.memoryUsage().arrayBuffers - base;
+  const open = manager.open().length;
+  await journal.close();
+  await history.close();
+  await lock.release();
+  return { ms: Math.round(ms), open, generation: report.generation, fromCheckpoint: report.fromCheckpoint, retainedMib: mib(Math.max(0, retained)) };
+}
+
+/** Child modes (one process each: "cold"). */
+async function child(mode: string, root: string): Promise<void> {
+  if (mode === 'recover') {
+    const cold = await recoverOnce(root, 9e12);
+    const warm = await recoverOnce(root, 9e12 + 1);
+    // performance.now() counts from the process start (module loading included).
+    console.log(JSON.stringify({ cold: { ...cold, sinceProcessStartMs: Math.round(performance.now()) }, warm, peakRssMib: mib(process.resourceUsage().maxRSS * 1024) }));
+  } else if (mode === 'compact') {
     const lock = await acquireDataDirectoryLock(root);
     const journal = new FileAttemptJournal(lock);
-    const history = new FileHistoryStore(lock);
-    const manager = createAttemptManager({ journal, history, resources: createResourceManager(rules), newAttemptId: () => randomUUID() as never });
-    (globalThis as { gc?: () => void }).gc?.();
-    const base = used();
+    const manager = createAttemptManager({ journal, history: createMemoryHistory(), resources: createResourceManager(rules), newAttemptId: () => randomUUID() as never });
+    await manager.recover(9e12 + 10);
     const t = performance.now();
-    const report = await manager.recover(at + 1);
+    const report = await manager.compact(9e12 + 11);
     const ms = performance.now() - t;
-    console.log(
-      JSON.stringify({
-        recovery: `${attempts} attempts of ${size} writes`,
-        fileMb: +(statSync(file).size / 1048576).toFixed(1),
-        ms: Math.round(ms),
-        released: report.released.length,
-        extraMb: +((used() - base) / 1048576).toFixed(1),
-      }),
-    );
     await journal.close();
-    await history.close();
     await lock.release();
+    console.log(JSON.stringify({ compactMs: Math.round(ms), writesBlockedMs: Math.round(ms), checkpointMib: mib(report.checkpointBytes), openAttempts: report.openAttempts, closedSummaries: report.closedSummaries, generation: report.generation, peakRssMib: mib(process.resourceUsage().maxRSS * 1024) }));
   }
-} finally {
-  for (const r of roots) rmSync(r, { recursive: true, force: true });
+}
+
+function runChild(mode: string, root: string): Record<string, unknown> {
+  const self = fileURLToPath(import.meta.url);
+  const result = spawnSync(process.execPath, ['--expose-gc', '--import', 'tsx', self, mode, root], { encoding: 'utf8', maxBuffer: 1 << 24 });
+  if (result.status !== 0) throw new Error(`${mode} failed: ${result.stderr}`);
+  return JSON.parse(result.stdout.trim().split('\n').at(-1)!) as Record<string, unknown>;
+}
+
+const [modeArg, rootArg] = process.argv.slice(2);
+if (modeArg !== undefined && rootArg !== undefined) await child(modeArg, rootArg);
+else {
+  console.log(`Node ${process.version}, ${process.platform}/${process.arch}`);
+  const roots: string[] = [];
+  try {
+    // Appends.
+    {
+      const root = mkdtempSync(path.join(tmpdir(), 'geoplacer-journal-'));
+      roots.push(root);
+      const lock = await acquireDataDirectoryLock(root);
+      const journal = new FileAttemptJournal(lock);
+      const manager = createAttemptManager({ journal, history: new FileHistoryStore(lock), resources: createResourceManager(rules), newAttemptId: () => randomUUID() as never });
+      await manager.recover(1);
+      const appendTimes: number[] = [];
+      for (let k = 0; k < 30; k++) {
+        const t = performance.now();
+        await journal.append({ type: 'leased', attempt: attempt(randomUUID(), writes(1000, k * 1000), 10 + k) });
+        appendTimes.push(performance.now() - t);
+      }
+      console.log(JSON.stringify({ append: 'lease of 1 000 pixels (fsync)', medianMs: +median(appendTimes).toFixed(2) }));
+      await journal.close();
+      await lock.release();
+    }
+    const root = mkdtempSync(path.join(tmpdir(), 'geoplacer-journal-'));
+    roots.push(root);
+    const bytes = prepare(root, 1000, 1000);
+    console.log(JSON.stringify({ scenario: '1 000 attempts of 1 000 pixels, 5 open', journalMib: mib(bytes) }));
+    const before = runChild('recover', root);
+    console.log(JSON.stringify({ phase: 'before compaction', ...before }));
+    const compaction = runChild('compact', root);
+    const active = statSync(path.join(root, 'journal', `attempts-${String(compaction['generation']).padStart(12, '0')}.log`)).size;
+    console.log(JSON.stringify({ phase: 'compaction', ...compaction, activeJournalBytes: active }));
+    const after = runChild('recover', root);
+    console.log(JSON.stringify({ phase: 'after compaction', ...after }));
+  } finally {
+    for (const r of roots) rmSync(r, { recursive: true, force: true });
+  }
 }

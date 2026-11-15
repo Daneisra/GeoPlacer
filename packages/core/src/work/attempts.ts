@@ -20,7 +20,11 @@
  *   id as operation id; an unknown outcome makes the agent's resources
  *   uncertain until a newer observation;
  * - operations of one manager are serialized (one at a time); one manager
- *   per data directory (the directory lock is the caller's).
+ *   per data directory (the directory lock is the caller's);
+ * - Phase 1B.7: the state is the pure JournalStateBuilder (shared with the
+ *   full replay and the checkpoints); closed attempts are kept as summaries;
+ *   after damage, no lease until a newer canvas read is confirmed;
+ *   compaction is refused on a damaged generation.
  */
 
 import type {
@@ -30,10 +34,14 @@ import type {
   AttemptJournal,
   AttemptManager,
   CanvasPointKey,
+  CompactionReport,
   CanvasSnapshot,
   HistoryEntry,
   HistoryStore,
   JournalEvent,
+  JournalLoadReport,
+  JournalState,
+  JournalVisitor,
   LeaseRequest,
   PixelResult,
   PixelWriteOutcome,
@@ -45,6 +53,7 @@ import type {
   Timestamp,
 } from '../contracts/index.js';
 import { TRANSPARENT, UNKNOWN } from '../contracts/index.js';
+import { JournalStateBuilder } from './journal-state.js';
 
 export type AttemptErrorCode =
   | 'NOT_RECOVERED'
@@ -57,6 +66,8 @@ export type AttemptErrorCode =
   | 'COLOR_LOCKED'
   | 'LEASE_EXPIRED'
   | 'STALE_SNAPSHOT'
+  | 'CANVAS_READ_REQUIRED'
+  | 'JOURNAL_DAMAGED'
   | 'INVALID_INPUT';
 
 export class AttemptError extends Error {
@@ -69,41 +80,7 @@ export class AttemptError extends Error {
   }
 }
 
-const OPEN_STATES: ReadonlySet<Attempt['state']> = new Set(['leased', 'started', 'needs-reconciliation']);
 const pointKey = (p: { readonly x: number; readonly y: number }): CanvasPointKey => `${p.x},${p.y}`;
-const eventAttemptId = (event: JournalEvent): AttemptId => (event.type === 'leased' ? event.attempt.attemptId : event.attemptId);
-
-/**
- * The state machine: the attempt after `event`, or the reason the event is
- * not a valid transition. Pure; used live and to replay the journal.
- */
-export function transition(attempt: Attempt | undefined, event: JournalEvent): Attempt | string {
-  if (event.type === 'leased') return attempt === undefined ? event.attempt : `attempt ${event.attempt.attemptId} leased twice`;
-  if (attempt === undefined) return `event ${event.type} for unknown attempt ${event.attemptId}`;
-  const from = attempt.state;
-  const results = (outcomes: readonly PixelWriteOutcome[]): Attempt['results'] => outcomes.map((o) => ({ taskId: o.taskId, result: o.status }));
-  switch (event.type) {
-    case 'started':
-      if (from === 'leased') return { ...attempt, state: 'started', startedAt: event.at };
-      break;
-    case 'finished':
-      if (from === 'started') return { ...attempt, state: 'finished', closedAt: event.at, results: results(event.outcomes) };
-      break;
-    case 'failed':
-      if (from === 'leased' || from === 'started') return { ...attempt, state: 'failed', closedAt: event.at, results: results(event.outcomes), reason: event.reason };
-      break;
-    case 'cancelled':
-      if (from === 'leased') return { ...attempt, state: 'cancelled', closedAt: event.at, reason: event.reason };
-      break;
-    case 'needs-reconciliation':
-      if (from === 'started' || from === 'leased') return { ...attempt, state: 'needs-reconciliation', needsReconciliationAt: event.at, reason: event.reason };
-      break;
-    case 'reconciled':
-      if (from === 'started' || from === 'needs-reconciliation') return { ...attempt, state: 'finished', closedAt: event.at, results: event.results };
-      break;
-  }
-  return `invalid transition ${from} -> ${event.type} for ${event.attemptId}`;
-}
 
 export function historyOf(attempt: Attempt, state: HistoryEntry['state'], at: Timestamp): HistoryEntry {
   const count = (r: PixelResult): number => attempt.results.filter((x) => x.result === r).length;
@@ -141,10 +118,11 @@ export interface AttemptManagerDeps {
 export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
   const { journal, history, resources } = deps;
   const cost = resources.rules.energy.costPerPixel;
-  const attempts = new Map<AttemptId, Attempt>();
-  const open = new Set<AttemptId>();
+  let state = new JournalStateBuilder();
   const uncertain = new Map<AgentId, Timestamp>();
   let recovered = false;
+  /** The loaded generation is damaged: compaction refused (repair first). */
+  let damaged = false;
   let queue: Promise<unknown> = Promise.resolve();
 
   /** One operation at a time: a lease checks overlap against every committed lease. */
@@ -154,25 +132,21 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
     return run;
   }
 
-  function attemptOf(id: AttemptId): Attempt {
-    const attempt = attempts.get(id);
-    if (attempt === undefined) throw new AttemptError('UNKNOWN_ATTEMPT', `unknown attempt ${id}`);
-    return attempt;
+  function openOf(id: AttemptId): Attempt {
+    const attempt = state.getOpen(id);
+    if (attempt !== undefined) return attempt;
+    const closed = state.get(id);
+    if (closed !== undefined) throw new AttemptError('INVALID_TRANSITION', `attempt ${id} is ${closed.state}`);
+    throw new AttemptError('UNKNOWN_ATTEMPT', `unknown attempt ${id}`);
   }
 
-  function store(attempt: Attempt): void {
-    attempts.set(attempt.attemptId, attempt);
-    if (OPEN_STATES.has(attempt.state)) open.add(attempt.attemptId);
-    else open.delete(attempt.attemptId);
-  }
-
-  /** Journal first (durable), then the in-memory state. */
+  /** Journal first (durable), then the in-memory state. Returns the attempt after the event (complete, even when closed). */
   async function commit(event: JournalEvent): Promise<Attempt> {
-    const next = transition(attempts.get(eventAttemptId(event)), event);
+    const next = state.peek(event);
     if (typeof next === 'string') throw new AttemptError('INVALID_TRANSITION', next);
-    await journal.append(event);
-    store(next);
-    return next;
+    const seq = await journal.append(event);
+    state.apply(event, seq);
+    return next as Attempt;
   }
 
   function markUncertain(agent: AgentId, at: Timestamp): void {
@@ -185,7 +159,7 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
 
   async function close(id: AttemptId, outcomes: readonly PixelWriteOutcome[], now: Timestamp, failure: string | null, reported: ResourceObservation | undefined): Promise<Attempt> {
     requireRecovered();
-    const attempt = attemptOf(id);
+    const attempt = openOf(id);
     const tasks = new Set(attempt.writes.map((w) => w.taskId));
     if (outcomes.some((o) => !tasks.has(o.taskId)) || new Set(outcomes.map((o) => o.taskId)).size !== outcomes.length) {
       throw new AttemptError('INVALID_INPUT', 'outcomes must refer to the attempt tasks, once each');
@@ -233,28 +207,31 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
   const manager: AttemptManager = {
     recover: (now) =>
       serialized(async (): Promise<RecoveryReport> => {
-        const loaded = await journal.load();
-        attempts.clear();
-        open.clear();
-        uncertain.clear();
+        let builder = new JournalStateBuilder();
         let inconsistent = 0;
-        for (const event of loaded.events) {
-          const next = transition(attempts.get(eventAttemptId(event)), event);
-          if (typeof next === 'string') inconsistent++;
-          else store(next);
-        }
+        const loaded = await journal.load({
+          checkpoint(checkpoint) {
+            builder = JournalStateBuilder.from(checkpoint);
+          },
+          event(event, seq) {
+            if (builder.apply(event, seq) !== null) inconsistent++;
+          },
+        });
+        state = builder;
+        uncertain.clear();
         recovered = true;
         // The spends recorded before the restart are gone: every agent that
         // started an attempt needs an observation newer than its last close.
-        for (const attempt of attempts.values()) {
-          if (attempt.startedAt !== null && attempt.closedAt !== null) markUncertain(attempt.agent, attempt.closedAt);
+        for (const [agent, at] of state.lastSpendAt()) markUncertain(agent, at);
+        damaged = loaded.corruptLines.length > 0 || loaded.sequenceGaps > 0 || loaded.problems.length > 0 || inconsistent > 0;
+        if (damaged) {
+          // An event may be lost (a lease, a start): no lease anywhere until the canvas is read again.
+          await commit({ type: 'canvas-read-required', at: now, reason: 'recovered from a damaged journal' });
         }
         const released: AttemptId[] = [];
         const toReconcile: AttemptId[] = [];
-        // A damaged journal may have lost a "started" event: reconcile rather than assume.
-        const damaged = loaded.corruptLines.length > 0 || inconsistent > 0;
-        for (const id of [...open]) {
-          const attempt = attemptOf(id);
+        for (const attempt of [...state.openAttempts()]) {
+          const id = attempt.attemptId;
           if (attempt.state === 'leased' && !damaged) {
             await cancelOne(id, 'recovered: never started', now);
             released.push(id);
@@ -262,11 +239,24 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
             markUncertain(attempt.agent, now);
             toReconcile.push(id);
           } else {
+            // A damaged journal may have lost a "started" event: reconcile rather than assume.
             await toReconciliation(attempt, damaged ? 'recovered from a damaged journal' : 'recovered: result unknown', now);
             toReconcile.push(id);
           }
         }
-        return { released, toReconcile, discardedTailBytes: loaded.discardedTailBytes, corruptLines: loaded.corruptLines, inconsistentEvents: inconsistent };
+        return {
+          released,
+          toReconcile,
+          generation: loaded.generation,
+          fromCheckpoint: loaded.fromCheckpoint,
+          discardedTailBytes: loaded.discardedTailBytes,
+          corruptLines: loaded.corruptLines,
+          sequenceGaps: loaded.sequenceGaps,
+          inconsistentEvents: inconsistent,
+          problems: loaded.problems,
+          damaged,
+          canvasReadRequiredAfter: state.canvasReadRequiredAfter,
+        };
       }),
 
     lease: (request: LeaseRequest) =>
@@ -276,6 +266,8 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
         if (writes.length === 0 || !Number.isSafeInteger(ttlMs) || ttlMs <= 0 || !Number.isSafeInteger(now)) {
           throw new AttemptError('INVALID_INPUT', 'a lease needs writes, a positive integer ttl and an integer time');
         }
+        const required = state.canvasReadRequiredAfter;
+        if (required !== null) throw new AttemptError('CANVAS_READ_REQUIRED', `the journal was damaged: confirm a canvas read newer than ${required} first`);
         const points = writes.map((w) => pointKey(w.point));
         if (new Set(points).size !== points.length) throw new AttemptError('INVALID_INPUT', 'a canvas point appears twice in the batch');
         if (new Set(writes.map((w) => w.taskId)).size !== writes.length) throw new AttemptError('INVALID_INPUT', 'a task id appears twice in the batch');
@@ -287,13 +279,13 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
         if (since !== undefined && (observed === undefined || observed.observedAt <= since)) {
           throw new AttemptError('RESOURCES_UNCERTAIN', 'an attempt ended with an unknown energy spending: observe the resources again first');
         }
-        const state = resources.stateAt(agent, now, now);
-        if (state.availability.status !== 'available') throw new AttemptError('AGENT_UNAVAILABLE', `agent ${agent} is unavailable`);
-        const unlocked = new Set(state.unlockedColors);
+        const resourcesNow = resources.stateAt(agent, now, now);
+        if (resourcesNow.availability.status !== 'available') throw new AttemptError('AGENT_UNAVAILABLE', `agent ${agent} is unavailable`);
+        const unlocked = new Set(resourcesNow.unlockedColors);
         const locked = writes.filter((w) => !unlocked.has(w.color)).length;
         if (locked > 0) throw new AttemptError('COLOR_LOCKED', `${locked} write(s) use a color the agent has not unlocked`);
         const energyCost = writes.length * cost;
-        const available = state.energy - manager.committedEnergy(agent);
+        const available = resourcesNow.energy - manager.committedEnergy(agent);
         if (energyCost > available) throw new AttemptError('INSUFFICIENT_ENERGY', `needs ${energyCost}, ${available} available after open attempts`);
         return commit({
           type: 'leased',
@@ -320,7 +312,7 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
     start: (id, now) =>
       serialized(async () => {
         requireRecovered();
-        const attempt = attemptOf(id);
+        const attempt = openOf(id);
         if (attempt.state === 'leased' && now >= attempt.expiresAt) throw new AttemptError('LEASE_EXPIRED', `attempt ${id} expired at ${attempt.expiresAt}: not started`);
         return commit({ type: 'started', attemptId: id, at: now });
       }),
@@ -331,6 +323,7 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
     cancel: (id, reason, now) =>
       serialized(async () => {
         requireRecovered();
+        openOf(id);
         return cancelOne(id, reason, now);
       }),
 
@@ -338,10 +331,9 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
       serialized(async () => {
         requireRecovered();
         const changed: Attempt[] = [];
-        for (const id of [...open]) {
-          const attempt = attemptOf(id);
+        for (const attempt of [...state.openAttempts()]) {
           if (attempt.expiresAt > now) continue;
-          if (attempt.state === 'leased') changed.push(await cancelOne(id, 'lease expired before start', now));
+          if (attempt.state === 'leased') changed.push(await cancelOne(attempt.attemptId, 'lease expired before start', now));
           else if (attempt.state === 'started') changed.push(await toReconciliation(attempt, 'lease expired after start: result unknown', now));
         }
         return changed;
@@ -351,10 +343,9 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
       serialized(async () => {
         requireRecovered();
         const changed: Attempt[] = [];
-        for (const id of [...open]) {
-          const attempt = attemptOf(id);
+        for (const attempt of [...state.openAttempts()]) {
           if (attempt.projectId !== projectId || attempt.templateId !== templateId || attempt.revision >= revision) continue;
-          if (attempt.state === 'leased') changed.push(await cancelOne(id, `superseded by revision ${revision}`, now));
+          if (attempt.state === 'leased') changed.push(await cancelOne(attempt.attemptId, `superseded by revision ${revision}`, now));
           else if (attempt.state === 'started') changed.push(await toReconciliation(attempt, `superseded by revision ${revision} while started`, now));
         }
         return changed;
@@ -363,7 +354,7 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
     reconcile: (id, snapshot: CanvasSnapshot, now) =>
       serialized(async () => {
         requireRecovered();
-        const attempt = attemptOf(id);
+        const attempt = openOf(id);
         if (attempt.state !== 'started' && attempt.state !== 'needs-reconciliation') throw new AttemptError('INVALID_TRANSITION', `attempt ${id} is ${attempt.state}`);
         const after = Math.max(attempt.startedAt ?? attempt.leasedAt, attempt.needsReconciliationAt ?? 0);
         if (snapshot.observedAt <= after) throw new AttemptError('STALE_SNAPSHOT', `reconciliation needs a canvas read taken after ${after}`);
@@ -375,41 +366,74 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
         return closed;
       }),
 
-    get: (id) => attempts.get(id),
-    open: () => [...open].map(attemptOf),
+    confirmCanvasRead: (snapshot, now) =>
+      serialized(async () => {
+        requireRecovered();
+        const required = state.canvasReadRequiredAfter;
+        if (required === null) return;
+        if (snapshot.observedAt <= required) throw new AttemptError('STALE_SNAPSHOT', `the canvas read must be newer than ${required}`);
+        await commit({ type: 'canvas-verified', at: now, observedAt: snapshot.observedAt });
+      }),
+
+    compact: (_now, options = {}) =>
+      serialized(async () => {
+        requireRecovered();
+        if (damaged) throw new AttemptError('JOURNAL_DAMAGED', 'the journal generation is damaged: compaction refused, repair it first (journal tool)');
+        if (options.maxClosedSummaries !== undefined) state.purgeClosed(options.maxClosedSummaries);
+        return journal.compact(state.toState());
+      }),
+
+    get: (id) => state.get(id),
+    open: () => [...state.openAttempts()],
     inFlight() {
       const points = new Set<CanvasPointKey>();
-      for (const id of open) for (const w of attemptOf(id).writes) points.add(pointKey(w.point));
+      for (const a of state.openAttempts()) for (const w of a.writes) points.add(pointKey(w.point));
       return points;
     },
     committedEnergy(agent) {
       // Needs-reconciliation attempts are covered by the uncertainty rule instead.
       let total = 0;
-      for (const id of open) {
-        const a = attemptOf(id);
-        if (a.agent === agent && (a.state === 'leased' || a.state === 'started')) total += a.energyCost;
-      }
+      for (const a of state.openAttempts()) if (a.agent === agent && (a.state === 'leased' || a.state === 'started')) total += a.energyCost;
       return total;
     },
     resourcesUncertainSince: (agent) => uncertain.get(agent) ?? null,
+    canvasReadRequiredAfter: () => state.canvasReadRequiredAfter,
+    state: () => state.toState(),
   };
   return manager;
 }
 
 const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
-/** In-memory journal (tests, simulator): same contract as the file journal, not durable. */
-export function createMemoryJournal(): AttemptJournal & { readonly events: JournalEvent[] } {
-  const events: JournalEvent[] = [];
-  return {
-    events,
-    async load() {
-      return { events: events.map(copy), discardedTailBytes: 0, corruptLines: [] };
+/**
+ * In-memory journal (tests, simulator): same contract as the file journal,
+ * not durable. `events` are those of the current generation (after the
+ * checkpoint); their sequence numbers follow the checkpoint's.
+ */
+export function createMemoryJournal(): AttemptJournal & { events: JournalEvent[]; checkpoint: JournalState | null; generation: number } {
+  const journal = {
+    events: [] as JournalEvent[],
+    checkpoint: null as JournalState | null,
+    generation: 0,
+    async load(visitor: JournalVisitor): Promise<JournalLoadReport> {
+      const base = journal.checkpoint?.lastSeq ?? 0;
+      if (journal.checkpoint !== null) visitor.checkpoint(copy(journal.checkpoint));
+      journal.events.forEach((e, i) => visitor.event(copy(e), base + i + 1));
+      return { generation: journal.generation, fromCheckpoint: journal.checkpoint !== null, lastSeq: base + journal.events.length, discardedTailBytes: 0, corruptLines: [], sequenceGaps: 0, problems: [] };
     },
-    async append(event) {
-      events.push(copy(event));
+    async append(event: JournalEvent): Promise<number> {
+      journal.events.push(copy(event));
+      return (journal.checkpoint?.lastSeq ?? 0) + journal.events.length;
+    },
+    async compact(next: JournalState): Promise<CompactionReport> {
+      const previousGeneration = journal.generation;
+      journal.checkpoint = copy(next);
+      journal.events = [];
+      journal.generation++;
+      return { previousGeneration, generation: journal.generation, lastSeq: next.lastSeq, checkpointBytes: JSON.stringify(next).length, openAttempts: next.open.length, closedSummaries: next.closed.length, removedGenerations: [], retentionPending: [] };
     },
   };
+  return journal;
 }
 
 /** In-memory history store (tests, simulator). */

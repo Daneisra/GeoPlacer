@@ -9,6 +9,10 @@
  * Phase 1B.6 (contracts v7): planning by order keys with an explicit policy
  * for unknown pixels and stale data; attempts with explicit states and
  * reconciliation; no promise of exactly-once execution.
+ *
+ * Phase 1B.7 (contracts v8): sequence numbers, checkpoints and journal
+ * generations (compaction), closed attempts kept as summaries, canvas read
+ * required after damage.
  */
 
 import type { CanvasSnapshot, CanvasSource, PixelWrite, PixelWriteOutcome } from './canvas.js';
@@ -150,7 +154,7 @@ export interface Attempt {
   readonly reason: string | null;
 }
 
-/** Append-only journal entries (one JSON line each). */
+/** Append-only journal entries (one checksummed line each, with a sequence number). */
 export type JournalEvent =
   | { readonly type: 'leased'; readonly attempt: Attempt }
   | { readonly type: 'started'; readonly attemptId: AttemptId; readonly at: Timestamp }
@@ -163,20 +167,108 @@ export type JournalEvent =
       readonly attemptId: AttemptId;
       readonly at: Timestamp;
       readonly results: readonly { readonly taskId: PixelWrite['taskId']; readonly result: 'observed-correct' | 'observed-incorrect' | 'observed-unknown' }[];
-    };
+    }
+  /** Phase 1B.7: the journal was found damaged; no lease until a canvas read newer than `at`. */
+  | { readonly type: 'canvas-read-required'; readonly at: Timestamp; readonly reason: string }
+  /** Phase 1B.7: a canvas read taken at `observedAt` (> the requirement) lifts it. */
+  | { readonly type: 'canvas-verified'; readonly at: Timestamp; readonly observedAt: Timestamp };
 
-export interface JournalLoad {
-  readonly events: readonly JournalEvent[];
+/**
+ * A closed attempt kept as a summary (Phase 1B.7): no pixels, so that the
+ * memory and the checkpoints stay small. Retained up to a configurable
+ * number; the journal generations and the history keep the details.
+ */
+export interface ClosedAttempt {
+  readonly attemptId: AttemptId;
+  readonly agent: AgentId;
+  readonly projectId: ProjectId;
+  readonly templateId: TemplateId;
+  readonly revision: number;
+  readonly state: 'finished' | 'failed' | 'cancelled';
+  readonly leasedAt: Timestamp;
+  readonly startedAt: Timestamp | null;
+  readonly closedAt: Timestamp;
+  readonly pixels: number;
+  /** Pixels reported applied (energy spent through the ResourceManager, operation id = attempt id). */
+  readonly applied: number;
+  /** Closed by reconciliation (observed results, spending unknown). */
+  readonly reconciled: boolean;
+}
+
+/**
+ * Logical state of the attempts (Phase 1B.7): what a full replay of the
+ * journal produces, and what a checkpoint stores. Rebuilding from a
+ * checkpoint plus the later events must give the same state.
+ */
+export interface JournalState {
+  readonly schemaVersion: 1;
+  /** Sequence number of the last event included (0: none). */
+  readonly lastSeq: number;
+  /** Open attempts, complete (leased, started, needs-reconciliation), by attempt id. */
+  readonly open: readonly Attempt[];
+  /** Retained summaries of closed attempts, by close time then id. */
+  readonly closed: readonly ClosedAttempt[];
+  /** Closed summaries dropped by the retention (never their uncertainty, kept below). */
+  readonly purgedClosed: number;
+  /**
+   * Per agent: last close of an attempt that was started. The spends
+   * recorded in memory do not survive a restart: after a recovery, the
+   * agent needs a resource observation newer than this. Explicit, so that
+   * it survives the retention of the summaries.
+   */
+  readonly lastSpendAt: readonly { readonly agent: AgentId; readonly at: Timestamp }[];
+  /** Damage seen: no lease until a canvas read newer than this (null: none). */
+  readonly canvasReadRequiredAfter: Timestamp | null;
+  /** Damaged journal generations: never deleted by the retention. */
+  readonly preservedGenerations: readonly number[];
+}
+
+/** Receives the recovered state: at most one checkpoint, then the later events in order. */
+export interface JournalVisitor {
+  checkpoint(state: JournalState): void;
+  /** `seq` is null for a line written before Phase 1B.7 (no sequence number). */
+  event(event: JournalEvent, seq: number | null): void;
+}
+
+export interface JournalLoadReport {
+  /** Generation read (0: the journal of Phase 1B.6, without checkpoint). */
+  readonly generation: number;
+  readonly fromCheckpoint: boolean;
+  /** Last sequence number seen (checkpoint or events). */
+  readonly lastSeq: number;
   /** A torn last line (interrupted append): ignored. */
   readonly discardedTailBytes: number;
   /** Damaged lines BEFORE the end (checksum or format): reported, never silently skipped. */
   readonly corruptLines: readonly number[];
+  /** Missing or out-of-order sequence numbers. */
+  readonly sequenceGaps: number;
+  /** Other damage that makes the state uncertain (e.g. checkpoint fallback). */
+  readonly problems: readonly string[];
+}
+
+export interface CompactionReport {
+  readonly previousGeneration: number;
+  readonly generation: number;
+  readonly lastSeq: number;
+  readonly checkpointBytes: number;
+  readonly openAttempts: number;
+  readonly closedSummaries: number;
+  /** Older generations deleted by the retention. */
+  readonly removedGenerations: readonly number[];
+  /** Deletions that failed: retried at the next compaction (never fatal). */
+  readonly retentionPending: readonly number[];
 }
 
 export interface AttemptJournal {
-  load(): Promise<JournalLoad>;
-  /** Durable before returning (the attempt state machine relies on it). */
-  append(event: JournalEvent): Promise<void>;
+  load(visitor: JournalVisitor): Promise<JournalLoadReport>;
+  /** Durable before returning (the attempt state machine relies on it); returns the sequence number. */
+  append(event: JournalEvent): Promise<number>;
+  /**
+   * Writes `state` as the checkpoint of a new generation, publishes it, then
+   * applies the retention. Never deletes data before the new generation is
+   * verified and published; an interruption leaves the previous one in use.
+   */
+  compact(state: JournalState): Promise<CompactionReport>;
 }
 
 export interface HistoryEntry {
@@ -222,10 +314,23 @@ export interface RecoveryReport {
   readonly released: readonly AttemptId[];
   /** Started without a closing event: to reconcile against a fresh canvas read. */
   readonly toReconcile: readonly AttemptId[];
+  readonly generation: number;
+  readonly fromCheckpoint: boolean;
   readonly discardedTailBytes: number;
   readonly corruptLines: readonly number[];
+  readonly sequenceGaps: number;
   /** Journal events that were not valid transitions (ignored, reported). */
   readonly inconsistentEvents: number;
+  readonly problems: readonly string[];
+  /** Damage of any kind: open attempts are reconciled, compaction is refused. */
+  readonly damaged: boolean;
+  /** No lease until a canvas read newer than this (null: none). */
+  readonly canvasReadRequiredAfter: Timestamp | null;
+}
+
+export interface CompactOptions {
+  /** Closed summaries kept (oldest dropped first); default: all. */
+  readonly maxClosedSummaries?: number;
 }
 
 export interface AttemptManager {
@@ -257,7 +362,8 @@ export interface AttemptManager {
    * the start and a crash may predate the write).
    */
   reconcile(attemptId: AttemptId, snapshot: CanvasSnapshot, now: Timestamp): Promise<Attempt>;
-  get(attemptId: AttemptId): Attempt | undefined;
+  /** Open attempts complete; closed ones as summaries (while retained). */
+  get(attemptId: AttemptId): Attempt | ClosedAttempt | undefined;
   open(): readonly Attempt[];
   /** Canvas points of open attempts (leased, started, needs-reconciliation). */
   inFlight(): ReadonlySet<CanvasPointKey>;
@@ -269,4 +375,12 @@ export interface AttemptManager {
    * are not kept, so a newer observation is required.
    */
   resourcesUncertainSince(agent: AgentId): Timestamp | null;
+  /** No lease until a canvas read newer than this (damage seen; null: none). */
+  canvasReadRequiredAfter(): Timestamp | null;
+  /** Journals a canvas read newer than the requirement, which lifts it. */
+  confirmCanvasRead(snapshot: CanvasSnapshot, now: Timestamp): Promise<void>;
+  /** The logical state (what a checkpoint stores). */
+  state(): JournalState;
+  /** Writes a checkpoint and starts a new journal generation; refused on a damaged journal (repair first). */
+  compact(now: Timestamp, options?: CompactOptions): Promise<CompactionReport>;
 }

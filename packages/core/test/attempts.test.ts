@@ -4,6 +4,7 @@ import type {
   Attempt,
   AttemptJournal,
   AttemptManager,
+  DecodedJournal,
   JournalEvent,
   PixelWrite,
   PreparedTemplate,
@@ -133,6 +134,21 @@ class World {
   }
 }
 
+/** A journal over decoded lines (no checkpoint): appends are kept in memory. */
+function decodedJournal(decoded: DecodedJournal): AttemptJournal {
+  let lastSeq = decoded.entries.reduce((m, e) => Math.max(m, e.seq ?? 0), 0);
+  return {
+    async load(visitor) {
+      for (const { event, seq } of decoded.entries) visitor.event(event, seq);
+      return { generation: 0, fromCheckpoint: false, lastSeq, discardedTailBytes: decoded.discardedTailBytes, corruptLines: decoded.corruptLines, sequenceGaps: 0, problems: [] };
+    },
+    append: async () => ++lastSeq,
+    compact: async () => {
+      throw new Error('not supported');
+    },
+  };
+}
+
 const writesOf = (points: readonly [number, number][], color = RED, prefix = 'projet/modele@1'): PixelWrite[] =>
   points.map(([x, y]) => ({ taskId: `${prefix}:${x},${y}:#${color.toString(16).padStart(6, '0')}` as TaskId, point: { x, y }, color }));
 
@@ -188,7 +204,7 @@ describe('AttemptManager: life cycle', () => {
     const b = await w.lease(t, A1, writesOf([[0, 0]]));
     await w.manager.start(b.attemptId, w.tick());
     expect(await code(w.manager.cancel(b.attemptId, 'user', w.tick()))).toBe('INVALID_TRANSITION');
-    expect(await code(w.manager.finish(a.attemptId, [], w.tick()))).toBe('INVALID_INPUT');
+    expect(await code(w.manager.finish(a.attemptId, [], w.tick()))).toBe('INVALID_TRANSITION'); // closed (cancelled)
     expect(w.resources.recordedSpends(A1)).toEqual([]);
   });
 
@@ -406,7 +422,7 @@ describe('AttemptManager: recovery', () => {
     // Restart: a new manager over the same journal, a ResourceManager that knows nothing.
     w.manager = w.newManager();
     const report = await w.manager.recover(w.tick());
-    expect(report).toEqual({ released: [leased.attemptId], toReconcile: [started.attemptId], discardedTailBytes: 0, corruptLines: [], inconsistentEvents: 0 });
+    expect(report).toEqual({ released: [leased.attemptId], toReconcile: [started.attemptId], generation: 0, fromCheckpoint: false, discardedTailBytes: 0, corruptLines: [], sequenceGaps: 0, inconsistentEvents: 0, problems: [], damaged: false, canvasReadRequiredAfter: null });
     expect(w.manager.get(leased.attemptId)?.state).toBe('cancelled');
     expect(w.manager.get(done.attemptId)?.state).toBe('finished');
     expect([...w.manager.inFlight()]).toEqual(['1,0']);
@@ -464,7 +480,7 @@ describe('AttemptManager: recovery', () => {
     const early = w.sim.snapshot(w.tick(10));
     await w.manager.expire(w.tick(100));
     expect(await code(w.manager.reconcile(a.attemptId, early, w.tick()))).toBe('STALE_SNAPSHOT');
-    expect(w.manager.get(a.attemptId)?.needsReconciliationAt).toBe(w.now - 1);
+    expect((w.manager.get(a.attemptId) as Attempt).needsReconciliationAt).toBe(w.now - 1);
   });
 
   it('no double consumption: a resource observation returned with the write is observed instead of spending', async () => {
@@ -510,13 +526,12 @@ describe('AttemptManager: recovery', () => {
     const a = await w.lease(t, A1, writesOf([[0, 0]]));
     const b = await w.lease(t, A1, writesOf([[1, 0]]));
     await w.manager.start(b.attemptId, w.tick());
-    const text = w.journal.events.map(encodeJournalLine).join('');
+    const text = w.journal.events.map((e, i) => encodeJournalLine(e, i + 1)).join('');
     const bytes = new TextEncoder().encode(text);
     bytes[text.indexOf('"started"') + 3]! ^= 0x01; // damage the "started" line
     const decoded = decodeJournal(bytes);
     expect(decoded.corruptLines).toEqual([3]);
-    const journal = { events: [] as JournalEvent[], load: async () => decoded, append: async (e: JournalEvent) => void journal.events.push(e) };
-    const manager = createAttemptManager({ journal, history: createMemoryHistory(), resources: createResourceManager(R), newAttemptId: () => 'x' as never });
+    const manager = createAttemptManager({ journal: decodedJournal(decoded), history: createMemoryHistory(), resources: createResourceManager(R), newAttemptId: () => 'x' as never });
     const report = await manager.recover(w.tick());
     // "started" was lost: b looks leased, but it may have been sent; nothing is released.
     expect(report).toMatchObject({ released: [], toReconcile: [a.attemptId, b.attemptId], corruptLines: [3] });
@@ -528,10 +543,10 @@ describe('AttemptManager: recovery', () => {
     await w.manager.recover(w.now);
     w.observe(A1);
     const a = await w.lease(t, A1, writesOf([[0, 0]]));
-    const full = w.journal.events.map(encodeJournalLine).join('') + encodeJournalLine({ type: 'started', attemptId: a.attemptId, at: w.tick() }).slice(0, 20);
+    const full = w.journal.events.map((e, i) => encodeJournalLine(e, i + 1)).join('') + encodeJournalLine({ type: 'started', attemptId: a.attemptId, at: w.tick() }, w.journal.events.length + 1).slice(0, 20);
     const decoded = decodeJournal(new TextEncoder().encode(full));
     expect(decoded).toMatchObject({ discardedTailBytes: 20, corruptLines: [] });
-    const manager = createAttemptManager({ journal: { load: async () => decoded, append: async () => undefined }, history: createMemoryHistory(), resources: createResourceManager(R), newAttemptId: () => 'x' as never });
+    const manager = createAttemptManager({ journal: decodedJournal(decoded), history: createMemoryHistory(), resources: createResourceManager(R), newAttemptId: () => 'x' as never });
     // The torn "started" was never durable, so the write was never sent (start is journaled before it).
     expect(await manager.recover(w.tick())).toMatchObject({ released: [a.attemptId], toReconcile: [] });
   });

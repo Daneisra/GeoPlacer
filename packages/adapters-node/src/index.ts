@@ -19,7 +19,21 @@ export {
   type LockOptions,
   type LockOwner,
 } from './lock.js';
-export { FileAttemptJournal, FileHistoryStore } from './attempt-journal.js';
+export {
+  FileAttemptJournal,
+  FileHistoryStore,
+  JournalOpenError,
+  checkpointName,
+  decodePointer,
+  encodePointer,
+  generationsIn,
+  logName,
+  type FileAttemptJournalOptions,
+  type FileHistoryStoreOptions,
+  type FileJournalStatus,
+  type JournalOpenErrorCode,
+} from './attempt-journal.js';
+export { nodeJournalFs, type AppendHandle, type JournalFs } from './journal-fs.js';
 export { FileOrderCacheStore } from './order-cache.js';
 export { pngjsCodec } from './png-codec.js';
 export { NodeTemplateStorage, type NodeTemplateStorageOptions } from './storage.js';
