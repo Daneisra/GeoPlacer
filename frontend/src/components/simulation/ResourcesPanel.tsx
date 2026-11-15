@@ -36,14 +36,17 @@ export function ResourcesPanel({ status }: { status: EngineStatus | null }) {
     []
   );
   const state = status?.state;
+  const writing = state === 'running' || state === 'initializing' || state === 'waiting-resources' || state === 'waiting-reconciliation';
   const revision = status?.selection?.revision;
+  // Every 3 s on a steady timer; again at once when the simulation starts or stops writing, or the
+  // template changes (not at each running / waiting alternation: that would spend the rate limit).
+  useEffect(() => {
+    const timer = setInterval(() => void refresh(), 3_000);
+    return () => clearInterval(timer);
+  }, [refresh]);
   useEffect(() => {
     void refresh();
-    const timer = setInterval(() => void refresh(), 2_000);
-    return () => clearInterval(timer);
-  }, [refresh, state, revision]);
-
-  const writing = state === 'running' || state === 'initializing' || state === 'waiting-resources' || state === 'waiting-reconciliation';
+  }, [refresh, writing, revision]);
   const apply = async (p: UpgradeProposal) => {
     const text = `Appliquer l’amélioration simulée « ${proposalTitle(p)} » pour ${p.cost ?? '?'} unités de monnaie simulée ?\n\nElle ne modifie que l’état local de la simulation (aucun achat réel).`;
     if (!window.confirm(text)) return;

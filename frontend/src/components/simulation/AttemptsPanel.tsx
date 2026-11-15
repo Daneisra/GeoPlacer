@@ -20,22 +20,26 @@ const STATE_LABELS: Record<string, string> = {
 };
 
 /** The work queue: attempts in flight (from the journal) and the latest closed ones (from the events). */
-export function AttemptsPanel({ status, recent }: { status: EngineStatus | null; recent: readonly AttemptSummary[] }) {
+export function AttemptsPanel({ recent }: { status: EngineStatus | null; recent: readonly AttemptSummary[] }) {
   const [open, setOpen] = useState<OpenAttempt[]>([]);
-  const openCount = status?.journal.openAttempts ?? 0;
-  const lastActivity = status?.lastActivityAt ?? 0;
+  // Read every 3 s, on a timer that status events never reset (they come up to 4 times per second and
+  // open attempts come and go at every batch): the server's rate limit is shared by all tabs.
   useEffect(() => {
     let cancelled = false;
-    void engineHttp
-      .get<{ open: OpenAttempt[] }>('/engine/attempts')
-      .then((r) => {
-        if (!cancelled) setOpen(r.data.open);
-      })
-      .catch(() => undefined);
+    const read = () =>
+      engineHttp
+        .get<{ open: OpenAttempt[] }>('/engine/attempts')
+        .then((r) => {
+          if (!cancelled) setOpen(r.data.open);
+        })
+        .catch(() => undefined);
+    void read();
+    const timer = setInterval(() => void read(), 3_000);
     return () => {
       cancelled = true;
+      clearInterval(timer);
     };
-  }, [openCount, lastActivity]);
+  }, []);
   return (
     <Card id="attemptsPanel">
       <CardHeader className="pb-2">
