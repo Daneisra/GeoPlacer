@@ -31,6 +31,11 @@ En plus, sous `/api/v1` :
 Aucune route n'expose de secret. Les réponses portent
 `Cache-Control: no-store`.
 
+Le limiteur de débit est commun à toutes les routes et à tous les
+onglets. Un onglet du tableau de bord fait environ 52 requêtes par minute
+(mesuré). Les mises à jour en direct passent par le WebSocket, qui n'est
+pas limité.
+
 ## 2. Format des erreurs
 
 ```json
@@ -95,7 +100,7 @@ Les commandes répondent `{ "changed": boolean, "status": … }`.
 | `POST /api/v1/simulator/reset` | `{ "confirm": "RESET" }` | Nouveau monde simulé vide ; l'ancien est **conservé** dans `world-reset-<date>` |
 | `POST /api/v1/simulator/agent/reset` | `{}` | Remet l'agent simulé à ses ressources de départ |
 | `POST /api/v1/simulator/external-edit` | `{ "count" }` | Démonstration : un « autre acteur » efface jusqu'à `count` pixels du modèle (détectés, puis repeints) |
-| `GET /api/v1/simulator/canvas` | `?x&y&w&h` (les quatre, ou aucun) | Région de la toile (par défaut, la zone du modèle sélectionné) avec le numéro de séquence qu'elle inclut (voir [websocket.md](websocket.md)). 2048 × 2048 pixels au plus |
+| `GET /api/v1/simulator/canvas` | `?x&y&w&h` (les quatre, ou aucun) | Région de la toile (par défaut, la zone du modèle sélectionné) avec le numéro de séquence qu'elle inclut (voir [websocket.md](websocket.md)). 2048 × 2048 pixels au plus ; par défaut, un modèle plus grand est limité à son coin supérieur gauche (`truncated: true`) |
 
 ### Ressources et améliorations simulées
 

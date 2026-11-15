@@ -136,8 +136,13 @@ completed`. Le détail est dans le guide utilisateur, § 4.
 
 **Une seule instance par dossier de moteur** : un second `npm start` sur
 le même dossier s'arrête aussitôt (code 2) avec « already used by another
-GeoPlacer instance ». Pour deux instances, donner à la seconde un autre
-dossier (`GEOPLACER_ENGINE_DIR`) **et** un autre port.
+GeoPlacer instance ». Pour deux instances, lancer la seconde depuis un
+**autre dossier de travail**, avec un autre port. Changer seulement
+`GEOPLACER_ENGINE_DIR` ne suffit pas : les fichiers hérités
+`data\*.json` resteraient partagés.
+
+`start.bat`, `start.sh`, `npm start`, `npm run dev` et `npm run
+dev:backend` construisent d'abord les paquets du moteur (Phase 1B.9).
 
 ### Mode développement (corrigé en Phase 1B.3)
 

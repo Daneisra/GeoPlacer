@@ -128,6 +128,44 @@ abondante, latence nulle) :
 | Checkpoint de la toile 2048² avec compactage | 148 ms | — |
 | Mémoire maximale du processus | 230 Mio | 141 Mio |
 
+**Long essai dans Edge** (relecture de la phase), avec les réglages **par
+défaut** (énergie 300, régénération 200 ms), un modèle de 350², deux
+onglets, 150 s :
+- l'attente de ressources a lieu ;
+- aucune réponse 429, aucune requête en échec, aucune erreur console ;
+- aucune tâche longue (> 50 ms) dans le navigateur ; tas JavaScript de 6
+  à 9 Mio ;
+- environ 4 messages WebSocket par seconde ;
+- la pause est vue dans l'autre onglet, 60 ms après le clic.
+
+**Correction trouvée par cet essai** : 93 requêtes par minute et par
+onglet. Les panneaux relançaient leur lecture à chaque alternance entre
+« En cours » et « Attente ressources », soit à chaque lot. Elles sont
+maintenant sur des minuteries fixes : **52 requêtes par minute**, cinq
+onglets sous la limite de 300.
+
+Navigateur sur un modèle de **2000²** :
+- premier affichage de la toile en 620 à 645 ms ;
+- 20 s de simulation (106 000 pixels) sans tâche longue, tas de 41 Mio ;
+- pause en 200 ms.
+
+**Mode développement** (`npm run dev`) : le tableau de bord à travers le
+proxy de Vite fonctionne. Le WebSocket est connecté, l'API `/api/v1` et
+les routes héritées répondent 200, sans erreur console.
+
+**Tests ajoutés après la relecture** (`service-waits.test.ts` et
+`crash.test.ts`) :
+- attente de régénération sur horloge réelle jusqu'à la fin, sans boucle
+  active ; pause et arrêt pendant une attente, puis redémarrage ;
+- checkpoints automatiques de la toile (seuil réglable), y compris un
+  vrai processus tué au milieu d'un checkpoint ;
+- reprise documentée d'un monde endommagé par réinitialisation
+  explicite ;
+- sélection jamais remplacée par la consultation d'un autre modèle.
+
+Côté serveur, un canal WebSocket est refusé pour une origine d'extension,
+et un client lent est resynchronisé même sans nouvel événement.
+
 Le navigateur n'est jamais bloqué : les calculs ont lieu dans le serveur.
 En 2000², une requête peut attendre jusqu'à environ 0,2 s pendant un
 cycle. La piste d'optimisation est une progression incrémentale dans

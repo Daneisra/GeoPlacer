@@ -28,7 +28,8 @@ Le moteur garde ses données dans `data\engine`, ou dans
 
 Un seul GeoPlacer peut utiliser ce dossier. Un second démarrage est
 **refusé** avec le message « already used by another GeoPlacer
-instance » et le code de sortie 2. Rien n'est écrit.
+instance » et le code de sortie 2. Rien n'est écrit dans le dossier du
+moteur.
 
 ## 2. Parcours
 
@@ -109,4 +110,12 @@ commandes (O/N) ? » après l'arrêt : répondre O.
 - Les messages du moteur (raisons d'état, erreurs) sont en anglais.
 - Les anciennes pages (Users, Templates, Settings, Logs) concernent le
   code hérité. Le démarrage hérité y reste désactivé, et le keep-alive
-  hérité est coupé par défaut.
+  hérité est coupé par défaut. Une action explicite sur un compte (ajout,
+  vérification) pourrait encore contacter Wplace : ne pas y saisir de
+  vrai compte.
+- Chaque onglet ouvert interroge le serveur environ 52 fois par minute.
+  Le limiteur de débit par défaut (300 par minute, partagé) tient donc
+  cinq onglets ; au-delà, des commandes peuvent recevoir un refus 429.
+- Un modèle de plus de 2048 × 2048 pixels n'est affiché qu'en partie : son
+  coin supérieur gauche (`truncated`). La simulation, elle, porte sur tout
+  le modèle.

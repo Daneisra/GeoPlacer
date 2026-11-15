@@ -49,9 +49,14 @@ Aucun de ces fichiers ne contient de secret.
 
 - Les lignes `[engine]` décrivent l'ouverture du monde, les tentatives
   interrompues, la fin d'une simulation et les erreurs.
-- Au démarrage, les lignes « Engine ready: local simulation only » et
-  « Inherited keep-alive disabled » confirment qu'aucun service réel n'est
-  contacté.
+- Au démarrage, deux lignes confirment qu'aucun accès **automatique** à
+  un service réel n'a lieu : le moteur ne travaille que sur la toile
+  simulée, et le keep-alive hérité est coupé :
+  - « Engine ready: local simulation only » ;
+  - « Inherited keep-alive disabled ».
+- Les pages héritées (Users, Templates…) contiennent encore du code
+  capable de contacter Wplace **sur une action explicite** : ajout ou
+  vérification d'un compte. Ne pas les utiliser avec un vrai compte.
 
 ## 5. Mesures
 

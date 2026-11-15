@@ -1,8 +1,9 @@
 # WebSocket du moteur : `/api/v1/ws` (Phase 1B.9)
 
 Un canal temps réel par onglet. Il est soumis aux mêmes contrôles `Host` et
-`Origin` que l'API. Le WebSocket des journaux hérité reste disponible sur
-les autres chemins.
+`Origin` que l'API. Comme pour `/api/v1`, une origine d'extension de
+navigateur est refusée : la connexion est fermée avec le code 1008. Le
+WebSocket des journaux hérité reste disponible sur les autres chemins.
 
 ## 1. Messages du serveur
 
@@ -47,8 +48,10 @@ intervalle, ou une demande de relecture.
 ## 3. Fiabilité
 
 - **Client lent** : au-delà de 1 Mio en attente d'envoi, ses événements
-  sont abandonnés. Il ne ralentit ni le moteur ni les autres clients. Une
-  fois rattrapé, il reçoit `resync`, puis `canvas-resync`.
+  sont abandonnés. Il ne ralentit ni le moteur ni les autres clients. Son
+  tampon est vérifié toutes les 500 ms. Dès qu'il est rattrapé, il reçoit
+  `resync`, puis `canvas-resync`, même si le moteur n'envoie plus rien
+  (simulation terminée).
 - **Déconnexion** : elle désabonne seulement le client ; la simulation
   continue. C'est vérifié par un vrai serveur dans les tests.
 - **Indépendance** : le journal des tentatives ne dépend jamais du
