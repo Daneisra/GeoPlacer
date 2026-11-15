@@ -38,6 +38,19 @@ Phase 1B.8 : les tests passent sans cette étape, le build la requiert.
   ajouté ;
 - build : réussi.
 
+**Clone neuf** (installation documentée de
+[installation-windows.md](installation-windows.md) § 3) :
+- installation ;
+- 488 tests Vitest + 1 ignoré, 122 tests Jest ;
+- construction ;
+- démarrage réel du serveur compilé : « Engine ready: local simulation
+  only », API `/api/v1/engine/status` en 200, interface servie.
+
+Sans l'étape 2 (binaire précompilé de `canvas`), le serveur hérité ne
+démarre pas (`Cannot find module '../build/Release/canvas.node'`). Les
+deux tests du vrai serveur échouent alors, et le test affiche désormais
+la sortie du serveur. Le binaire téléchargé a l'empreinte documentée.
+
 | Où | Fichier | Couvre |
 |---|---|---|
 | engine-service | `world-store.test.ts` | Toile durable : restauration (pixels, énergie dépensée une fois), checkpoints, échec d'enregistrement sans effet, ligne déchirée coupée, dommage et identité refusés, restes d'un checkpoint interrompu ; **vrais processus tués à 9 étapes nommées** |

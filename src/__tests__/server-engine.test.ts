@@ -59,6 +59,11 @@ async function startServer(cwd: string): Promise<Server> {
   return { proc, port: first.kind === 'listening' ? first.p : port, exit, output: () => out };
 }
 
+/** Fails with the server's own output when it did not start (e.g. the canvas binary missing on a fresh clone). */
+function assertRunning(s: Server): void {
+  if (s.proc.exitCode !== null) throw new Error(`the server exited (${s.proc.exitCode}) instead of listening:\n${s.output().slice(-2000)}`);
+}
+
 async function stopServer(s: Server): Promise<number | null> {
   if (s.proc.exitCode === null) s.proc.send('shutdown');
   return s.exit;
@@ -168,7 +173,7 @@ describe('server with the engine (real processes)', () => {
     const dir = await workDir();
     const a = await startServer(dir);
     servers.push(a);
-    expect(a.proc.exitCode).toBeNull();
+    assertRunning(a);
     expect(a.output()).toContain('local simulation only');
     const { id, paintable } = await prepare(a.port, 24);
 
@@ -207,6 +212,7 @@ describe('server with the engine (real processes)', () => {
     expect(a.output()).toMatch(/Engine stopped and data directory released/);
     const c = await startServer(dir);
     servers.push(c);
+    assertRunning(c);
     const status = (await call(c.port, 'GET', '/api/v1/engine/status')).body;
     expect(status.selection.templateId).toBe(id);
     expect((await call(c.port, 'GET', '/api/v1/resources')).body.energy).toBe(2000 - paintable);
@@ -220,6 +226,7 @@ describe('server with the engine (real processes)', () => {
     const dir = await workDir();
     const a = await startServer(dir);
     servers.push(a);
+    assertRunning(a);
     const { paintable } = await prepare(a.port, 30);
     await call(a.port, 'POST', '/api/v1/engine/start', {});
     await until(() => call(a.port, 'GET', '/api/v1/engine/status'), (r) => (r.body.scheduler?.applied ?? 0) > 100);
@@ -227,6 +234,7 @@ describe('server with the engine (real processes)', () => {
     await a.exit;
     const b = await startServer(dir);
     servers.push(b);
+    assertRunning(b);
     const before = (await call(b.port, 'GET', '/api/v1/engine/status')).body;
     expect(before.world.available).toBe(true);
     await call(b.port, 'POST', '/api/v1/engine/start', {});
