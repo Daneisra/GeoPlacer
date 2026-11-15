@@ -530,9 +530,16 @@ async function startServer(): Promise<void> {
       });
     }, WS_PING_INTERVAL_MS);
 
-    // Start keep-alive interval using configured value
-    const keepAliveInterval = setInterval(runKeepAlive, KEEP_ALIVE_INTERVAL_MS);
-    serverState.intervals.push(keepAliveInterval);
+    // GeoPlacer (Phase 1B.9): the inherited keep-alive logs every stored account into Wplace on a
+    // timer, an automated access to a real service. It is OFF unless explicitly enabled
+    // (LEGACY_KEEPALIVE=1); the new engine never uses it (local simulation only).
+    if (process.env.LEGACY_KEEPALIVE === '1') {
+      logger.warn('LEGACY_KEEPALIVE=1: the inherited keep-alive will contact Wplace for the stored accounts.');
+      const keepAliveInterval = setInterval(runKeepAlive, KEEP_ALIVE_INTERVAL_MS);
+      serverState.intervals.push(keepAliveInterval);
+    } else {
+      logger.info('Inherited keep-alive disabled (no automated access to a real service).');
+    }
 
     // Register graceful shutdown handlers
     process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
