@@ -31,3 +31,9 @@ dist/
 *.tsbuildinfo
 # Complete test logs (scripts/run-logged.mjs)
 test-logs/
+
+# GeoPlacer backups (Phase 1B.10): user data, never committed
+sauvegardes/
+data.avant-restauration-*/
+*.restauration-*.partial/
+*.restauration.json

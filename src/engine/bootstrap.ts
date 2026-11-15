@@ -29,11 +29,20 @@ export function engineDataDir(env: NodeJS.ProcessEnv, dataDir: string): string {
   return path.resolve(configured !== undefined && configured !== '' ? configured : path.join(dataDir, 'engine'));
 }
 
+/** Backups (Phase 1B.10): GEOPLACER_BACKUP_DIR, or `sauvegardes` in the working directory (as `npm run backup`). */
+export function backupDir(env: NodeJS.ProcessEnv): string {
+  const configured = env.GEOPLACER_BACKUP_DIR?.trim();
+  return path.resolve(configured !== undefined && configured !== '' ? configured : 'sauvegardes');
+}
+
 export async function openEngine(dataDir: string, log: (level: 'info' | 'warn' | 'error', message: string) => void): Promise<OpenedEngine> {
   let service: EngineService;
   try {
-    service = await EngineService.open({ dataDir, log });
+    service = await EngineService.open({ dataDir, log, backupDir: backupDir(process.env) });
   } catch (error) {
+    if ((error as { code?: unknown }).code === 'RESTORE_IN_PROGRESS') {
+      throw new EngineLockedError(`an interrupted restore must be finished first: run "npm run restore -- --resume" (GeoPlacer stopped)`);
+    }
     if ((error as { code?: unknown }).code === 'DATA_DIRECTORY_LOCKED') {
       throw new EngineLockedError(`${(error as Error).message}. Stop the other instance, or give this one another directory (GEOPLACER_ENGINE_DIR).`);
     }

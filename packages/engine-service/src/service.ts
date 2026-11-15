@@ -84,6 +84,7 @@ import {
   type SimulatorSettings,
 } from './settings.js';
 import { FileWorldStore, WorldStoreError, type FileWorldStoreOptions, type WorldIdentity } from './world-store.js';
+import { assertNoRestoreInProgress, createBackup, type BackupManifest } from './backup.js';
 
 export type EngineErrorCode =
   | 'NO_TEMPLATE_SELECTED'
@@ -101,6 +102,7 @@ export type EngineErrorCode =
   | 'STALE_PROPOSAL'
   | 'UPGRADE_REFUSED'
   | 'INVALID_REQUEST'
+  | 'BACKUP_FAILED'
   | 'ENGINE_CLOSED';
 
 /** A refused command: stable code, HTTP status suggestion, readable message. */
@@ -136,6 +138,8 @@ export interface EngineServiceOptions {
   readonly worldStore?: FileWorldStoreOptions;
   /** World checkpoint after this many logged changes (default WORLD_CHECKPOINT_RECORDS). */
   readonly worldCheckpointRecords?: number;
+  /** Where backups are written (default: `<dataDir>/../sauvegardes`); never chosen by a client. */
+  readonly backupDir?: string;
 }
 
 export interface CommandResult {
@@ -249,6 +253,8 @@ export class EngineService {
   private closed = false;
   private readonly worldStoreOptions: FileWorldStoreOptions;
   private readonly checkpointRecords: number;
+  private readonly backupDir: string;
+  private backingUp = false;
   /** Decoded templates by id (current revision only), a few at most. */
   private readonly templateCache = new Map<string, Template>();
 
@@ -261,6 +267,7 @@ export class EngineService {
     this.log = options.log ?? (() => undefined);
     this.worldStoreOptions = options.worldStore ?? {};
     this.checkpointRecords = options.worldCheckpointRecords ?? WORLD_CHECKPOINT_RECORDS;
+    this.backupDir = path.resolve(options.backupDir ?? path.join(root, '..', 'sauvegardes'));
     this.hub = new EngineEventHub({ intervalMs: options.eventIntervalMs ?? 250, now: () => this.clock.now() });
     this.templates = createTemplateManager({ storage: new NodeTemplateStorage(lock), hasher: nodeSha256Hasher, codec: pngjsCodec, ids: randomIdSource, clock: systemClock });
     this.journal = new FileAttemptJournal(lock);
@@ -270,6 +277,8 @@ export class EngineService {
   /** Opens the engine on `dataDir`; throws DataDirectoryLockedError when another instance holds it. */
   static async open(options: EngineServiceOptions): Promise<EngineService> {
     const root = path.resolve(options.dataDir);
+    // An interrupted restore must be finished (or rolled back) first (Phase 1B.10).
+    await assertNoRestoreInProgress(root);
     const lock = await acquireDataDirectoryLock(root);
     try {
       const settings = await loadSettings(root);
@@ -1023,6 +1032,33 @@ export class EngineService {
       return { journal: report, worldGeneration: this.world?.store.generation ?? null };
     } finally {
       this.compacting = false;
+    }
+  }
+
+  // ───────────────────────── Backup ─────────────────────────
+
+  /**
+   * Backs up the data directory (stopped only: nothing writes meanwhile)
+   * into the configured backup directory. Restoring is done with GeoPlacer
+   * stopped (npm run restore).
+   */
+  async backup(): Promise<{ readonly name: string; readonly files: number; readonly bytes: number; readonly createdAt: string }> {
+    this.guard();
+    this.requireIdle('a backup');
+    if (this.backingUp || this.compacting) throw new EngineServiceError('ENGINE_BUSY', 409, 'a backup or a compaction is already in progress');
+    this.backingUp = true;
+    try {
+      await this.checkpointing;
+      let result: { dir: string; manifest: BackupManifest };
+      try {
+        result = await createBackup(this.root, this.backupDir, { lock: this.lock });
+      } catch (error) {
+        throw new EngineServiceError('BACKUP_FAILED', 500, `the backup failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      this.log('info', `backup written: ${path.basename(result.dir)} (${result.manifest.summary.files} files)`);
+      return { name: path.basename(result.dir), files: result.manifest.summary.files, bytes: result.manifest.summary.bytes, createdAt: result.manifest.createdAt };
+    } finally {
+      this.backingUp = false;
     }
   }
 

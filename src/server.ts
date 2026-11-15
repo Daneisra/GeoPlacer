@@ -442,7 +442,7 @@ async function startServer(): Promise<void> {
     } catch (error) {
       if (error instanceof EngineLockedError) {
         logger.error(`Refused to start: ${error.message}`);
-        console.error(gradient('red', 'yellow')(`\nGeoPlacer is already running on this data directory. ${error.message}\n`));
+        console.error(gradient('red', 'yellow')(`\nGeoPlacer cannot start on this data directory: ${error.message}\n`));
         process.exit(2);
       }
       throw error;

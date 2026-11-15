@@ -45,3 +45,19 @@ export {
   type ResourcesView,
   type TemplateInfo,
 } from './service.js';
+export {
+  BACKUP_FORMAT_VERSION,
+  BackupError,
+  assertNoRestoreInProgress,
+  createBackup,
+  restoreBackup,
+  restoreStateFile,
+  resumeRestore,
+  verifyBackup,
+  type BackupErrorCode,
+  type BackupFileEntry,
+  type BackupManifest,
+  type RestoreOptions,
+  type RestoreReport,
+  type RestoreStep,
+} from './backup.js';

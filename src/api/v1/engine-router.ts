@@ -187,6 +187,9 @@ export function createEngineRouter(api: EngineApi): Router {
   r.get('/journal/diagnosis', route(() => api.journalDiagnosis()));
   r.post('/journal/compact', route((req) => (parse(schemas.empty, req.body), api.compact())));
 
+  // Backup (Phase 1B.10): stopped only, written where the server decides (never a client path).
+  r.post('/backup', route((req) => (parse(schemas.empty, req.body), api.backup())));
+
   // Unknown /api/v1 route: JSON 404, never the UI.
   r.use((_req, res) => sendError(res, 404, 'NOT_FOUND', 'unknown API route'));
   return r;

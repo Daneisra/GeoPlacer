@@ -59,6 +59,8 @@ export interface EngineApi {
   attemptsView(): unknown;
   journalDiagnosis(): Promise<unknown>;
   compact(): Promise<unknown>;
+  /** Backup of the data directory, stopped only, into the server's backup directory (Phase 1B.10). */
+  backup(): Promise<unknown>;
 }
 
 /** True for an error thrown by the engine with a stable code (EngineServiceError and the like). */

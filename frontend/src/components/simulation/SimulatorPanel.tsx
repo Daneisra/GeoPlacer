@@ -94,6 +94,12 @@ export function SimulatorPanel({ status }: { status: EngineStatus | null }) {
 
   const compact = () => run('Compactage', () => engineHttp.post('/journal/compact', {}), 'Journal compacté, toile simulée enregistrée (checkpoint).');
 
+  const backup = () =>
+    run('Sauvegarde', async () => {
+      const r = await engineHttp.post<{ name: string; files: number }>('/backup', {});
+      setDiagnosis(`Sauvegarde créée : sauvegardes\\${r.data.name} (${r.data.files} fichiers). Restauration : GeoPlacer arrêté, « npm run restore -- sauvegardes\\${r.data.name} ».`);
+    }, 'Sauvegarde créée dans le dossier « sauvegardes ».');
+
   return (
     <Card id="simulatorPanel">
       <CardHeader className="pb-2">
@@ -126,6 +132,9 @@ export function SimulatorPanel({ status }: { status: EngineStatus | null }) {
           </Button>
           <Button size="sm" variant="secondary" onClick={() => void compact()} disabled={pending !== null || status?.journal.compacting === true}>
             Compacter
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => void backup()} disabled={!idle || pending !== null} title="À l’arrêt seulement">
+            Sauvegarder
           </Button>
           <Button size="sm" variant="outline" onClick={resetAgent} disabled={!idle || pending !== null}>
             Réinitialiser l’agent

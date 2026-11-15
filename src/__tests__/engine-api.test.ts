@@ -77,6 +77,7 @@ function fakeEngine() {
     compact: async () => {
       throw new FakeEngineError('COMPACTION_IN_PROGRESS', 409, 'a compaction is already in progress');
     },
+    backup: async () => (calls.push('backup'), { name: 'geoplacer-sauvegarde-x', files: 3, bytes: 10, createdAt: 'now' }),
   };
   return api;
 }
@@ -200,6 +201,11 @@ describe('/api/v1: commands and errors', () => {
     expect(engine.calls).toEqual(
       expect.arrayContaining(['stop:true', 'select:abc', 'import:Fresque:8:random', 'configure:{"simulator":{"width":128},"resetWorld":true}', 'upgrade:p1:true', 'canvas:{"minX":1,"minY":2,"width":3,"height":4}'])
     );
+  });
+
+  it('backs up without any client-chosen path (a path in the body is refused)', async () => {
+    expect((await call('POST', '/api/v1/backup', {})).body).toMatchObject({ name: 'geoplacer-sauvegarde-x' });
+    expect((await call('POST', '/api/v1/backup', { out: 'C:/Windows' })).status).toBe(400);
   });
 
   it('an unknown /api/v1 route is a JSON 404, never the UI', async () => {
