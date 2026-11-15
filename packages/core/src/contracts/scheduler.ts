@@ -70,6 +70,13 @@ export interface SchedulerConfig {
   readonly maxRecentErrors: number;
   /** Safety net: the loop stops in error after this many cycles (tests; null: unlimited). */
   readonly maxCycles: number | null;
+  /**
+   * Phase 1B.10 (optional, default 'full'): 'incremental' reclassifies only
+   * the pixels whose observed value changed since the previous cycle, and
+   * is compared with the full computation every `verifyEvery` cycles (on any
+   * difference the full result is used and the state rebuilt).
+   */
+  readonly progressMode?: 'full' | 'incremental';
 }
 
 export interface SchedulerDependencies {

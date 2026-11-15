@@ -29,6 +29,19 @@ export const PixelState = {
   INVALID: 5,
 } as const;
 
+/**
+ * The ONE classification of an observed value against the expected color
+ * (also used by the incremental progress, Phase 1B.10).
+ */
+export function classifyValue(expected: number, seen: CanvasPixel | number): number {
+  if (expected === TRANSPARENT_U32) return PixelState.TRANSPARENT;
+  if (seen === expected) return PixelState.CORRECT;
+  if (seen === UNKNOWN) return PixelState.UNKNOWN;
+  if (seen === TRANSPARENT) return PixelState.MISSING;
+  if (Number.isInteger(seen) && seen >= 0 && seen <= 0xffffff) return PixelState.WRONG_COLOR;
+  return PixelState.INVALID;
+}
+
 export interface RowScan {
   /** Image row. */
   readonly iy: number;
@@ -83,19 +96,7 @@ export function scanEligibleRows(template: ProgressTemplate, snapshot: CanvasSna
       }
     }
     const base = iy * width + region.ix;
-    for (let k = 0; k < region.width; k++) {
-      const expected = pixels[base + k]!;
-      if (expected === TRANSPARENT_U32) {
-        states[k] = PixelState.TRANSPARENT;
-        continue;
-      }
-      const seen: CanvasPixel | number = observed[k]!;
-      if (seen === expected) states[k] = PixelState.CORRECT;
-      else if (seen === UNKNOWN) states[k] = PixelState.UNKNOWN;
-      else if (seen === TRANSPARENT) states[k] = PixelState.MISSING;
-      else if (Number.isInteger(seen) && seen >= 0 && seen <= 0xffffff) states[k] = PixelState.WRONG_COLOR;
-      else states[k] = PixelState.INVALID;
-    }
+    for (let k = 0; k < region.width; k++) states[k] = classifyValue(pixels[base + k]!, observed[k]!);
     onRow({ iy, ix0: region.ix, x0, y, count: region.width, states });
   }
   return region;

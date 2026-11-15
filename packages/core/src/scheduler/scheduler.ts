@@ -46,6 +46,7 @@ import type {
 } from '../contracts/index.js';
 import { templateBounds } from '../geometry/projection.js';
 import { computeProgress } from '../progress/progress.js';
+import { createIncrementalProgress } from '../progress/incremental.js';
 import { estimateEta } from '../progress/eta.js';
 import { nextBatch, prepareTemplate, prepareTemplateSync } from '../work/planner.js';
 
@@ -114,6 +115,7 @@ export function validateSchedulerConfig(config: SchedulerConfig): void {
   }
   if (config.minBatchSize > config.maxBatchSize) throw new SchedulerConfigError('minBatchSize must not exceed maxBatchSize');
   if (config.maxCycles !== null && !positive(config.maxCycles)) throw new SchedulerConfigError('maxCycles must be a positive integer or null');
+  if (config.progressMode !== undefined && config.progressMode !== 'full' && config.progressMode !== 'incremental') throw new SchedulerConfigError('progressMode must be full or incremental');
 }
 
 export function createScheduler(config: SchedulerConfig, deps: SchedulerDependencies): TaskScheduler {
@@ -121,6 +123,9 @@ export function createScheduler(config: SchedulerConfig, deps: SchedulerDependen
   const agent: AgentId = config.agents[0]!;
   const { clock, canvas, attempts, resources } = deps;
   const ref = { projectId: config.projectId, templateId: config.templateId };
+  const progressOptions = config.freshness === undefined ? {} : { freshness: config.freshness };
+  // A new scheduler (restart, restore, new world) starts with a new calculator: nothing is reused.
+  const incremental = config.progressMode === 'incremental' ? createIncrementalProgress({ options: progressOptions }) : null;
   const cost = resources.rules.energy.costPerPixel;
 
   let state: SchedulerState = 'stopped';
@@ -350,7 +355,7 @@ export function createScheduler(config: SchedulerConfig, deps: SchedulerDependen
     // continues at the later time, never asking for a state before the observation.
     now = Math.max(clock.now(), resources.observed(agent)?.at ?? 0);
     const resourcesNow = resources.stateAt(agent, now, now);
-    progress = computeProgress(current, snapshot, now, config.freshness === undefined ? {} : { freshness: config.freshness });
+    progress = incremental !== null ? incremental.compute(current, snapshot, now) : computeProgress(current, snapshot, now, progressOptions);
     eta = estimateEta(progress, [{ id: agent, state: resourcesNow }], { rules: resources.rules, msPerPixel: config.eta.msPerPixel, minCoveragePercent: config.eta.minCoveragePercent, maxResourceAgeMs: config.maxResourceAgeMs, ...(config.eta.pauses === undefined ? {} : { pauses: config.eta.pauses }) }, now);
     emit({ type: 'progress', at: now, progress });
     const open = attempts.open().length;

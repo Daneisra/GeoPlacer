@@ -168,6 +168,10 @@ export interface EngineServiceOptions {
   readonly worldCheckpointRecords?: number;
   /** Where backups are written (default: `<dataDir>/../sauvegardes`); never chosen by a client. */
   readonly backupDir?: string;
+  /** Progress computation of the scheduler (Phase 1B.10): see SchedulerConfig.progressMode. */
+  readonly progressMode?: 'full' | 'incremental';
+  /** Measurement hook (benches): called after every cycle with the scheduler status. */
+  readonly onCycle?: (status: SchedulerStatus) => void;
 }
 
 export interface CommandResult {
@@ -291,6 +295,8 @@ export class EngineService {
   private readonly worldStoreOptions: FileWorldStoreOptions;
   private readonly checkpointRecords: number;
   private readonly backupDir: string;
+  private readonly progressMode: 'full' | 'incremental';
+  private readonly onCycle: ((status: SchedulerStatus) => void) | undefined;
   private backingUp = false;
   /** Decoded templates by id (current revision only), a few at most. */
   private readonly templateCache = new Map<string, Template>();
@@ -305,6 +311,9 @@ export class EngineService {
     this.worldStoreOptions = options.worldStore ?? {};
     this.checkpointRecords = options.worldCheckpointRecords ?? WORLD_CHECKPOINT_RECORDS;
     this.backupDir = path.resolve(options.backupDir ?? path.join(root, '..', 'sauvegardes'));
+    // Phase 1B.10: incremental by default (measured: -39 % per cycle at 2000², -42 % at 4096²; verified every 10 cycles).
+    this.progressMode = options.progressMode ?? 'incremental';
+    this.onCycle = options.onCycle;
     this.hub = new EngineEventHub({ intervalMs: options.eventIntervalMs ?? 250, now: () => this.clock.now() });
     this.templates = createTemplateManager({ storage: new NodeTemplateStorage(lock), hasher: nodeSha256Hasher, codec: pngjsCodec, ids: randomIdSource, clock: systemClock });
     this.journal = new FileAttemptJournal(lock);
@@ -474,6 +483,7 @@ export class EngineService {
       maxWaitMs: 5_000,
       maxRecentErrors: 20,
       maxCycles: null,
+      progressMode: this.progressMode,
     };
   }
 
@@ -484,6 +494,7 @@ export class EngineService {
         this.hub.statusNow(this.status());
         break;
       case 'cycle':
+        this.onCycle?.(e.status);
         this.lastActivityAt = e.status.at;
         this.hub.status(this.status());
         this.maybeCheckpoint();

@@ -37,6 +37,25 @@ describe('scheduler: a complete run and its state machine', () => {
     expect(e.appliedTwice()).toBe(0);
   });
 
+  it('incremental progress (Phase 1B.10): outside changes are still seen, same final counters as the full mode', async () => {
+    for (const progressMode of ['full', 'incremental'] as const) {
+      const e = new Engine(flag(12, 10), { config: { progressMode, maxBatchSize: 7 } });
+      let painted = 0;
+      e.scheduler.subscribe((ev) => {
+        // An outside actor erases and miscolors pixels already painted, several times during the run.
+        if (ev.type === 'attempt' && painted < 6) {
+          painted++;
+          e.canvas.erase({ x: 2, y: 3 });
+          e.canvas.paint({ x: 3 + painted, y: 3 }, BLUE);
+        }
+      });
+      await e.scheduler.start();
+      const final = await e.scheduler.done();
+      expect(final, progressMode).toMatchObject({ state: 'completed', correct: 120, incorrect: 0, unknown: 0, progressPercent: 100 });
+      expect(e.wrong(), progressMode).toBe(0);
+    }
+  });
+
   it('step() runs one cycle at a time, deterministically', async () => {
     const run = async (): Promise<string> => {
       const e = new Engine(flag(4, 3), { config: { maxBatchSize: 5 } });

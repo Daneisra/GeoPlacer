@@ -12,10 +12,15 @@
  *   of a canvas read of the template area;
  * - events emitted per second and canvas bytes;
  * - world checkpoint time, peak RSS.
- * usage: node --expose-gc --import tsx bench/responsiveness.bench.ts [side] [seconds]
+ * Phase 1B.10: progress mode (full | incremental), cycle median and p95,
+ * real HTTP latency (a local server answering the status during the run),
+ * largest gap between two status events (WebSocket fluidity).
+ * usage: node --expose-gc --import tsx bench/responsiveness.bench.ts [side] [seconds] [full|incremental]
  */
 
 import { mkdtemp, rm } from 'node:fs/promises';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
@@ -24,19 +29,27 @@ import { DEMO_COLORS, EngineService, type EngineEventEnvelope } from '../src/ind
 
 const SIDE = Number(process.argv[2] ?? 2000);
 const SECONDS = Number(process.argv[3] ?? 20);
+const MODE = (process.argv[4] ?? 'full') as 'full' | 'incremental';
+const quantile = (values: number[], q: number): number | null => {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  return Math.round(sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))]! * 10) / 10;
+};
 const ms = (t: number) => Math.round(t * 10) / 10;
 let peakRss = 0;
 const sampleRss = () => (peakRss = Math.max(peakRss, process.memoryUsage().rss));
 const rssTimer = setInterval(sampleRss, 100);
 
 const dir = await mkdtemp(path.join(tmpdir(), 'gp-bench-'));
-const out: Record<string, unknown> = { side: SIDE, seconds: SECONDS, node: process.version };
+const out: Record<string, unknown> = { side: SIDE, seconds: SECONDS, mode: MODE, node: process.version };
+const cycleAt: number[] = [];
 let service: EngineService | null = null;
 try {
   let t = performance.now();
-  service = await EngineService.open({ dataDir: dir });
+  service = await EngineService.open({ dataDir: dir, progressMode: MODE, onCycle: () => cycleAt.push(performance.now()) });
+  const side = SIDE > 2048 ? 4096 : 2048;
   await service.configure({
-    simulator: { width: 2048, height: 2048, costPerPixel: 1, capacity: 1_000_000, regenIntervalMs: 3_600_000, writeLatencyMs: 0 },
+    simulator: { width: side, height: side, costPerPixel: 1, capacity: 1_000_000, regenIntervalMs: 3_600_000, writeLatencyMs: 0 },
     agent: { startEnergy: 1_000_000, startCurrency: 0 },
     run: { maxBatchSize: 1000, minBatchSize: 1 },
     resetWorld: true,
@@ -56,6 +69,30 @@ try {
   await service.selectTemplate(tpl.templateId);
   out.importAndSelectMs = ms(performance.now() - t);
 
+  // A local HTTP server answering the engine status: the latency a dashboard request sees.
+  const svc = service;
+  const server = http.createServer((_req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify(svc.status()));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+  const port = (server.address() as AddressInfo).port;
+  const httpTimes: number[] = [];
+  let httpRunning = true;
+  const httpLoop = (async () => {
+    while (httpRunning) {
+      const t0 = performance.now();
+      await new Promise<void>((resolve) => {
+        http.get({ host: '127.0.0.1', port, path: '/' }, (res) => {
+          res.resume();
+          res.on('end', () => resolve());
+        });
+      });
+      httpTimes.push(performance.now() - t0);
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  })();
+  const statusEventAt: number[] = [];
   let events = 0;
   let canvasPixels = 0;
   let canvasBytes = 0;
@@ -67,6 +104,7 @@ try {
       canvasBytes += JSON.stringify(e).length;
     }
     if (e.event.type === 'attempts' && firstAttemptAt === null) firstAttemptAt = performance.now();
+    if (e.event.type === 'status') statusEventAt.push(performance.now());
   });
 
   const lag = monitorEventLoopDelay({ resolution: 10 });
@@ -83,6 +121,9 @@ try {
   const until = Date.now() + SECONDS * 1000;
   while (Date.now() < until && service.status().state !== 'completed') await new Promise((r) => setTimeout(r, 100));
   clearInterval(statusTimer);
+  httpRunning = false;
+  await httpLoop;
+  server.close();
   out.endState = service.status().state;
 
   t = performance.now();
@@ -103,6 +144,11 @@ try {
   out.pixelsPerSecond = Math.round((st.scheduler?.applied ?? 0) / elapsed);
   out.cycles = st.scheduler?.cycles;
   out.msPerCycle = st.scheduler?.cycles ? ms((elapsed * 1000) / st.scheduler.cycles) : null;
+  const cycles = cycleAt.slice(1).map((t, i) => t - cycleAt[i]!);
+  out.cycleMs = { median: quantile(cycles, 0.5), p95: quantile(cycles, 0.95), count: cycles.length };
+  out.httpMs = { median: quantile(httpTimes, 0.5), p95: quantile(httpTimes, 0.95), max: quantile(httpTimes, 1), requests: httpTimes.length };
+  const gaps = statusEventAt.slice(1).map((t, i) => t - statusEventAt[i]!);
+  out.statusEventGapMs = { median: quantile(gaps, 0.5), max: quantile(gaps, 1) };
   out.eventLoopDelayMs = { p50: ms(lag.percentile(50) / 1e6), p99: ms(lag.percentile(99) / 1e6), max: ms(lag.max / 1e6) };
   out.statusMs = { max: ms(Math.max(...statusTimes)), mean: ms(statusTimes.reduce((a, b) => a + b, 0) / statusTimes.length) };
   out.eventsPerSecond = Math.round(events / elapsed);

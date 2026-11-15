@@ -137,7 +137,25 @@ export function computeProgress(template: ProgressTemplate, snapshot: CanvasSnap
   // Excluded pixels, over the whole image.
   let transparent = 0;
   for (let i = 0; i < pixels.length; i++) if (pixels[i] === TRANSPARENT_U32) transparent++;
+  return assembleProgress(template, snapshot, now, options, colors, counters, invalid, transparent);
+}
 
+/**
+ * The progress snapshot from the counters per color slot (total, correct,
+ * wrongColor, missing, unknown; 5 per slot), shared by the full and the
+ * incremental computations (Phase 1B.10).
+ */
+export function assembleProgress(
+  template: ProgressTemplate,
+  snapshot: CanvasSnapshot,
+  now: Timestamp,
+  options: ProgressOptions,
+  colors: readonly number[],
+  counters: Float64Array,
+  invalid: number,
+  transparent: number
+): ProgressSnapshot {
+  const { pixels } = template.image;
   const byColor: ColorProgress[] = colors
     .map((color, k) => {
       const total = counters[k * 5]!;
