@@ -1,6 +1,6 @@
 # Architecture de GeoPlacer
 
-État : **Phase 1B.6**. Les contrats existent depuis la 1B.0 ; la géométrie,
+État : **Phase 1B.7**. Les contrats existent depuis la 1B.0 ; la géométrie,
 les couleurs et les palettes sont implémentées en 1B.1 (voir
 [geometrie-couleurs.md](geometrie-couleurs.md)) ; le gestionnaire de
 modèles et sa persistance en 1B.2 (voir [modeles.md](modeles.md)) ; les
@@ -9,7 +9,9 @@ la progression et le temps restant en 1B.4 (voir
 [progression.md](progression.md)) ; les ressources et les améliorations
 en 1B.5 (voir [ressources.md](ressources.md)) ; la planification du
 travail, les tentatives et la reprise après crash en 1B.6 (voir
-[planification.md](planification.md)).
+[planification.md](planification.md)) ; le compactage du journal, son
+diagnostic et sa réparation, et le simulateur de toile en 1B.7 (voir
+[journal.md](journal.md) et [simulateur.md](simulateur.md)).
 Le serveur et l'interface hérités de Wplacer fonctionnent comme avant.
 
 ## Arborescence
@@ -30,7 +32,7 @@ GeoPlacer/
 │   │   │   ├── progress/         progression et estimation du temps restant (1B.4)
 │   │   │   ├── resources/        règles, états d'agent, régénération, ResourceManager (1B.5)
 │   │   │   ├── upgrades/         planificateur d'améliorations simulées (1B.5)
-│   │   │   └── work/             WorkPlanner, AttemptManager, format du journal (1B.6)
+│   │   │   └── work/             WorkPlanner, AttemptManager, formats du journal et des checkpoints (1B.6, 1B.7)
 │   │   ├── bench/                benchmarks (npm run bench:core, bench:strategies, bench:planner…)
 │   │   ├── test/                 Vitest (dont la suite de conformité des stockages)
 │   │   ├── tsconfig.json         compilation (sans types Node ni DOM)
@@ -39,9 +41,11 @@ GeoPlacer/
 │   ├── adapters-node/            @geoplacer/adapters-node : stockage fichiers, verrou du répertoire
 │   │                             de données (1B.3), codec PNG (pngjs), SHA-256, UUID, horloge ;
 │   │                             cache d'ordre, journal des tentatives et historique (1B.6) ;
+│   │                             générations, checkpoints, diagnostic et réparation du journal (1B.7) ;
 │   │                             benchmarks bench:templates, bench:reservations, bench:journal
-│   └── simulator/                @geoplacer/simulator (squelette, dépend de core)
+│   └── simulator/                @geoplacer/simulator : toile simulée locale, horloge virtuelle (1B.7)
 ├── scripts/run-logged.mjs        contrôles avec journal complet dans test-logs/ (1B.4)
+├── scripts/recette-navigateur.mjs recette automatisée dans un vrai navigateur (1B.7)
 ├── src/                          serveur hérité (Express, Jest) — inchangé
 ├── frontend/                     interface React héritée — inchangée
 ├── tsconfig.base.json            configuration stricte commune aux paquets

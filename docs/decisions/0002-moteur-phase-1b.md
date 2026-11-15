@@ -482,3 +482,30 @@ d'architecture.
 Détails : [planification.md](../fr/planification.md),
 [strategies.md](../fr/strategies.md) § 4,
 [modeles.md](../fr/modeles.md) (numérotation des révisions).
+
+## 16. Mise en œuvre de la Phase 1B.7 : contrats v8, journal compacté et simulateur
+
+`CORE_CONTRACT_VERSION` passe à **8**.
+
+| Élément | Changement | Raison |
+|---|---|---|
+| `JournalEvent` | Nouveaux événements `canvas-read-required` et `canvas-verified` ; lignes au format 2, avec un numéro de séquence global (le format 1 de la 1B.6 reste lisible) | Un événement manquant se voit ; un journal endommagé bloque les baux jusqu'à une lecture de la toile journalisée |
+| `JournalState`, `ClosedAttempt` | État logique : tentatives ouvertes complètes, résumés des closes, `lastSpendAt` explicite, lecture de la toile exigée, générations préservées, `lastSeq` | Contenu des checkpoints ; équivalent au rejeu complet |
+| `AttemptJournal` | `load(visitor)` (checkpoint puis événements, en flux), `append` → numéro de séquence, `compact(state)` ; `JournalLoadReport`, `CompactionReport` | Reprise à mémoire bornée, compactage |
+| `AttemptManager` | `compact`, `state`, `canvasReadRequiredAfter`, `confirmCanvasRead` ; `get` renvoie un résumé pour une tentative close ; `RecoveryReport` enrichi (génération, séquences, dommage) | Mémoire et checkpoint bornés |
+
+**Écarts avec le § 3** :
+- le compactage atomique prévu est fait, mais il est **déclenché
+  manuellement** : son déclenchement automatique viendra avec
+  l'ordonnanceur ;
+- la rotation de l'historique est faite.
+
+**Décisions de mise en œuvre** :
+- un compactage est refusé sur une génération endommagée ; seule une
+  réparation confirmée, avec sauvegarde vérifiée et trace, publie la
+  génération suivante ;
+- une génération endommagée n'est jamais supprimée ;
+- l'absence de pointeur alors que des générations existent est un refus,
+  pas une génération 0.
+
+Détails : [journal.md](../fr/journal.md), [simulateur.md](../fr/simulateur.md).

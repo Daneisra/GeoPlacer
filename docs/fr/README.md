@@ -6,7 +6,24 @@ GeoPlacer est un fork de
 pour GeoPixels, avec un moteur développé et testé **uniquement sur simulateur
 local** (voir l'ADR 0001).
 
-## État actuel : Phase 1B.6, planification, tentatives et reprise
+## État actuel : Phase 1B.7, journal compacté et simulateur de toile
+
+Réalisé en Phase 1B.7 :
+- **journal** (voir [journal.md](journal.md)) :
+  - compactage par checkpoints vérifiés et générations ;
+  - reprise équivalente au rejeu complet, en 22 ms au lieu de 3,7 s pour
+    un journal de 146 Mio ;
+  - diagnostic en lecture seule et réparation confirmée ;
+  - rotation de l'historique ;
+- **simulateur** : fournisseur de toile simulé local branché sur le
+  gestionnaire de tentatives, avec dix scénarios de réconciliation (voir
+  [simulateur.md](simulateur.md)) ;
+- **interface** : recette dans un vrai navigateur (Edge), automatisée,
+  avec trois anomalies corrigées : F12, F13 et les notifications jamais
+  affichées (voir [recette-navigateur.md](recette-navigateur.md)) ;
+- **planificateur** : premier lot plus rapide pour « couleur par couleur »
+  et « contours d'abord ».
+
 
 Réalisé en Phase 1B.6 (voir [planification.md](planification.md)) :
 - numérotation durable des révisions par réservations immuables : un
@@ -63,9 +80,10 @@ Réalisé en Phase 1B.0 :
 Voir [architecture.md](architecture.md). V1 : **un seul agent actif** ; les
 essais multi-agents se feront uniquement sur le simulateur local.
 
-**Interface non validée** : la recette navigateur
-([recette-navigateur.md](recette-navigateur.md)) n'a pas encore été
-effectuée. Les bugs F12 et F13 restent suivis.
+**Interface** : recette navigateur automatisée effectuée (Edge,
+28 contrôles), F12 et F13 corrigés. Restent manuels : le vrai Ctrl+C,
+l'aspect visuel et Firefox (voir
+[recette-navigateur.md](recette-navigateur.md)).
 
 Acquis de la Phase 1A, fondation et sécurité :
 
@@ -92,6 +110,8 @@ Le moteur de dessin hérité n'est **pas** fonctionnel et sera remplacé.
 | [progression.md](progression.md) | Progression, classification des pixels, ETA |
 | [ressources.md](ressources.md) | Règles de ressources, `ResourceManager`, améliorations |
 | [planification.md](planification.md) | `WorkPlanner`, tentatives, journal, reprise après crash |
+| [journal.md](journal.md) | Compactage, checkpoints, générations, diagnostic et réparation, historique |
+| [simulateur.md](simulateur.md) | Toile simulée locale, pannes déterministes, scénarios de réconciliation |
 | [geometrie-couleurs.md](geometrie-couleurs.md) | Repères, projection, OKLab, palettes, quantification, performances |
 | [installation-windows.md](installation-windows.md) | Installation et lancement vérifiés sous Windows |
 | [securite.md](securite.md) | Modèle de menace, protections, limites |

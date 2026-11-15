@@ -27,6 +27,34 @@ licence. L'historique Git complet du projet d'origine est conservé.
 - `start.bat` : installation des deux projets par le chemin vérifié.
 - Documentation française (`docs/fr/`, `docs/decisions/`).
 
+## 2026-11-15 — Phase 1B.7 : journal compacté, simulateur, recette navigateur
+
+- `packages/core/src/work` :
+  - état logique du journal (réducteur pur partagé) ;
+  - checkpoints vérifiés ;
+  - lignes numérotées ;
+  - compactage ;
+  - lecture de la toile exigée après un dommage.
+- `packages/adapters-node` :
+  - générations du journal, pointeur `CURRENT` et rétention ;
+  - diagnostic en lecture seule, réparation confirmée avec sauvegarde
+    vérifiée et trace ;
+  - rotation de l'historique ;
+  - outil `journal:diagnose` / `journal:repair`.
+- `packages/simulator` : fournisseur de toile simulé local et horloge
+  virtuelle.
+- `packages/core/src/strategy`, `work` : clés plus rapides pour « couleur
+  par couleur » et « contours d'abord », palette en table typée.
+- Interface héritée, corrigée après la recette navigateur :
+  - **F13** : un F5 sur une page affiche l'interface ;
+  - **F12** : démarrage désactivé et expliqué, arrêt branché sur la vraie
+    route ;
+  - les notifications s'affichent (magasin partagé, styles).
+- `scripts/recette-navigateur.mjs` : recette automatisée dans un vrai
+  navigateur.
+- Documentation : `docs/fr/journal.md`, `docs/fr/simulateur.md`, ADR 0002
+  § 16, mises à jour des autres documents.
+
 ## 2026-11-15 — Phase 1B.6 : planification, tentatives et reprise après crash
 
 - Numérotation durable des révisions : réservations immuables

@@ -173,10 +173,16 @@ Transitions permises (les autres sont refusées avec `INVALID_TRANSITION`) :
 
 ## 5. Journal et historique
 
+> **Phase 1B.7** : le journal est désormais compacté en générations, avec
+> des checkpoints vérifiés, des lignes numérotées (format 2), un
+> diagnostic et une réparation. L'historique est découpé en segments
+> tournants. Voir [journal.md](journal.md). Cette section décrit les
+> règles de ligne, qui restent valables.
+
 | Fichier | Contenu |
 |---|---|
-| `<données>/journal/attempts.log` | Un événement de tentative par ligne. |
-| `<données>/journal/history.log` | Une entrée d'historique par tentative close. Fichier séparé, jamais compacté avec le journal. |
+| `<données>/journal/attempts.log` | Un événement de tentative par ligne. Depuis la 1B.7, c'est la génération 0, suivie de `attempts-<g>.log`. |
+| `<données>/journal/history.log` | Une entrée d'historique par tentative close. Fichier séparé, jamais compacté avec le journal. Depuis la 1B.7, découpé en `history-<n>.log`. |
 
 **Format de ligne** (partagé par les deux fichiers, défini dans le cœur) :
 `<CRC-32 en 8 chiffres hexadécimaux> {"v":1,"event":…}\n`. La ligne est en
@@ -204,7 +210,8 @@ injection : ligne partielle puis erreur ; mutation vérifiée). Les adaptateurs
 exigent le verrou du répertoire de données.
 
 **Durabilité** : elle est testée contre l'**arrêt brutal du processus**
-(processus réels tués pendant les ajouts). Elle n'est **pas** démontrée
+(depuis la 1B.7, des processus réels s'arrêtent eux-mêmes à des étapes
+nommées). Elle n'est **pas** démontrée
 contre une coupure électrique : cela dépend du disque qui honore `fsync`,
 et aucun test approprié n'existe.
 
@@ -214,15 +221,20 @@ Au démarrage, `recover(now)` est obligatoire avant toute autre opération
 (sinon `NOT_RECOVERED`) :
 
 1. **Relire le journal** et rejouer chaque événement avec la même machine
-   d'états (`transition`, fonction pure).
+   d'états (`transition`, fonction pure). Depuis la 1B.7, la relecture
+   part du checkpoint de la génération en usage, puis lit ses événements
+   en flux (réducteur `JournalStateBuilder`).
 2. **Identifier les tentatives incomplètes** :
    - une tentative **réservée jamais démarrée** est annulée (« libérée ») ;
      elle n'a rien envoyé, puisque le démarrage est journalisé avant
      l'écriture ;
    - une tentative **démarrée sans clôture** est envoyée en réconciliation.
-3. **Journal endommagé** (lignes corrompues ou incohérentes) : un
-   événement « démarrée » a pu être perdu. **Toutes** les tentatives
-   ouvertes sont donc envoyées en réconciliation, et aucune n'est libérée.
+3. **Journal endommagé** (lignes corrompues ou incohérentes, séquence
+   manquante, checkpoint de repli) : un événement « démarrée », ou un
+   bail entier, a pu être perdu. **Toutes** les tentatives ouvertes sont
+   donc envoyées en réconciliation, et aucune n'est libérée. Depuis la
+   1B.7, aucun bail n'est accepté avant une lecture de la toile plus
+   récente (`confirmCanvasRead`), et le compactage est refusé.
 4. **Ressources incertaines** : le registre des dépenses du
    `ResourceManager` ne survit pas au redémarrage. Chaque agent ayant
    démarré une tentative exige une observation plus récente que sa
@@ -234,7 +246,10 @@ Au démarrage, `recover(now)` est obligatoire avant toute autre opération
    puisque la toile fait foi.
 
 `RecoveryReport` contient `released`, `toReconcile`, `discardedTailBytes`,
-`corruptLines` et `inconsistentEvents`. La reprise est idempotente : une
+`corruptLines` et `inconsistentEvents`. Depuis la 1B.7, il contient aussi
+`generation`, `fromCheckpoint`, `sequenceGaps`, `problems`, `damaged` et
+`canvasReadRequiredAfter`. Une tentative close est conservée sous forme de
+résumé, sans ses pixels (`get` renvoie ce résumé). La reprise est idempotente : une
 deuxième reprise ne libère rien de plus (testé).
 
 ## 7. Plusieurs agents
@@ -348,6 +363,60 @@ soit la taille. Elle comprend le tas des k meilleurs en tableaux typés,
 une ligne d'états et les écritures retenues. Rien n'est alloué par pixel.
 Seule la table des rangs de l'aléatoire grandit avec l'image.
 
+### Optimisation ciblée de la Phase 1B.7 (`npm run bench:planner-focus`)
+
+Sont visés « couleur par couleur » et « contours d'abord », qui
+dépassaient 200 ms sur une image bruitée en 2000². Trois changements
+sont faits, sans modifier l'ordre (propriétés et mutation vérifiées) :
+
+- **couleur par couleur** : le rang de couleur est lu dans une table
+  typée à adressage ouvert, au lieu d'une `Map` ;
+- **contours d'abord** : une carte des contours est calculée une fois par
+  révision. Elle occupe 1 bit par pixel, soit 0,5 Mio en 2000² et 2 Mio
+  en 4096², et sa préparation prend 16 à 19 ms en 2000² ;
+- **palette** : les couleurs débloquées sont lues dans la même table
+  typée, au lieu d'un `Set`. Ce changement touche toutes les stratégies,
+  ce que justifie un gain mesuré sans régression.
+
+**Comparaison fiable** : A/B alterné dans un même processus, sur le même
+`nextBatch`, avec un lot identique vérifié. Médianes de 3 alternances
+de 30 tours, en 2000² :
+
+| Stratégie | Image | 1B.6 | Clés 1B.7 | Plus palette typée |
+|---|---|---|---|---|
+| Couleur par couleur | Bruit | 244 à 251 ms | 213 à 221 ms | 158 à 164 ms |
+| Contours d'abord | Bruit | 205 à 209 ms | 180 à 188 ms | 152 à 156 ms |
+| Contours d'abord | Pixel art | 145 à 150 ms | 114 à 116 ms | — |
+| Couleur par couleur | Pixel art | 122 à 129 ms | 126 à 127 ms (sans effet) | — |
+
+La palette typée, mesurée par alternance de processus (3 × 2), gagne
+aussi sur les autres stratégies : de 15 à 17 % sur le bruit (haut vers le
+bas : 166–174 → 139–146 ms ; centre : 238–250 → 204–206 ms) et de 3 à 7 %
+sur le pixel art.
+
+**Valeurs absolues de la version finale** : banc ciblé, 2000², 25 tours,
+machine plus chargée que pendant la 1B.6.
+
+| Stratégie | Image | Médiane | p95 | Max | Préparation |
+|---|---|---|---|---|---|
+| Couleur par couleur | Bruit | 166 ms | 182 ms | 191 ms | 73 ms |
+| Contours d'abord | Bruit | 157 ms | 180 ms | 215 ms | 17 ms |
+| Couleur par couleur | Pixel art | 105 ms | 119 ms | 138 ms | 31 ms |
+| Contours d'abord | Pixel art | 130 ms | 139 ms | 143 ms | 19 ms |
+
+**Allocations** : 1,3 à 2,5 Mio transitoires par appel, sans croissance
+avec la taille. Le surplus d'environ 1 Mio, avec la palette typée, sur
+certaines stratégies n'est **pas expliqué** : la table elle-même fait
+quelques centaines d'octets. **Constat hors périmètre** : « centre vers
+l'extérieur » alloue 9 à 15 Mio par appel, probablement parce que ses
+clés dépassent les petits entiers de V8. Ce point n'a pas été modifié.
+
+**Variabilité** : sur ce poste, deux passes du banc complet diffèrent
+jusqu'à environ 30 %. Dans un passage chargé, « couleur par couleur » et
+« centre » sur bruit en 2000² ont encore donné 210 et 217 ms. Le seuil
+de 200 ms n'est donc pas garanti pour une image bruitée. Il l'est pour
+le pixel art et pour l'image uniforme.
+
 ### Reprise d'un modèle presque terminé, pixels inconnus
 
 | Scénario | 1000² | 2000² | 4096² |
@@ -363,6 +432,11 @@ toile, qui doit couvrir tout le modèle pour fournir les compteurs
 (`candidates`, couleurs indisponibles, pixels inconnus).
 
 ### Journal et reprise (`npm run bench:journal`, disque réel, une exécution)
+
+> Mesures de la 1B.6, **avant le compactage**. Depuis la 1B.7, la reprise
+> du même journal de 146 Mio prend 22 ms après compactage (3,2 à 3,7 s
+> avant), avec un pic de mémoire résidente de 64 Mio au lieu de 420 Mio.
+> Voir [journal.md](journal.md) § 8.
 
 | Opération | Taille de ligne | Durée |
 |---|---|---|
@@ -392,9 +466,10 @@ faire. Il est proposé pour la phase suivante.
 
 - Pas d'exécution « exactement une fois » (§ 4).
 - Durabilité non démontrée contre une coupure électrique (§ 5).
-- Le journal **grossit sans compactage**, et les tentatives closes restent
-  en mémoire après la reprise : 146 Mio, 3,8 s et 420 Mio pour 1 000
-  tentatives de 1 000 pixels (§ 8).
+- Le journal grossissait sans compactage : c'est résolu en 1B.7
+  (compactage, résumés des tentatives closes, lecture en flux), voir
+  [journal.md](journal.md). Le compactage reste à déclencher par
+  l'appelant.
 - En 2000², sur une image **bruitée**, le premier lot dépasse 200 ms pour
   « couleur par couleur » (256 ms) et « contours d'abord » (202 ms). Le
   tout premier lot d'une révision aléatoire dépasse aussi le seuil

@@ -18,7 +18,7 @@ npm run check                 # tsc, lint, lint:packages, puis test:all (contrô
 cd frontend; npx eslint .; npm run build
 ```
 
-## Tests des paquets (Phase 1B.6 : Vitest, 28 fichiers, 374 tests + 1 exhaustif optionnel)
+## Tests des paquets (Phase 1B.7 : Vitest, 33 fichiers, 423 tests + 1 exhaustif optionnel)
 
 | Paquet | Fichier | Objet |
 |---|---|---|
@@ -49,7 +49,12 @@ cd frontend; npx eslint .; npm run build
 | core | `attempts.test.ts` | `AttemptManager` : succès, échec, annulation, bail déjà réservé, doublons, énergie insuffisante, couleur ou agent indisponible, duplication concurrente, bail expiré, changement de révision, résultat inconnu, réponse perdue, écriture refusée puis replanifiée, réconciliation (lecture trop ancienne refusée), pixel redevenu incorrect, reprise après interruption, reprise idempotente, registre des dépenses perdu, observation rapportée sans double consommation, journal corrompu, fin déchirée, événements incohérents, injection de fautes à chaque écriture du journal, machine d'états complète ; propriétés : trois agents simulés sur une toile locale, actions entrelacées (baux concurrents, chevauchements, fautes, crashs, expirations) |
 | core | `journal-codec.test.ts` | Format des lignes : aller-retour ASCII, somme valide sur un contenu invalide, version inconnue ; propriétés : coupure à chaque octet, octet altéré jamais lu comme un événement |
 | adapters-node | `adapters.test.ts` | Même suite de conformité sur le stockage fichiers ; décodage pngjs (palette + tRNS, gris 1/16 bits, entrelacé…) ; disposition des fichiers ; fichiers modifiés sur disque ; réparation sur disque (octets corrompus conservés) ; chemins refusés ; arrêt brutal d'un processus réel ; numéros jamais réutilisés malgré arrêts, corruption et réparations interrompues (1B.6) ; réservations sur disque ; cache d'ordre sur disque ; journal et historique sur disque (fin déchirée mise de côté, dommage conservé, ajout échoué après une ligne partielle), processus réels tués pendant les ajouts au journal ; verrou du répertoire (un processus ; deux processus indépendants ; quatre lancés en même temps ; les deux mécanismes) ; dépendances du paquet |
+| core | `journal-state.test.ts` | Phase 1B.7 : reconstruction depuis le journal complet (A) égale à la reconstruction depuis le checkpoint et les événements postérieurs (B), sur 25 scénarios et plus de 50 compactages avec crashs ; gestionnaires repris sur un journal compacté et sur un journal complet identiques ; tentatives ouvertes conservées par le compactage ; purge des résumés sans perte d'incertitude ; journal endommagé (lecture de la toile exigée, compactage refusé) ; checkpoint réparé |
+| adapters-node | `journal.test.ts` | Générations et compactage sur disque, équivalence avec le rejeu complet, rétention, lecture du journal de la 1B.6, pointeur absent ou illisible, repli de checkpoint, séquence manquante ; injection de fautes avant et après chaque opération du compactage ; fin déchirée, ajout échoué ; rotation de l'historique ; processus réels arrêtés à 10 étapes nommées |
+| adapters-node | `journal-tool.test.ts` | Diagnostic en lecture seule (empreinte du répertoire inchangée, aucun contenu ni chemin exposé) ; réparation (plan, identifiant, sauvegarde vérifiée, trace, préservation, fin déchirée, pointeur absent, checkpoint inutilisable, journal modifié après le plan) ; injection de fautes à chaque opération de la réparation ; ligne de commande |
 | simulator | `package.test.ts` | Résolution de `@geoplacer/core` (valeurs et types) |
+| simulator | `canvas.test.ts` | Fournisseur de toile simulé : contrats, lecture (limites, repère, `readRow`, copie datée), écriture (ordre des refus, énergie des règles du core, régénération), idempotence, pannes déterministes, acteurs externes |
+| simulator | `reconciliation.test.ts` | Les dix scénarios de réconciliation avec l'`AttemptManager`, le repère y vers le haut, le déterminisme |
 
 Test exhaustif facultatif (aller-retour OKLab des 16,7 M couleurs, environ
 10 s) : `$env:GEOPLACER_EXHAUSTIVE="1"; npm run test --workspace=packages/core`.
@@ -71,10 +76,15 @@ Benchmarks :
   ([strategies.md](strategies.md) § 4) ;
 - `npm run bench:reservations` : réservations de numéros
   ([modeles.md](modeles.md)) ;
+- `npm run bench:planner-focus` : couleur par couleur et contours d'abord,
+  médiane, p95, maximum, A/B dans un même processus
+  ([planification.md](planification.md) § 8) ;
+- `npm run journal:diagnose`, `npm run journal:repair` : outil local du
+  journal ([journal.md](journal.md) § 6) ;
 - `npm run bench:planner` : `WorkPlanner` en 1000², 2000², 4096²
   ([planification.md](planification.md) § 8) ;
-- `npm run bench:journal` : coût du journal et de la reprise
-  ([planification.md](planification.md) § 8).
+- `npm run bench:journal` : coût du journal et de la reprise, avant et
+  après compactage ([journal.md](journal.md) § 8).
 
 Simulation de l'ETA sur d'autres graines :
 `$env:GEOPLACER_ETA_SEED="5"; npx vitest run --root packages/core test/eta.test.ts`.
@@ -121,6 +131,56 @@ Phase 1B.6, mutations vérifiées (chacune fait échouer au moins un test) :
 - incertitude non reconstruite à la reprise, lecture de réconciliation
   antérieure à l'envoi en réconciliation (2 tests), dépense enregistrée en
   plus de l'observation rapportée.
+
+Phase 1B.7, mutations vérifiées (chacune fait échouer au moins un test) :
+- reprise depuis un checkpoint sans `lastSpendAt` (3 tests) ; `lastSpendAt`
+  non mis à jour à la clôture (1 test) ;
+- carte des contours fausse sur la première colonne (propriété des clés) ;
+- interface d'origine contre le contrat de routes (4 appels inexistants
+  détectés).
+
+Phase 1B.7, échecs rencontrés (journaux complets conservés hors du
+dépôt) :
+- **Deux défauts réels**, trouvés par les tests et corrigés :
+  - lors du tout premier compactage, un arrêt après la création du
+    checkpoint laissait des fichiers de génération sans pointeur, et la
+    reprise refusait de démarrer. Correction : un pointeur est écrit avant
+    tout fichier de génération (trouvé par les processus arrêtés aux
+    étapes nommées) ;
+  - une panne d'entrée-sortie pendant la réparation faisait reconstruire
+    l'état depuis les seuls événements, ce qui perdait les tentatives
+    ouvertes du checkpoint. Correction : le repli est limité au cas annoncé
+    par le plan (trouvé par l'injection de fautes dans la réparation).
+- **Une faiblesse corrigée** : un `catch` trop large dans l'empreinte des
+  fichiers avalait une panne injectée et produisait une trace incomplète.
+- **Erreurs de rédaction des tests**, corrigées :
+  - fin déchirée vérifiée sans ajout préalable ;
+  - attente fausse sur le nombre de segments lus par l'historique ;
+  - horloge d'un deuxième harnais antérieure à la dernière dépense ;
+  - lecture du fichier de verrou (EBUSY) ;
+  - attente de 6 tentatives au lieu de 7 (la ligne endommagée était une
+    clôture) ;
+  - message attendu de `PLAN_CHANGED`.
+- **Script de recette** : la première exécution est restée bloquée,
+  faute d'arrêter le serveur après une erreur, à cause d'un sélecteur
+  ambigu. Le script nettoie maintenant tout en sortie.
+- **Avertissement** « FileHandle fermé par le ramasse-miettes » : des tests
+  ne fermaient pas leurs journaux. Corrigé.
+- **Délai de la duplication interrompue** (cause toujours non établie) : le
+  test enregistre maintenant la durée de chaque itération lente, pour
+  qu'une récidive laisse des données. Pas de récidive pendant la 1B.7.
+
+**Lint du frontend** (`cd frontend; npx eslint .`) : 17 erreurs et
+3 avertissements **hérités** (règles `react-refresh` et `no-explicit-any`).
+Il est hors de `npm run check`. Les corrections de la recette n'en ajoutent
+aucun : le compte est vérifié avant et après.
+
+**Tests de processus** : le test du journal arrête l'enfant à des étapes
+nommées, sans minuteur. Les tests de modèles des phases 1B.2 et 1B.5
+attendent une poignée de main explicite (« ready »), puis tuent l'enfant
+après un délai qui ne sert qu'à **tirer au hasard l'instant du crash**.
+Aucune assertion ne dépend de ce délai, sauf « au moins une écriture sur
+8 passages ».
 
 Phase 1B.6, échecs rencontrés (journaux complets conservés hors du dépôt) :
 - **test des processus tués pendant les ajouts au journal**, deux échecs :

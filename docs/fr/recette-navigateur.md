@@ -1,8 +1,72 @@
 # Recette navigateur (Windows)
 
+## Recette automatisée (Phase 1B.7)
+
+`scripts/recette-navigateur.mjs` exécute cette procédure dans un **vrai
+navigateur**, Microsoft Edge ou Chrome installé sur la machine, sans
+fenêtre et en profil privé.
+
+- **Pilotage** : `playwright-core` sert à piloter le navigateur. Il n'est
+  **pas** une dépendance du projet : on l'installe hors du dépôt, et il ne
+  télécharge aucun navigateur.
+- **Serveur** : le serveur compilé tourne dans un dossier temporaire, ce
+  qui laisse intact le `data\` du dépôt.
+- **Synchronisation** : le script attend que le serveur annonce son port
+  (« listening ») avant de commencer.
+- **Contrôles** : aucun compte ni modèle n'est créé ou démarré, et aucune
+  requête ne quitte la machine.
+
+```powershell
+npm install playwright-core@1.49.1 --prefix ..\outils-recette --ignore-scripts
+$env:GEOPLACER_PLAYWRIGHT_CORE = (Resolve-Path ..\outils-recette\node_modules\playwright-core)
+npm run build
+node scripts/recette-navigateur.mjs recette.json   # le port 3000 doit être libre
+```
+
+**Résultat du 15/11/2026** : Edge 157, commit de la correction, deux
+passes, **28 contrôles, 0 KO**.
+
+| Contrôle | Résultat |
+|---|---|
+| Démarrage du serveur compilé, affichage du tableau de bord, `GET /settings` à 200 | OK |
+| Navigation par le menu : Dashboard, Users, Templates, Templates → Add, Logs, Settings | OK |
+| Paramètres : enregistrement (`PUT` 200 et fichier écrit), valeur hors bornes refusée (`PUT` 400, fichier inchangé), notifications « Settings Saved » et « Save Failed » | OK après correction |
+| Persistance après arrêt et redémarrage du serveur | OK |
+| Logs et WebSocket : connexion `ws://127.0.0.1:3000`, messages d'abonnement, second onglet signalé en direct (« 2 total »), `data\logs.log` sans cookie ni jeton | OK |
+| F13 : F5 sur `/logs`, `/users`, `/templates`, `/settings` | OK après correction |
+| F12 : « Start All » | OK après correction |
+| Autre origine qui lit `/users` | Bloquée (« Failed to fetch ») |
+| Console | Seulement les 2 lignes attendues du refus 400 volontaire |
+
+**Anomalies constatées puis corrigées**, avec des tests de non-régression
+(Jest, `src/__tests__/ui-navigation.test.ts`) :
+
+1. **F13** : un F5 sur une page dont l'adresse est aussi une route de l'API
+   affichait du JSON. Les navigations de document reçoivent maintenant
+   l'interface, et les appels d'API gardent l'API. La distinction se fait
+   par `Sec-Fetch-Dest: document`, ou à défaut par `Accept` commençant par
+   `text/html`.
+2. **F12** : « Start All », « Stop All » et Start/Stop par modèle
+   appelaient des routes inexistantes (404).
+   - Le **démarrage** est désactivé et expliqué dans l'interface, car il
+     lancerait le moteur hérité contre un service réel.
+   - L'**arrêt** utilise la vraie route `PUT /template/:id`.
+   - Un test vérifie que chaque appel HTTP de l'interface correspond à une
+     route du serveur.
+3. **Notifications jamais affichées** (défaut hérité, découvert par la
+   recette) : chaque composant tenait sa propre liste, que `App` n'affichait
+   pas. Elles passent maintenant par un magasin partagé, et les styles ont
+   été ajoutés.
+
+**Restent manuels** : la section 5.1 (vrai Ctrl+C et message d'arrêt
+propre), car Windows ne transmet pas de signal à un processus enfant : le
+script l'arrête brutalement. Restent aussi l'aspect visuel des
+notifications et un essai sous Firefox.
+
+## Recette manuelle
+
 Procédure manuelle d'environ 15 minutes pour vérifier l'interface dans un
-vrai navigateur. Elle complète les tests automatisés, qui ont tous été
-exécutés depuis Node.
+vrai navigateur.
 
 > **Règles** :
 > - n'utiliser aucun compte Wplace ni GeoPixels ;
@@ -12,10 +76,11 @@ exécutés depuis Node.
 
 ## Limites connues, à ne pas signaler comme régressions
 
-- **F13** : en production, les adresses des pages (`/logs`, `/users`,
-  `/templates`, `/settings`) sont aussi des routes de l'API. Un **F5** sur
-  ces pages affiche du JSON ou du texte brut. Naviguer uniquement par le menu
-  latéral, et recharger depuis `http://127.0.0.1:3000/`.
+- **F13** (corrigé en Phase 1B.7) : un **F5** sur `/logs`, `/users`,
+  `/templates` ou `/settings` affiche maintenant l'interface. Avant cette
+  correction, il affichait du JSON.
+- **F12** (corrigé en Phase 1B.7) : le démarrage des modèles est
+  volontairement désactivé, et seul l'arrêt reste possible.
 - **Flux de logs** : la page Logs n'affiche pas l'historique, seulement les
   lignes arrivées depuis l'ouverture de la page. Son port WebSocket est fixé
   à 3000.
@@ -75,7 +140,7 @@ Ouvrir `http://127.0.0.1:3000/`.
 |---|---|---|---|
 | Dashboard | S'affiche | — | |
 | Users | Liste vide ; `GET /users` renvoie `{}` | Ajouter un compte | |
-| Templates | Liste vide | « Start all », « Stop all », démarrer un modèle (routes absentes du serveur, F12) | |
+| Templates | Liste vide ; « Start All » désactivé avec une explication | Démarrer un modèle (désactivé : moteur hérité non utilisé) | |
 | Templates → Add | Le formulaire s'affiche | Créer un modèle | |
 | Logs | S'affiche avec un indicateur vert « Connected » | — | |
 | Settings | Le formulaire s'affiche avec les valeurs actuelles | — | |

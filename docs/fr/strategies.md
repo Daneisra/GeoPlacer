@@ -360,6 +360,12 @@ la position du pixel et `W × H` la taille de l'image.
 | Contours d'abord | `(contour ? 0 : N) + i` | aucune (contour testé sur 4 voisins) |
 | Aléatoire | rang du pixel dans l'ordre PCG32 V1 | 4 octets par pixel (64 Mio en 4096²) |
 
+**Phase 1B.7** : pour « couleur par couleur », le rang de couleur est lu
+dans une table typée ; pour « contours d'abord », une carte des contours
+d'un bit par pixel est calculée une fois par révision. Les clés sont
+identiques et les mesures sont dans [planification.md](planification.md)
+§ 8.
+
 **Équivalence** : pour chaque stratégie, trier les pixels peignables par
 leur clé redonne **exactement** l'ordre validé en 1B.3. C'est testé sur
 toutes les stratégies, avec des images, des régions, des graines et des

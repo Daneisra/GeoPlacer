@@ -77,3 +77,15 @@ avertissement.
   hérité de `wplacer-dev`, voir `docs/decisions/0001-fork-et-perimetre.md`).
   Ce point sera traité avec le nouveau moteur, qui aura sa propre file de
   tâches persistante.
+
+## Nouveau moteur (Phase 1B.6 et 1B.7)
+
+Les données du nouveau moteur (modèles, journal des tentatives,
+historique) ont leurs propres formats et garanties, sous un répertoire de
+données verrouillé :
+- modèles : voir [modeles.md](modeles.md) ;
+- journal des tentatives et historique : voir [journal.md](journal.md),
+  qui décrit les checkpoints, les générations, la rétention, le diagnostic
+  et la réparation.
+
+Ils ne sont pas encore branchés sur le serveur hérité.
