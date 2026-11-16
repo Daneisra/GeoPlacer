@@ -230,3 +230,7 @@ Phase 1B.10, il est neutralisé (voir [securite.md](securite.md)).
 | [../decisions/0002-moteur-phase-1b.md](../decisions/0002-moteur-phase-1b.md) | Nouveau moteur (statut : accepté avec ajustements) |
 | [../decisions/0003-migration-api-v1.md](../decisions/0003-migration-api-v1.md) | Migration des routes vers `/api/v1/` (statut : proposé, inventaire complet) |
 | [../../MODIFICATIONS.md](../../MODIFICATIONS.md) | Modifications apportées au code d'origine (AGPL §5a) |
+
+## Candidate consolidée
+
+[Rapport 6.0.0-rc.1](consolidation-6.0.0-rc.1.md) : intégration, palettes, tests, validation utilisateur, clone neuf et provenance de l’archive.

@@ -1,5 +1,13 @@
 # Qualité : tests, lint et outillage
 
+## Consolidation 6.0.0-rc.1 (16 novembre 2026)
+
+Contrôle complet du code applicatif 972ae3a : **735 réussis**, 1 optionnel ignoré,
+Jest 170, Vitest 565 (core 375, adapters 66, service 73, simulator 51).
+Lint : 0 erreur, 47 avertissements hérités ; build réussi.
+Détails, limites et journaux : [rapport de consolidation](consolidation-6.0.0-rc.1.md).
+Les résultats historiques ci-dessous restent datés par phase.
+
 ## Commandes
 
 Deux lanceurs coexistent (Phase 1B.0) : **Jest** pour le serveur hérité

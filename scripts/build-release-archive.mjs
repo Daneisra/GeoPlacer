@@ -129,7 +129,7 @@ if (verifyInstall) {
   const installLog = `${zip}.install.log`;
   writeFileSync(installLog, `${start.stdout ?? ''}\n${start.stderr ?? ''}\n--check (${check.status})\n${check.stdout ?? ''}\n${check.stderr ?? ''}`);
   const ok = start.status === 0 && /GeoPlacer est install/.test(start.stdout) && check.status === 0;
-  const verification = { folder: root, log: installLog, startBat: start.status, check: check.status, checkText: check.stdout.trim(), canvas: (start.stdout.match(/OK \(binaire chargé[^\n]*/) ?? [''])[0] };
+  const verification = { folder: path.relative(tmpdir(), root).split(path.sep).join('/'), folderBase: 'os.tmpdir()', log: path.basename(installLog), startBat: start.status, check: check.status, checkText: check.stdout.trim(), canvas: (start.stdout.match(/OK \(binaire chargé[^\n]*/) ?? [''])[0] };
   writeFileSync(`${zip}.manifest.json`, `${JSON.stringify({ ...manifest, installation: { ...verification, ok } }, null, 2)}\n`);
   console.log(`Installation depuis l’archive : ${ok ? 'réussie' : 'ÉCHEC'} (${verification.checkText}) ${verification.canvas}`);
   if (!ok) {
