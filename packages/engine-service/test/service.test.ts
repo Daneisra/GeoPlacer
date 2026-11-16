@@ -112,6 +112,35 @@ describe('EngineService: no network (Phase 1B.10)', () => {
   });
 });
 
+describe('EngineService: simulated outside actor (Phase 1C.0)', () => {
+  it('erases exactly the asked number of PAINTED template pixels (at most all of them), then they are repainted', async () => {
+    const { service } = await engine();
+    const t = await withTemplate(service);
+    await service.start();
+    await waitFor(service, (s) => s.state === 'completed');
+    const img = await service.templateImage(t.templateId);
+    const read = async () => decodeRegion((await service.canvasRegion({ minX: img.x, minY: img.y, width: img.width, height: img.height })).data);
+    const before = await read();
+    expect((await service.simulateExternalEdit(0)).changed).toBe(0);
+    expect((await service.simulateExternalEdit(5)).changed).toBe(5);
+    const after = await read();
+    const erased = [...before.keys()].filter((i) => before[i] !== after[i]);
+    expect(erased).toHaveLength(5);
+    // Only painted pixels were erased (to empty), nothing else changed.
+    for (const i of erased) {
+      expect(before[i]).not.toBe(-1);
+      expect(after[i]).toBe(-1);
+    }
+    // More than the painted pixels: all of them, never more.
+    const painted = [...after].filter((v) => v !== -1).length;
+    expect((await service.simulateExternalEdit(10_000)).changed).toBe(painted);
+    expect([...(await read())].every((v) => v === -1)).toBe(true);
+    await service.start();
+    await waitFor(service, (s) => s.state === 'completed');
+    expect(await matchesTemplate(service, t.templateId)).toBe(true);
+  });
+});
+
 describe('EngineService: commands, concurrent and incompatible requests', () => {
   it('start, pause, resume and stop: idempotent where it makes sense, explicit refusals otherwise', async () => {
     const { service } = await engine();

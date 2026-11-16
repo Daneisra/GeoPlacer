@@ -964,24 +964,44 @@ export class EngineService {
     });
   }
 
-  /** Demonstration: another actor erases `count` painted pixels of the template area (detected and repainted). */
+  /**
+   * Demonstration: another actor erases `count` painted pixels of the template area (detected and
+   * repainted). Phase 1C.0: one pass with a uniform random sample of at most `count` pixels
+   * (reservoir), one reused point, and a yield to the event loop every DEFAULT_SLICE_PIXELS pixels:
+   * before, an object per pixel of the area (16 million at 4096 x 4096) and a full shuffle.
+   */
   async simulateExternalEdit(count: number): Promise<{ readonly changed: number }> {
     this.guard();
     const world = this.requireWorld();
     const t = this.selectedTemplate;
     if (t === null) throw new EngineServiceError('NO_TEMPLATE_SELECTED', 409, 'select a template first');
-    const candidates: { point: { x: number; y: number }; color: number }[] = [];
-    for (let iy = 0; iy < t.image.height; iy++) {
-      for (let ix = 0; ix < t.image.width; ix++) {
-        const point = { x: t.placement.topLeft.x + ix, y: t.placement.topLeft.y + iy };
-        if (world.canvas.at(point) !== TRANSPARENT) candidates.push({ point, color: TRANSPARENT });
+    const k = Math.max(0, Math.min(count, 10_000));
+    const { width, height } = t.image;
+    const { x: x0, y: y0 } = t.placement.topLeft;
+    const chosen: number[] = [];
+    const point = { x: 0, y: 0 };
+    let painted = 0;
+    let sinceYield = 0;
+    for (let iy = 0; iy < height; iy++) {
+      point.y = y0 + iy;
+      for (let ix = 0; ix < width; ix++) {
+        point.x = x0 + ix;
+        if (world.canvas.at(point) === TRANSPARENT) continue;
+        painted++;
+        if (chosen.length < k) chosen.push(iy * width + ix);
+        else {
+          const j = Math.floor(Math.random() * painted);
+          if (j < k) chosen[j] = iy * width + ix;
+        }
+      }
+      sinceYield += width;
+      if (sinceYield >= DEFAULT_SLICE_PIXELS) {
+        sinceYield = 0;
+        await yieldToEventLoop();
       }
     }
-    for (let i = candidates.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [candidates[i], candidates[j]] = [candidates[j]!, candidates[i]!];
-    }
-    const changed = await world.canvas.editExternal(candidates.slice(0, Math.max(0, Math.min(count, 10_000))));
+    const edits = chosen.map((i) => ({ point: { x: x0 + (i % width), y: y0 + Math.floor(i / width) }, color: TRANSPARENT }));
+    const changed = await world.canvas.editExternal(edits);
     return { changed: changed.length };
   }
 
