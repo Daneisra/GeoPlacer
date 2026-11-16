@@ -63,3 +63,4 @@ export {
   type RestoreStep,
 } from './backup.js';
 export { DEMO_HEIGHT, DEMO_POSITION, DEMO_SETTINGS, DEMO_STRATEGY, DEMO_TEMPLATE_NAME, DEMO_WIDTH, demoPixels, demoRgba } from './demo.js';
+export { GHOST_PROJECT, MAX_GHOST_COLORS, ghostFilename, hexOf, parsePalette, type GhostImportInput, type GhostInfo } from './ghost.js';

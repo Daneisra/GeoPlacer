@@ -42,6 +42,7 @@ import {
   applyConfirmedUpgrade,
   asProjectId,
   asTemplateId,
+  isValidId,
   capacityOf,
   computeProgress,
   confirmUpgrade,
@@ -67,6 +68,7 @@ import {
 } from '@geoplacer/adapters-node';
 import { SimulatedCanvasProvider, type WorldCommit } from '@geoplacer/simulator';
 import { monotonicClock, type MonotonicClock } from './clock.js';
+import { GHOST_PROJECT, exportGhostPng, ghostInfo, importGhost, type GhostImportInput, type GhostInfo } from './ghost.js';
 import { EngineEventHub, type EngineEventEnvelope } from './events.js';
 import {
   DEMO_PALETTE,
@@ -833,6 +835,70 @@ export class EngineService {
       }
     }
     return { width: t.image.width, height: t.image.height, x: tx, y: ty, rect: r, scale: k, outWidth: ow, outHeight: oh, data: base64(out) };
+  }
+
+  // ─────────────── GeoPixels ghost image export (Phase 1C.1) ───────────────
+  // Their own TemplateManager project: never selectable, started or listed by the simulation.
+  // Nothing here contacts GeoPixels; the user imports the exported PNG by hand.
+
+  private ghostRef(templateId: string): TemplateRef {
+    if (!isValidId(templateId)) throw new EngineServiceError('TEMPLATE_NOT_FOUND', 404, `template ${templateId} not found`);
+    return { projectId: asProjectId(GHOST_PROJECT), templateId: asTemplateId(templateId) };
+  }
+
+  private async ghostTemplate(templateId: string): Promise<Template> {
+    const ref = this.ghostRef(templateId);
+    return (await this.templates.load(ref)).template;
+  }
+
+  async importGhost(input: GhostImportInput): Promise<GhostInfo> {
+    this.guard();
+    return ghostInfo(await importGhost(this.templates, pngjsCodec, input));
+  }
+
+  async listGhosts(): Promise<{ readonly templates: readonly GhostInfo[]; readonly unreadable: number }> {
+    this.guard();
+    const listing = await this.templates.list(asProjectId(GHOST_PROJECT));
+    const templates: GhostInfo[] = [];
+    let unreadable = listing.failures.length;
+    for (const s of listing.templates) {
+      try {
+        templates.push(ghostInfo((await this.templates.load({ projectId: asProjectId(GHOST_PROJECT), templateId: s.templateId })).template));
+      } catch {
+        unreadable++;
+      }
+    }
+    templates.sort((a, b) => b.updatedAt - a.updatedAt);
+    return { templates, unreadable };
+  }
+
+  async ghostInfoOf(templateId: string): Promise<GhostInfo> {
+    this.guard();
+    const t = await this.ghostTemplate(templateId).catch((error: unknown) => {
+      if (error instanceof EngineServiceError) throw error;
+      throw new EngineServiceError('TEMPLATE_NOT_FOUND', 404, `template ${templateId} not found`);
+    });
+    return ghostInfo(t);
+  }
+
+  /** The PNG to import by hand in GeoPixels, and its file name. */
+  async exportGhost(templateId: string): Promise<{ readonly png: Uint8Array; readonly filename: string }> {
+    this.guard();
+    const t = await this.ghostTemplate(templateId).catch((error: unknown) => {
+      if (error instanceof EngineServiceError) throw error;
+      throw new EngineServiceError('TEMPLATE_NOT_FOUND', 404, `template ${templateId} not found`);
+    });
+    return { png: await exportGhostPng(pngjsCodec, t), filename: ghostInfo(t).filename };
+  }
+
+  async deleteGhost(templateId: string): Promise<{ readonly deleted: string }> {
+    this.guard();
+    const t = await this.ghostTemplate(templateId).catch((error: unknown) => {
+      if (error instanceof EngineServiceError) throw error;
+      throw new EngineServiceError('TEMPLATE_NOT_FOUND', 404, `template ${templateId} not found`);
+    });
+    await this.templates.delete(this.ghostRef(templateId), { confirmName: t.name });
+    return { deleted: templateId };
   }
 
   // ───────────────────────── Settings ─────────────────────────

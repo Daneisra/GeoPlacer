@@ -50,6 +50,18 @@ const schemas = {
   reset: z.strictObject({ confirm: z.string().max(16) }),
   externalEdit: z.strictObject({ count: z.number().int().min(1).max(10_000) }),
   upgrade: z.strictObject({ proposalId: z.string().min(1).max(200), confirm: z.boolean() }),
+  // Phase 1C.1: GeoPixels ghost image export. Coordinates: GeoPixels' own, as typed (not converted;
+  // GeoPixels does not document their range or sign), bounded; at most 256 palette colors.
+  ghostImport: z.strictObject({
+    name: z.string().trim().min(1).max(100),
+    pngBase64: z.string().min(1).max(Math.ceil((MAX_PNG_BYTES * 4) / 3) + 4).regex(/^[A-Za-z0-9+/]+={0,2}$/, 'invalid base64'),
+    palette: z.array(z.string().trim().max(16)).min(1).max(256),
+    width: z.number().int().min(1).max(4096).optional(),
+    height: z.number().int().min(1).max(4096).optional(),
+    alphaThreshold: z.number().int().min(0).max(256).optional(),
+    x: z.number().int().min(-1_000_000_000).max(1_000_000_000).optional(),
+    y: z.number().int().min(-1_000_000_000).max(1_000_000_000).optional(),
+  }),
   canvasQuery: z.strictObject({ x: z.coerce.number().int(), y: z.coerce.number().int(), w: z.coerce.number().int().min(1), h: z.coerce.number().int().min(1), s: z.coerce.number().int().min(1).max(256) }).partial(),
 };
 
@@ -197,6 +209,40 @@ export function createEngineRouter(api: EngineApi): Router {
 
   // Backup (Phase 1B.10): stopped only, written where the server decides (never a client path).
   r.post('/backup', route((req) => (parse(schemas.empty, req.body), api.backup())));
+
+  // GeoPixels ghost image export (Phase 1C.1): local only, nothing is sent to GeoPixels.
+  r.get('/geopixels/templates', route(() => api.listGhosts()));
+  r.post('/geopixels/templates', route((req) => {
+    const body = parse(schemas.ghostImport, req.body);
+    const png = Buffer.from(body.pngBase64, 'base64');
+    if (png.length > MAX_PNG_BYTES) throw new RequestValidationError([{ path: 'pngBase64', message: `at most ${MAX_PNG_BYTES} bytes` }]);
+    return api.importGhost({
+      name: body.name,
+      png: new Uint8Array(png),
+      palette: body.palette,
+      ...(body.width === undefined ? {} : { width: body.width }),
+      ...(body.height === undefined ? {} : { height: body.height }),
+      ...(body.alphaThreshold === undefined ? {} : { alphaThreshold: body.alphaThreshold }),
+      ...(body.x === undefined ? {} : { x: body.x }),
+      ...(body.y === undefined ? {} : { y: body.y }),
+    });
+  }));
+  r.get('/geopixels/templates/:id', route((req) => api.ghostInfoOf(parse(ID, req.params.id))));
+  r.get('/geopixels/templates/:id/export.png', async (req, res) => {
+    try {
+      const { png, filename } = await api.exportGhost(parse(ID, req.params.id));
+      // The file name is an ASCII slug already; filtered again: nothing else reaches the header.
+      const safe = filename.replace(/[^A-Za-z0-9._-]/g, '_');
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Content-Disposition', `attachment; filename="${safe}"`);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.end(Buffer.from(png.buffer, png.byteOffset, png.byteLength));
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+  r.delete('/geopixels/templates/:id', route((req) => (parse(schemas.empty, req.body), api.deleteGhost(parse(ID, req.params.id)))));
 
   // Demonstration (Phase 1B.10): set up on an empty project only.
   r.get('/demo', route(() => api.demoAvailability()));

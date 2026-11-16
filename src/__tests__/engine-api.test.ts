@@ -80,6 +80,12 @@ function fakeEngine() {
     backup: async () => (calls.push('backup'), { name: 'geoplacer-sauvegarde-x', files: 3, bytes: 10, createdAt: 'now' }),
     demoAvailability: async () => ({ available: true, reason: null, active: false }),
     setupDemo: async () => (calls.push('demo'), result(true)),
+    importGhost: async (input) => (calls.push(`ghost:${input.name}:${input.palette.length}:${input.x ?? '-'}`), { templateId: 'fantome', width: 2, height: 2 }),
+    listGhosts: async () => ({ templates: [], unreadable: 0 }),
+    ghostInfoOf: async (id) => ({ templateId: id }),
+    // A hostile file name: it must never reach the Content-Disposition header as is.
+    exportGhost: async (id) => (calls.push(`export:${id}`), { png: new Uint8Array([0x89, 0x50, 0x4e, 0x47]), filename: 'evil"\r\nX-Injected: 1.png' }),
+    deleteGhost: async (id) => (calls.push(`delete:${id}`), { deleted: id }),
   };
   return api;
 }
@@ -243,6 +249,46 @@ describe('/api/v1: protections (Phase 1A kept, plus the engine guards)', () => {
   it('refuses a body above the size limit', async () => {
     const r = await call('POST', '/api/v1/templates', { name: 'x', pngBase64: 'A'.repeat(100_000), x: 0, y: 0, strategy: 'random' });
     expect(r.status).toBe(413);
+  });
+});
+
+describe('GeoPixels ghost image export routes (Phase 1C.1)', () => {
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString('base64');
+
+  it('imports with the player palette; bounded palette, sizes and coordinates', async () => {
+    const ok = await call('POST', '/api/v1/geopixels/templates', { name: 'Fantôme', pngBase64: png, palette: ['#ff0000', '00ff00'], x: 107958, y: 196137 });
+    expect(ok.status).toBe(200);
+    expect(engine.calls).toContain('ghost:Fantôme:2:107958');
+    for (const bad of [
+      { name: 'x', pngBase64: png },
+      { name: 'x', pngBase64: png, palette: [] },
+      { name: 'x', pngBase64: png, palette: Array.from({ length: 257 }, (_, i) => `#${i.toString(16).padStart(6, '0')}`) },
+      { name: 'x', pngBase64: png, palette: ['#ff0000'], width: 0 },
+      { name: 'x', pngBase64: png, palette: ['#ff0000'], height: 4097 },
+      { name: 'x', pngBase64: png, palette: ['#ff0000'], x: 1e10 },
+      { name: 'x', pngBase64: png, palette: ['#ff0000'], cookie: 'j=abc' },
+    ]) {
+      const r = await call('POST', '/api/v1/geopixels/templates', bad);
+      expect({ status: r.status, code: r.body.error?.code }).toEqual({ status: 400, code: 'INVALID_REQUEST' });
+    }
+  });
+
+  it('exports a PNG as an attachment; the file name cannot inject a header', async () => {
+    const r = await call('GET', '/api/v1/geopixels/templates/fantome/export.png');
+    expect(r.status).toBe(200);
+    expect(r.headers['content-type']).toBe('image/png');
+    expect(r.headers['cache-control']).toBe('no-store');
+    expect(r.headers['content-disposition']).toBe('attachment; filename="evil___X-Injected__1.png"');
+    expect(r.headers['x-injected']).toBeUndefined();
+    expect(engine.calls).toContain('export:fantome');
+    expect((await call('GET', '/api/v1/geopixels/templates/BAD..ID/export.png')).status).toBe(400);
+  });
+
+  it('deletes with a JSON request only (no cross-site form)', async () => {
+    expect((await call('DELETE', '/api/v1/geopixels/templates/fantome', 'a=1', { 'Content-Type': 'application/x-www-form-urlencoded' })).status).toBe(415);
+    const r = await call('DELETE', '/api/v1/geopixels/templates/fantome', {});
+    expect(r.status).toBe(200);
+    expect(engine.calls).toContain('delete:fantome');
   });
 });
 
