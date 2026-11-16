@@ -4,6 +4,7 @@ import MainView from './components/MainView';
 import LogsViewer from './components/LogsViewer';
 import Settings from './components/Settings';
 import LegacyDisabled from './components/LegacyDisabled';
+import { GeoPixelsPage } from './components/geopixels/GeoPixelsPage';
 
 export const router = createBrowserRouter([
   {
@@ -13,6 +14,10 @@ export const router = createBrowserRouter([
       {
         index: true,
         element: <MainView />,
+      },
+      {
+        path: 'geopixels',
+        element: <GeoPixelsPage />,
       },
       {
         path: 'logs',
