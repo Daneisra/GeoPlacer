@@ -3,7 +3,7 @@
 //
 //   node scripts/recette-arret-windows.mjs <dossier de GeoPlacer> <dossier du compte rendu>
 //
-// start.bat --demo runs in its own minimized console window; the demonstration is set up and started
+// start.bat --demo runs in its own hidden console window; the demonstration is set up and started
 // from the API; a CTRL_C_EVENT is generated on that console (GenerateConsoleCtrlEvent: the event the
 // keyboard sends, NOT a key press); the progress must be found again after a restart; the run goes
 // to the end; a backup is made from the API; the simulated world is deleted, the backup verified and
@@ -43,8 +43,8 @@ function launch(label, args) {
   const log = path.join(here, `${label}.log`);
   if (existsSync(log)) rmSync(log);
   const run = path.join(here, `${label}.cmd`);
-  writeFileSync(run, `@echo off\r\ncd /d "${clone}"\r\ncall .\\start.bat ${args} > "${log}" 2>&1\r\necho [run.cmd] exit=%errorlevel% >> "${log}"\r\n`);
-  const pid = Number(ps(`${K}\n[void][K]::SetConsoleCtrlHandler([IntPtr]::Zero, $false); $p = Start-Process -FilePath cmd.exe -ArgumentList '/d','/c','"${run}"' -WindowStyle Minimized -PassThru; $p.Id`));
+  writeFileSync(run, `@echo off\r\nchcp 65001 >nul\r\ncd /d "${clone}"\r\ncall .\\start.bat ${args} > "${log}" 2>&1\r\necho [run.cmd] exit=%errorlevel% >> "${log}"\r\n`);
+  const pid = Number(ps(`${K}\n[void][K]::SetConsoleCtrlHandler([IntPtr]::Zero, $false); $p = Start-Process -FilePath cmd.exe -ArgumentList '/d','/c','"${run}"' -WindowStyle Hidden -PassThru; $p.Id`));
   return { pid, log, out: () => (existsSync(log) ? readFileSync(log, 'utf8') : '') };
 }
 const ctrlC = (pid) => ps(`${K}\n[void][K]::FreeConsole(); if (-not [K]::AttachConsole(${pid})) { 'attach failed'; exit 2 }; [void][K]::SetConsoleCtrlHandler([IntPtr]::Zero, $true); [void][K]::GenerateConsoleCtrlEvent(0,0); Start-Sleep -Milliseconds 300; 'sent'`);
@@ -118,7 +118,9 @@ try {
   await stopWithCtrlC(w, 'run2');
 
   // Damage the demo data, then restore the backup from the command line (GeoPlacer stopped).
-  rmSync(path.join(demoDir, 'world'), { recursive: true, force: true });
+  const testWorld = path.resolve(demoDir, 'world');
+  if (!testWorld.startsWith(path.resolve(clone) + path.sep) || path.basename(testWorld) !== 'world') throw new Error('unexpected test-world path');
+  rmSync(testWorld, { recursive: true, force: true });
   const bdir = path.join(clone, 'sauvegardes', backup.body.name);
   const verify = spawnSync('npm.cmd', ['run', 'backup:verify', '--', bdir], { cwd: clone, encoding: 'utf8', shell: true });
   say(`verify: code ${verify.status} ; ${verify.stdout.trim().split('\n').pop()}`);

@@ -156,7 +156,7 @@ simulation.
 
 | Méthode et route | Corps | Effet |
 |---|---|---|
-| `GET /api/v1/geopixels/templates` | — | Images préparées, les plus récentes d'abord : dimensions, pixels à placer et transparents, couleurs utilisées (`{hex, pixels}`), palette, coin haut-gauche saisi, nom de fichier |
+| `GET /api/v1/geopixels/templates` | — | Images préparées, les plus récentes d'abord : dimensions, surface totale (`totalPixels`), pixels opaques (`paintablePixels`), retenus après filtre alpha (`retainedPixels`) et transparents (`transparentPixels`), couleurs utilisées (`{hex, pixels}`), palette, coin haut-gauche saisi, nom de fichier |
 | `POST /api/v1/geopixels/templates` | `{ name, pngBase64, palette: ["#rrggbb", …], width?, height?, alphaThreshold?, x?, y? }` | Prépare une image : palette du joueur (1 à 256 couleurs), redimensionnement facultatif (un seul côté : proportions gardées), seuil de transparence (0 à 256), coin haut-gauche GeoPixels gardé tel quel (entiers de −10⁹ à 10⁹, non convertis) |
 | `GET /api/v1/geopixels/templates/:id` | — | Informations d'une image préparée |
 | `GET /api/v1/geopixels/templates/:id/export.png` | — | Le PNG (RGBA 8 bits, alpha 0 ou 255, fragments `IHDR`, `IDAT`, `IEND`), en pièce jointe ; nom de fichier ASCII filtré |
