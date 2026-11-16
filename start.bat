@@ -40,7 +40,7 @@ if "%GEOPLACER_SETUP_ONLY%"=="1" (
   exit /b 0
 )
 
-echo [run] GeoPlacer demarre : ouvrez http://127.0.0.1:3000 ^(Ctrl+C pour arreter^)
+echo [run] GeoPlacer demarre : ouvrez l'adresse "Server listening on" affichee ci-dessous ^(par defaut http://127.0.0.1:3000^). Ctrl+C pour arreter.
 if /i "%~1"=="--demo" (
   call npm run demo
 ) else (
