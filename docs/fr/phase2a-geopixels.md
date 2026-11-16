@@ -46,7 +46,7 @@ généré à partir de `browser/` par `npm run build:connector`. Le code est fou
 et essai interactif ultérieur ; aucun essai sur le vrai site n'a été effectué par l'agent.
 
 Après vérification des autorisations du service et des restrictions du navigateur, l'utilisateur
-pourra installer le lecteur, ouvrir la couche de base de `https://www.geopixels.net`, charger
+pourra installer le lecteur, choisir l’origine exacte (`https://geopixels.net` ou `https://www.geopixels.net`), ouvrir sa couche de base, charger
 et positionner un fantôme, demander un couplage **lecteur** dans GeoPlacer puis saisir
 l'adresse locale et le code dans le petit panneau du userscript. « Observer le modèle »
 lit uniquement les bitmaps déjà présents dans le cache. Aucune requête au service n'est émise.
@@ -100,3 +100,10 @@ Elle ne contacte jamais GeoPixels. Voir le [rapport de phase](RAPPORT-PHASE2A.md
 
 Sous PowerShell, utiliser `npm.cmd` si la résolution de `npm.ps1` est bloquée ;
 aucune modification de la politique d’exécution Windows n’est nécessaire.
+
+## Résultat de la recette réelle de Phase 2B
+
+Le panneau apparaît sur le site chez l’utilisateur, mais la CSP bloque le WebSocket local ;
+l’interface de couche attendue est également indisponible. Le lecteur n’est donc pas validé
+de bout en bout sur le site. Ne pas désactiver la CSP pour contourner ce blocage.
+Voir le [rapport Phase 2B](RAPPORT-PHASE2B.md) pour les preuves et la suite nécessaire.
