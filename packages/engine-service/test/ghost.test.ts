@@ -8,7 +8,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { pngjsCodec } from '@geoplacer/adapters-node';
 import { TemplateError, asProjectId, asTemplateId, rgbaToQuantized } from '@geoplacer/core';
-import { EngineService, EngineServiceError, GHOST_PROJECT, ghostFilename, parsePalette } from '../src/index.js';
+import path from 'node:path';
+import { EngineService, EngineServiceError, GHOST_PROJECT, createBackup, ghostFilename, parsePalette, restoreBackup } from '../src/index.js';
 import { cleanup, openFast, tempDir } from './helpers.js';
 
 afterEach(cleanup);
@@ -133,6 +134,22 @@ describe('GeoPixels ghost image export (Phase 1C.1)', () => {
     expect((await service.listGhosts()).templates).toEqual([]);
     await expect(service.exportGhost(g.templateId)).rejects.toMatchObject({ code: 'TEMPLATE_NOT_FOUND' });
     await expect(service.ghostInfoOf('../../x')).rejects.toMatchObject({ code: 'TEMPLATE_NOT_FOUND' });
+  });
+
+  it('prepared ghost images are in the backups: restored elsewhere, the same export', async () => {
+    const root = await tempDir();
+    const data = path.join(root, 'engine');
+    const { service } = await openFast(data);
+    const g = await service.importGhost({ name: 'Sauvegardée', png: await png(9, 5, (x, y) => (x === y ? [0, 0, 0, 0] : [255, 0, 0, 255])), palette: PALETTE, x: 3, y: 4 });
+    const before = await service.exportGhost(g.templateId);
+    await service.close();
+    const { dir } = await createBackup(data, await tempDir());
+    const target = path.join(await tempDir(), 'engine');
+    await restoreBackup(dir, target);
+    const restored = await EngineService.open({ dataDir: target });
+    opened.push(restored);
+    expect((await restored.listGhosts()).templates.map((t) => t.templateId)).toEqual([g.templateId]);
+    expect(await restored.exportGhost(g.templateId)).toEqual(before);
   });
 
   it('import, export and delete open no network connection (no GeoPixels account, nothing sent)', async () => {

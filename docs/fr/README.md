@@ -6,6 +6,13 @@ GeoPlacer est un fork de
 pour GeoPixels, avec un moteur développé et testé **uniquement sur simulateur
 local** (voir l'ADR 0001).
 
+## En cours : Phase 1C.1, préparation d'images pour GeoPixels
+
+Branche `feat/geopixels-ghost-export` (locale) : préparer dans GeoPlacer une
+image pour l'**outil natif d'image fantôme** de GeoPixels (vos couleurs,
+dimensions, aperçu, PNG standard), puis l'importer **à la main** sur le site.
+GeoPlacer ne se connecte jamais à GeoPixels. Voir [geopixels.md](geopixels.md).
+
 ## État actuel : Phase 1C.0, version candidate de démonstration
 
 Réalisé en Phase 1C.0 (voir [version-candidate.md](version-candidate.md)) :
@@ -204,6 +211,7 @@ Phase 1B.10, il est neutralisé (voir [securite.md](securite.md)).
 | [installation-windows.md](installation-windows.md) | Installation en une commande, `start.bat`, lancement, configuration |
 | [guide-utilisateur.md](guide-utilisateur.md) | Parcours complet de la simulation dans le navigateur, grands modèles, arrêt par Ctrl+C |
 | [demonstration.md](demonstration.md) | Guide de démonstration |
+| [geopixels.md](geopixels.md) | Préparer une image fantôme pour GeoPixels : parcours, conditions d'utilisation, test manuel, limites |
 | [sauvegarde-restauration.md](sauvegarde-restauration.md) | Sauvegarde, vérification, restauration, reprise après interruption |
 | [commandes.md](commandes.md) | Toutes les commandes |
 | [problemes-connus.md](problemes-connus.md) | Problèmes connus et limites de la V1 |
