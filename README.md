@@ -1,22 +1,13 @@
-<h1 align="center"><p style="display: inline-flex; align-items: center; gap: 0.25em"><img style="width: 1.5em; height: 1.5em;" src="frontend/public/icons/favicon.svg">wplacer</p></h1>
+# GeoPlacer 6.0.0-rc.1
 
-<p align="center"><img src="https://img.shields.io/github/package-json/v/wplacer/wplacer">
-<a href="LICENSE"><img src="https://img.shields.io/github/license/wplacer/wplacer"></a>
-<a href="https://discord.gg/wplacerbot"><img src="https://img.shields.io/badge/Support-gray?style=flat&logo=Discord&logoColor=white&logoSize=auto&labelColor=5562ea"></a>
-<a href="LEIAME.md"><img src="https://img.shields.io/badge/tradução-português_(brasil)-green"></a>
-<a href="LISEZMOI.md"><img src="https://img.shields.io/badge/traduction-français-blue"></a>
-<a href="README_zh-cn.md"><img src="https://img.shields.io/badge/翻译-简体中文-red"></a></p>
+**GeoPlacer** propose deux parcours locaux : préparer une image PNG pour un
+import manuel dans l’outil d’image fantôme de GeoPixels, et simuler le dessin
+d’un modèle sur une toile locale avec un agent et des ressources simulés.
+Aucune connexion automatisée à GeoPixels ou Wplace, aucun compte réel,
+cookie, jeton ou proxy. Le dessin sur GeoPixels reste manuel.
 
-## GeoPlacer
-
-**GeoPlacer** place les pixels d'une image sur une toile, pixel par pixel,
-en respectant des ressources limitées (énergie qui se régénère, couleurs
-débloquées), avec une stratégie de dessin, et reprend là où il s'était
-arrêté. **GeoPlacer V1 est un environnement de simulation local** : la
-toile, l'agent et ses ressources sont **simulés** sur votre machine, et un
-tableau de bord dans le navigateur pilote le moteur. Aucune connexion à
-GeoPixels, à Wplace ou à un autre service ; aucun compte, aucune session,
-aucun jeton.
+La version **6.0.0-rc.1** consolidée est locale, sur
+`integrate/6.0.0-rc.1-geopixels`, et attend une validation de publication.
 
 **Origine** : GeoPlacer est un fork de wplacer (`Arknight38/wplacer-dev`,
 issu de `luluwaffless/wplacer`), œuvre de JinxTheCatto, luluwaffless,
@@ -32,15 +23,16 @@ dépôt), une connexion Internet pour l'installation. Aucun compilateur,
 aucun droit administrateur.
 
 ```powershell
-git clone https://github.com/Daneisra/GeoPlacer.git
+git clone --branch integrate/6.0.0-rc.1-geopixels https://github.com/Daneisra/GeoPlacer.git
 cd GeoPlacer
 npm run setup:windows      # ou double-clic sur setup.bat
 ```
 
-Tant que la version candidate n'est pas fusionnée dans `main`, se placer
-d'abord sur sa branche : `git checkout feat/phase1c0-release-candidate`
-(une fois cette branche publiée ; avant, utiliser
-`feat/phase1b10-demo-hardening`).
+Cette branche n’est pas encore publiée : pour un test immédiat, utilisez
+l’archive candidate locale fournie et extrayez-la, puis lancez
+`npm run setup:windows` dans son dossier. La commande Git ci-dessus sera
+utilisable après publication autorisée de cette branche. `main` contient
+encore la base historique et ne doit pas être utilisée pour cette candidate.
 
 Une seule commande : dépendances exactes, binaire `canvas` précompilé (sans
 compilateur), compilation, configuration sans secret, démarrage de
@@ -83,8 +75,9 @@ npm run demo               # ou start.bat --demo : démonstration, dossier sépa
   GeoPlacer arrêté ([guide](docs/fr/sauvegarde-restauration.md)).
 - **Mettre à jour** : `git pull`, puis `start.bat` (ou
   `npm run setup:windows`).
-- **GeoPixels** : menu « Préparer pour GeoPixels » : votre image dans vos
-  couleurs, aux dimensions voulues, exportée en PNG pour l'outil d'image
+- **GeoPixels** : menu « Préparer pour GeoPixels » : sélection immédiate
+  de votre palette de 28 couleurs, d’une palette communautaire de 30 couleurs,
+  d’une palette personnalisée ou des couleurs de l’image ; PNG pour l’outil d’image
   fantôme du site, que vous importez **vous-même** ; GeoPlacer ne se
   connecte jamais à GeoPixels ([guide](docs/fr/geopixels.md)).
 

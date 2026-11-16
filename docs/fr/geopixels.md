@@ -1,4 +1,4 @@
-# Préparer une image fantôme pour GeoPixels (Phase 1C.1)
+# Préparer une image fantôme pour GeoPixels (6.0.0-rc.1 consolidée)
 
 GeoPlacer prépare **sur votre ordinateur** une image destinée à l'outil
 d'image fantôme (« ghost image ») de [GeoPixels](https://geopixels.net/) :
@@ -26,9 +26,10 @@ aucun script du site ni code d'extension n'a été consulté.
 - le **ditherer** (🏁) qui pixellise une image ;
 - l'outil « Restore Area », qui utilise l'image fantôme chargée et **son coin
   haut-gauche** ;
-- une **palette propre à chaque joueur** : des couleurs se débloquent
-  (« Any hex color allowed ») ; aucune palette de base n'est publiée en
-  clair ;
+- une **palette propre à chaque joueur** : le site propose les choix Base,
+  Active (couleurs actives) et Full (couleurs débloquées), ainsi que le
+  déblocage de couleurs supplémentaires (« Any hex color allowed »). Les
+  pages consultées ne certifient pas une liste initiale exhaustive ;
 - des champs de coordonnées « X,Y », un point d'apparition
   `[107958,196137]` (page « Nuances »).
 
@@ -69,12 +70,35 @@ GeoPlacer n'utilise ni ne recommande d'extension.
 Dans GeoPlacer (menu **« Préparer pour GeoPixels »**) :
 
 1. **Image** : un PNG (8 Mio au plus, 4096 × 4096 au plus) et un nom.
-2. **Couleurs** : collez **vos** couleurs GeoPixels en hexadécimal
-   (`#rrggbb`, une par ligne ou séparées par des espaces ; 256 au plus).
-   Si votre image a déjà les bonnes couleurs (256 au plus), « Reprendre les
-   couleurs de l'image » les remplit. Chaque pixel est ramené à la couleur la
-   plus proche de cette liste (distance OKLab, la même conversion que pour
-   la simulation).
+2. **Palette de couleurs** :
+   - **Ma palette GeoPixels (28 couleurs)** : liste fournie par l’utilisateur,
+     dans son ordre original, avec `#ffffff` corrigé ; sélectionnée par défaut.
+   - **Palette communautaire GeoPixels (30 couleurs)** : liste Manako sur
+     [Lospec](https://lospec.com/palette-list/geopixels-free-colors), consultée
+     le 16 novembre 2026, alors signalée en attente de modération. Elle
+     contient les 28 couleurs et, en plus, `#ff9f1c` et `#ffff00`, dans l’ordre
+     propre à la source. Aucun mélange silencieux des deux listes.
+   - **Palette personnalisée** : coller vos codes à six chiffres ; espaces,
+     virgules, points-virgules et retours à la ligne acceptés, casse normalisée.
+     Les doublons sont signalés puis ignorés en conservant la première occurrence.
+     `#fffff`, les valeurs alpha et caractères invalides sont refusés explicitement.
+     Une palette vide ou dépassant 256 couleurs bloque la préparation.
+   - **Couleurs originales de l’image** : couleurs des pixels retenus au
+     seuil alpha choisi, jusqu’à 256 couleurs. Au-delà, choisir une autre
+     palette ; une image filtrée entièrement transparente n’ajoute pas de
+     couleur opaque fictive.
+
+   Pastilles, codes, nombre et bouton de copie sont disponibles. Le mode et
+   la liste personnalisée sont conservés dans ce navigateur si le stockage
+   local est autorisé ; revenir à un préréglage ne remplace pas votre liste.
+   Les presets ne sont pas présentés comme officiels et ne prouvent jamais
+   les couleurs débloquées de votre compte. Aucun accès au compte n’est fait.
+   La distinction Base/Active/Full est visible sur la
+   [page native](https://www.geopixels.net/), sans certification de ces listes.
+
+   Le choix alimente la prochaine **Préparation de l’image**, par le même
+   quantificateur OKLab que la simulation. Un modèle déjà enregistré conserve
+   sa palette effective et son export, même si un préréglage évolue ensuite.
 3. **Dimensions** : largeur et/ou hauteur (une seule : proportions gardées) ;
    seuil de transparence (128 par défaut).
 4. **Placement** : le coin haut-gauche visé sur GeoPixels (X, Y), noté tel
@@ -116,45 +140,43 @@ Puis, **vous-même**, dans GeoPixels :
   `GET /api/v1/geopixels/templates/:id`, `GET …/:id/export.png`,
   `DELETE …/:id` (voir [api-v1.md](api-v1.md)).
 
-## 5. Ce qui est vérifié, et ce qui ne l'est pas
+## 5. Validation utilisateur du 16 novembre 2026
 
-Vérifié par des tests automatisés et une recette navigateur (Edge et
-Firefox de Playwright), **sans réseau et sans compte** : transparence,
-images non carrées, 3000 × 2000 réduite, 4096 × 4096, couleurs de la
-palette uniquement, coordonnées grandes et négatives gardées, aucune
-inversion de l'axe Y, export identique au modèle et à l'aperçu, aucune
-connexion réseau, séparation d'avec la simulation, sauvegarde.
+L’utilisateur a préparé un PNG **595 × 894** avec une palette de **28 couleurs**,
+puis l’a importé manuellement dans GeoPixels. Il confirme le téléchargement,
+l’acceptation par l’outil natif d’image fantôme, l’affichage et le positionnement,
+sans inversion évidente. Cette validation a été réalisée par l’utilisateur,
+pas par Codex ; elle ne certifie pas toutes les dimensions, palettes, formats,
+couleurs ou transparences. Les limites des formats et tailles acceptés par le
+site restent non déterminées hors de cet exemple.
 
-**Non vérifié** (GeoPixels ne le documente pas, et GeoPlacer n'accède jamais
-au site) : que « Upload Image » accepte ce PNG, la taille maximale admise,
-l'orientation affichée, la fidélité des couleurs et le traitement de la
-transparence dans l'outil. La procédure ci-dessous permet de le vérifier à
-la main.
+| Mesure rapportée | Pixels |
+|---|---:|
+| Surface totale, 595 × 894 | 531 930 |
+| Opaques retenus par GeoPlacer | 294 647 |
+| Transparents | 237 283 |
+| Dénominateur affiché par GeoPixels | 531 930 |
 
-## 6. Test manuel sur le vrai site (à faire par vous)
+Les compteurs peuvent utiliser des définitions différentes. La surface inclut
+la transparence ; GeoPlacer applique le seuil alpha et ne compare pas les pixels
+à l’état réel de la carte. Cette différence n’est donc pas déclarée comme un bug.
+La recette locale utilise une **fixture synthétique** de mêmes dimensions et
+mêmes compteurs, pas le fichier personnel de l’utilisateur.
 
-Durée : 10 minutes, avec votre compte habituel, sans rien peindre.
+## 6. Recette locale reproductible
 
-1. Dans GeoPlacer, préparez une **image de test** de 30 × 20 : un carré
-   rouge en haut à gauche (5 × 5), un carré bleu en bas à droite, une bande
-   transparente au milieu (lignes entières), le reste dans une de vos
-   couleurs ; palette : vos couleurs. Téléchargez le PNG.
-2. Dans GeoPixels, outil d'image fantôme, « Upload Image » : **le fichier
-   est-il accepté** ? Notez tout message.
-3. « Place on Map » à un endroit libre : **le rouge est-il en haut à
-   gauche** ? (sinon, l'orientation diffère).
-4. **La bande transparente** laisse-t-elle voir la carte ?
-5. **Couleurs** : avec la pipette de GeoPixels, les couleurs lues sont-elles
-   celles de votre palette ? (La protection contre l'empreinte du canevas de
-   certains navigateurs ajoute du « bruit » : GeoPixels conseille de la
-   désactiver pour le site.)
-6. **Taille** : recommencez avec une image de 500 × 500, puis plus grande,
-   jusqu'à un refus éventuel ; notez la taille maximale acceptée.
-7. « Clear Image » pour retirer l'image fantôme.
+`node scripts/recette-geopixels.mjs <dossier>` utilise le serveur compilé dans
+un dossier temporaire et Edge ; avec `GEOPLACER_BROWSER_ENGINE=firefox`, elle
+utilise le Firefox de Playwright. `GEOPLACER_PLAYWRIGHT_CORE` désigne l’outil
+installé séparément. Elle vérifie les quatre choix, erreurs, doublons,
+persistance, quantification effective, conservation des anciens modèles,
+couleurs utilisées/inutilisées, téléchargement et égalité pixel par pixel de
+l’aperçu et du PNG. Les requêtes externes sont bloquées ; les liens GeoPixels
+et Lospec ne sont pas suivis. Les journaux et captures sont conservés.
 
-Notez les résultats (acceptée ou non, orientation, transparence,
-couleurs, taille maximale) : tant que ce test n'a pas été fait, la
-compatibilité n'est **pas** considérée comme validée.
+Pour un contrôle manuel, préparer d’abord une petite image locale, vérifier les
+pastilles et le damier, puis télécharger le PNG. Son import dans GeoPixels est
+une action manuelle séparée ; aucun placement automatique n’est proposé.
 
 ## 7. Intégrations plus poussées : ce qu'il faudrait demander à GeoPixels
 

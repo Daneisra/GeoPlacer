@@ -27,7 +27,7 @@ licence. L'historique Git complet du projet d'origine est conservé.
 - `start.bat` : installation des deux projets par le chemin vérifié.
 - Documentation française (`docs/fr/`, `docs/decisions/`).
 
-## 2026-11-16 — Phase 1C.1 : préparation d'images pour GeoPixels (branche distincte)
+## 2026-11-16 — Phase 1C.1 : préparation d'images pour GeoPixels (initialement branche distincte, désormais intégrée)
 
 - `packages/core/src/template/resize.ts` (nouveau) : redimensionnement avant quantification.
 - `packages/engine-service/src/ghost.ts` (nouveau) : préparation et export PNG pour l'outil natif
@@ -301,3 +301,14 @@ licence. L'historique Git complet du projet d'origine est conservé.
 - Contrats du moteur, sans algorithme (`packages/core/src/contracts`).
 - Documentation : architecture, ADR 0002 accepté avec ajustements,
   commandes Windows, qualité.
+
+## 2026-11-16 — Consolidation locale 6.0.0-rc.1
+
+- Fusion des quatre commits de release et des quatre commits d’export depuis leur
+  ancêtre c57e478, sans réécriture des branches existantes ni changement de main.
+- Deux listes de palette distinctes, modes personnalisé/image, validation et
+  préférences de navigateur ; même TemplateManager, quantification et export.
+- Compteurs de surface/transparence et couleurs inutilisées, fixtures et recettes.
+- Identité principale GeoPlacer/GP, sans logo téléchargé ; attribution et AGPL préservées.
+- Documentation du PNG et du Ctrl+C validés par l’utilisateur, pas par Codex.
+- Version conservée à 6.0.0-rc.1 ; aucun push, tag, release ou publication.

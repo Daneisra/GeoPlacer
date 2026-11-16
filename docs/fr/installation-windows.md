@@ -9,6 +9,22 @@ pas vérifiés.
 double-cliquer sur `setup.bat` (ou `npm run setup:windows`). Ensuite,
 `start.bat` lance GeoPlacer et `start.bat --demo` la démonstration.
 
+## Candidate consolidée 6.0.0-rc.1
+
+Utiliser l’archive candidate issue du commit de consolidation, ou la branche
+`integrate/6.0.0-rc.1-geopixels` après sa publication autorisée. L’ancienne
+archive du commit `4a62e5d` ne contient ni l’export intégré ni ces palettes et
+ne représente plus la candidate complète. `main` reste historique.
+
+Après l’installation : tableau de bord pour la **simulation locale**, menu
+**Préparer pour GeoPixels** pour le PNG et ses quatre modes de palette.
+L’import du fichier dans GeoPixels et le dessin sont manuels. Les modèles
+préparés sont inclus dans les sauvegardes du moteur.
+
+L’utilisateur confirme le **Ctrl+C physique au clavier sous Windows**, le
+16 novembre 2026. Cette confirmation ne se substitue pas aux tests automatiques
+de reprise et ne prétend pas être une manipulation physique de Codex.
+
 ## 1. Prérequis
 
 | Outil | Minimum (vérifié par l'installation) | Recommandé (vérifié en recette) | Remarque |

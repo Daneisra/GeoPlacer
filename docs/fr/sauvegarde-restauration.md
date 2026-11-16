@@ -8,6 +8,12 @@ tentatives et ses checkpoints, l'historique et les réglages
 `templates.json`…) ne font pas partie de la sauvegarde ; voir
 [persistance.md](persistance.md).
 
+Les modèles préparés pour GeoPixels (`projects/geopixels`) sont également
+sauvegardés, avec leurs palettes effectives et leurs exports reproductibles.
+Le choix de palette du navigateur et le texte personnalisé sont des préférences
+locales du navigateur : ils ne font pas partie de la sauvegarde serveur.
+Changer de préréglage ne requantifie jamais silencieusement un modèle sauvegardé.
+
 ## 1. Sauvegarder
 
 **GeoPlacer doit être arrêté, ou la simulation à l'arrêt** : rien ne doit

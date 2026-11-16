@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the wplacer project will be documented in this file.
+GeoPlacer changes are listed first; the inherited wplacer history is preserved below.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -15,6 +15,16 @@ les fonctions de wplacer (comptes, extension, ancien moteur, proxys) sont désac
 Entrée rédigée en français, comme la documentation de GeoPlacer.
 
 ### Ajouté
+
+- Préparation locale et export PNG pour import manuel dans GeoPixels, redimensionnement
+  et même quantification OKLab que les modèles simulés.
+- Palette fournie de 28 couleurs, palette communautaire de 30 couleurs (Lospec/Manako),
+  saisie personnalisée conservée et couleurs originales de l’image.
+- Validation des codes, doublons, nombre de couleurs, pastilles/copie et statistiques
+  séparant surface, pixels retenus, transparence et couleurs inutilisées.
+- Identité visible GeoPlacer avec monogramme provisoire GP ; crédits Wplacer/AGPL conservés.
+- Validation utilisateur PNG 595 × 894 et Ctrl+C Windows du 16 novembre 2026,
+  documentée avec ses limites ; tests locaux supplémentaires et archive consolidée.
 
 - Nouveau moteur mono-agent sur toile simulée durable : modèles et révisions, huit stratégies,
   progression et ETA, ressources et améliorations simulées, journal des tentatives, reprise.

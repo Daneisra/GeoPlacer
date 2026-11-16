@@ -1,4 +1,4 @@
-# GeoPlacer 6.0.0-rc.1 — V1 de démonstration (simulation locale)
+# GeoPlacer 6.0.0-rc.1 — préparation PNG et simulation locale
 
 > **Version candidate destinée à des testeurs.** GeoPlacer V1 est un
 > environnement de **simulation locale** : la toile, l'agent et ses
@@ -15,6 +15,12 @@
 - Mettre en pause, reprendre, arrêter (Ctrl+C) et **retrouver la
   progression** au démarrage suivant.
 - **Sauvegarder** et **restaurer** vos données.
+
+- Préparer une image fantôme PNG pour import manuel dans GeoPixels :
+  quatre modes de palette (28 fournie, 30 communautaire, personnalisée,
+  couleurs originales), conversion OKLab et redimensionnement.
+- Voir surface totale, pixels retenus/transparents, couleurs utilisées et
+  inutilisées ; conserver chaque palette effective avec son modèle.
 
 ## Installer (Windows 10, 64 bits ; Windows 11 non vérifié)
 
@@ -38,6 +44,14 @@
 Guide complet : `docs/fr/installation-windows.md` et
 `docs/fr/demonstration.md`.
 
+## Validation utilisateur du 16 novembre 2026
+
+PNG 595 × 894 préparé avec 28 couleurs, accepté et positionné dans le fantôme
+natif GeoPixels, sans inversion évidente ; Ctrl+C physique Windows confirmé.
+Ces validations sont celles de l’utilisateur. Elles ne certifient pas toutes
+les images ou plateformes et aucun placement automatique n’a été testé.
+La palette communautaire est attribuée à Manako/Lospec, pas dite officielle.
+
 ## Nouveautés de cette version candidate
 
 - **Serveur réactif** sur les grands modèles : le calcul est découpé et
@@ -53,7 +67,10 @@ Guide complet : `docs/fr/installation-windows.md` et
 
 ## Limites connues
 
-- Simulation locale uniquement ; un seul agent simulé.
+- Préparation PNG et simulation locales uniquement ; un seul agent simulé,
+  aucun placement automatique sur GeoPixels. Les presets ne prouvent pas les
+  couleurs débloquées du compte. L’ancienne archive 4a62e5d est remplacée par
+  celle du commit consolidé identifié dans son manifeste.
 - Vérifié sous Windows 10 ; Linux et macOS non vérifiés.
 - Navigateurs vérifiés : Edge ; Firefox dans la version fournie par
   Playwright (une version officielle de Firefox n'a pas été testée).
