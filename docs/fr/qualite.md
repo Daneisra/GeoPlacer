@@ -14,8 +14,10 @@ npm run typecheck:packages    # types des paquets, tests compris
 npm run test:packages         # Vitest
 npm run lint:packages         # ESLint des paquets
 npm run test:all              # typecheck des paquets, puis Jest, puis Vitest
-npm run check                 # tsc, lint, lint:packages, puis test:all (contrôle complet)
-cd frontend; npx eslint .; npm run build
+npm run lint:frontend         # ESLint de l'interface, 0 avertissement toléré (1B.10)
+npm run typecheck:frontend    # types de l'interface (1B.10)
+npm run check                 # tsc, lint du serveur, des paquets et de l'interface, types de l'interface, puis test:all
+npm run check:logged          # idem, sortie complète dans test-logs\
 ```
 
 Sur un **clone neuf**, `npm run build` construit aussi le frontend, qui a
@@ -23,6 +25,92 @@ ses propres dépendances hors des workspaces. Il faut donc lancer
 `cd frontend; npm ci` en plus du `npm ci` racine, sinon le build échoue
 dans `frontend` (modules `react`, `vite`… introuvables). C'est vérifié en
 Phase 1B.8 : les tests passent sans cette étape, le build la requiert.
+
+## Phase 1B.10 : stabilisation, sécurisation, démonstration
+
+**Clone neuf, procédure documentée seulement** (16/11/2026) : dépôt cloné
+dans un dossier vide, cache npm **vide**, puis `npm run setup:windows`
+(six étapes réussies, 3 min 40 environ), `npm run check:logged`,
+`npm run build`, recettes et mesures. Journaux complets conservés hors du
+dépôt.
+
+**`npm run check:logged`** sur le clone (commit `fd10b98`, code de sortie 0) :
+- Jest : 14 suites, **145 tests** (122 en 1B.9) ;
+- Vitest : 46 fichiers, **530 tests** + 1 exhaustif optionnel :
+  - core 363 ;
+  - adapters-node 66 ;
+  - engine-service 57 ;
+  - simulator 44 ;
+- lint du serveur : 0 erreur (65 avertissements hérités `no-explicit-any`) ;
+- lint des paquets : 0 ;
+- **lint de l'interface : 0 erreur, 0 avertissement** (17 erreurs et 3
+  avertissements hérités en 1B.9), désormais inclus dans `npm run check`
+  avec `--max-warnings 0` ; types de l'interface vérifiés ;
+- `npm run build` : réussi (26 s).
+
+Le contrôle complet a été refait sur le commit final (voir le rapport de
+phase).
+
+**Tests ajoutés** :
+
+| Où | Fichier | Couvre |
+|---|---|---|
+| serveur | `legacy-isolation.test.ts` | Chaque route héritée désactivée : 410 `LEGACY_DISABLED` avant son traitement ; contournements (casse, barre finale, `HEAD`, démarrage déguisé) ; routes locales conservées ; client réseau hérité fermé ; aucune connexion hors boucle locale |
+| serveur | `server-engine.test.ts` | Serveur réel : `LEGACY_KEEPALIVE=1` ignoré, `POST /user` refusé, écoute sur `127.0.0.1`, aucun fichier servi hors des dossiers prévus (chemins encodés compris) |
+| serveur | `engine-api.test.ts` | Routes `/backup` (aucun chemin accepté du client : 400) et `/demo` |
+| engine-service | `backup.test.ts` | Sauvegarde restaurée dans un autre dossier puis reprise sans repeindre ; refus pendant l'exécution ; sauvegarde corrompue, incomplète, modifiée, incompatible ou incohérente refusée sans toucher aux données ; données précédentes conservées ; ligne de commande en français ; **vrais processus tués à chaque étape de la restauration**, reprise ou annulation |
+| engine-service | `demo.test.ts` | Image d'exemple déterministe, opaque, couleurs débloquées ; préparation sur un projet vide puis démarrage ; refus sur un projet qui a des données (rien n'est modifié) et pendant une simulation |
+| engine-service | `i18n.test.ts` | Chaque code d'erreur, code d'estimation et de refus d'amélioration, raison d'état (y compris chaque littéral du code de l'ordonnanceur) a sa traduction ; avis, verdicts, paramètres ; repli marqué pour l'inconnu |
+| engine-service | `large-display.test.ts` | 256², 1000², 2000², 4096² et non carrés affichés entiers au zoom d'ajustement, proportions, lecture bornée ; zoom et déplacement bornés ; correspondance pixel de toile, pixel affiché, axe Y dans les deux sens ; toile 4096² lue entière, chaque échantillon exact ; modèle non carré : superposition alignée et pixels affichés conformes aux compteurs du moteur ; modèle partiellement hors toile refusé |
+| engine-service | `service.test.ts` | Simulation complète, sauvegarde et diagnostics sans aucune connexion réseau |
+| core | `progress-incremental.test.ts` | Égalité exacte avec le calcul complet, reconstructions, désaccord détecté et corrigé |
+
+**Contre-épreuves** :
+- sans le verrou des routes héritées, 16 tests d'isolation échouent ;
+- la recette Firefox avec le nouveau contrôle des heures, sur l'interface
+  d'avant le correctif : 1 échec attendu (« 1:03:35 AM »), puis 0 après.
+
+**Recettes** (clone neuf) : Edge complet 0 échec, Firefox de Playwright
+complet 0 échec, recette 1B.7 29 contrôles 0 KO, arrêt par événement
+Ctrl+C réel sur la console de `start.bat` réussi deux fois (voir
+[recette-navigateur.md](recette-navigateur.md)).
+
+**Mesures sur le clone** (`npm run bench:responsiveness`), **machine
+chargée** : un autre logiciel occupait le processeur (94 % mesurés juste
+après). Les valeurs absolues sont donc environ deux fois moins bonnes que
+celles de [progression.md](progression.md) § 6, mesurées machine calme ;
+la comparaison des deux modes, faite dans les mêmes conditions, reste
+valable.
+
+| Modèle | Mode | Import | Premier lot | Cycle médian / p95 | Débit | HTTP médian / max | Mémoire |
+|---|---|---|---|---|---|---|---|
+| 256² | incrémental | 0,2 s | 0,4 s | 28 / 45 ms | 29 084 px/s | 2,6 / 22 ms | 184 Mio |
+| 2000² | complet | 2,4 s | 1,2 s | 403 / 485 ms | 2 394 px/s | 4,0 / 33 ms | 223 Mio |
+| 2000² | incrémental | 2,2 s | 1,0 s | 238 / 459 ms | 3 759 px/s | 3,1 / 28 ms | 231 Mio |
+| 4096² | incrémental | 8,8 s | 3,6 s | 876 / 1 770 ms | 1 002 px/s | 3,5 / 26 ms | 566 Mio |
+
+Lecture d'une région de 2000² ou 4096² pour l'affichage : 83 à 86 ms,
+environ 21 Mio de JSON ; l'interface ne lit que la zone visible, à
+l'échelle de l'affichage. Sous cette charge, l'attente maximale de la
+boucle d'événements atteint 2,7 s à 4096² (0,67 s à 2000²) ; les requêtes
+HTTP mesurées sont restées sous 35 ms.
+
+**Délais intermittents : suivi.**
+- **Phase 1B.10** : aucun échec par délai dépassé dans les contrôles
+  complets de la phase (le contrôle du clone neuf ci-dessus, et le
+  contrôle final), ni dans les essais ciblés. Ce n'est pas une preuve que
+  le problème a disparu : la machine était calme pendant certains
+  passages et chargée pendant d'autres, sans mesure systématique.
+- **Causes démontrées** (phases précédentes) : une course dans un test
+  (checkpoint lu avant `close()`, corrigée en 1B.9) ; des tests trop
+  courts sous forte charge, mesurée (un jeu occupait 9 des 12 processeurs
+  logiques, la suite core prenait 47 s au lieu de 6 s).
+- **Cause supposée, non démontrée** : l'analyse antivirus des fichiers
+  d'un clone neuf, qui ralentirait les premiers tests.
+- **Non expliqué** : la rétention du journal à 2,6 s dans un passage
+  sans charge connue (Phase 1B.6).
+- Le budget de 30 s par test (Vitest) reste en place ; un vrai blocage
+  échoue toujours.
 
 ## Phase 1B.9 : serveur, toile durable, tableau de bord
 
@@ -176,8 +264,9 @@ et un client lent est resynchronisé même sans nouvel événement.
 
 Le navigateur n'est jamais bloqué : les calculs ont lieu dans le serveur.
 En 2000², une requête peut attendre jusqu'à environ 0,2 s pendant un
-cycle. La piste d'optimisation est une progression incrémentale dans
-l'ordonnanceur ; elle n'est pas faite. La vérification complète
+cycle. La piste d'optimisation était une progression incrémentale dans
+l'ordonnanceur : elle est faite et mesurée en Phase 1B.10 (voir
+[progression.md](progression.md), § 6). La vérification complète
 périodique de la toile, qui détecte les modifications extérieures, est
 conservée : chaque cycle relit la zone du modèle.
 

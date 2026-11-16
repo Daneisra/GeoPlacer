@@ -1,5 +1,9 @@
 # Persistance des données
 
+> Ce document décrit les fichiers **hérités** de `data\`. Les données du
+> moteur de la V1 (`data\engine`) ont leur propre sauvegarde vérifiée :
+> voir [sauvegarde-restauration.md](sauvegarde-restauration.md).
+
 Toutes les données sont stockées en JSON dans `data/` (dossier ignoré par
 Git) :
 

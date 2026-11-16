@@ -1,11 +1,15 @@
-# API `/api/v1` du moteur (Phase 1B.9)
+# API `/api/v1` du moteur (Phase 1B.9, complétée en 1B.10)
 
 La V1 de GeoPlacer est un **environnement de simulation local**. Ces routes
 pilotent le nouveau moteur sur la toile simulée locale. Elles ne parlent à
 aucun service réel et ne manipulent ni compte, ni session, ni jeton.
 
-Les routes héritées (`/users`, `/templates`, `/settings`…) sont inchangées,
-toujours montées à la racine, et ne concernent pas le nouveau moteur.
+Les routes héritées (`/users`, `/templates`, `/settings`…) sont toujours
+montées à la racine et ne concernent pas le nouveau moteur. Depuis la
+Phase 1B.10, celles qui pouvaient contacter un service réel ou lancer
+l'ancien moteur répondent `410` avec le code `LEGACY_DISABLED` (format
+hérité : `{ "error": "…", "code": "LEGACY_DISABLED" }`) ; voir
+[securite.md](securite.md).
 
 ## 1. Protections
 
@@ -62,7 +66,14 @@ mais peut évoluer.
 | `STALE_PROPOSAL` | 409 | La proposition d'amélioration ne correspond plus à l'état de l'agent : relire `/resources` |
 | `UPGRADE_REFUSED` | 409 | Amélioration impossible (monnaie, niveau maximal…) |
 | `INVALID_SETTINGS`, `INVALID_TEMPLATE` | 400 | Réglage hors limites, PNG invalide |
+| `INVALID_REQUEST` | 400 | Aussi : région de lecture ou échelle hors limites (voir § 3, Simulateur) |
+| `DEMO_NEEDS_EMPTY_PROJECT` | 409 | Démonstration demandée sur un projet qui contient déjà des modèles, des tentatives ou une toile peinte (1B.10) |
+| `BACKUP_FAILED` | 500 | La sauvegarde n'a pas pu être écrite (disque plein, droits) ; aucune sauvegarde partielle n'est laissée (1B.10) |
 | `ENGINE_CLOSED` | 503 | Le serveur s'arrête |
+
+L'interface traduit ces codes en français (`frontend/src/lib/i18n.ts`) ;
+un code inconnu est affiché avec le message d'origine, suivi de
+« (message du moteur) ».
 
 ## 3. Routes
 
@@ -88,7 +99,7 @@ Les commandes répondent `{ "changed": boolean, "status": … }`.
 | `GET /api/v1/templates` | — | Liste |
 | `POST /api/v1/templates` | `{ name, pngBase64, x, y, strategy }` | Import : PNG de 8 Mio au plus, couleurs ramenées à la palette de démonstration. 8 stratégies possibles |
 | `GET /api/v1/templates/:id` | — | Informations |
-| `GET /api/v1/templates/:id/image` | — | Image quantifiée de la révision courante (base64, int32 petit-boutiste, `-1` = transparent) |
+| `GET /api/v1/templates/:id/image` | `?x&y&w&h&s` (facultatifs) | Image quantifiée de la révision courante (base64, int32 petit-boutiste, `-1` = transparent). Avec une région (coordonnées de l'image) et une échelle `s`, seule cette partie est renvoyée, un pixel sur `s`. Réponse : `width`, `height`, `x`, `y` (le modèle), `rect`, `scale`, `outWidth`, `outHeight`, `data` |
 | `POST /api/v1/templates/:id/move` | `{ x, y }` | Nouvelle révision à une autre position. **Permis pendant l'exécution** : l'ordonnanceur suit la révision, annule les tentatives non démarrées et réconcilie les autres |
 
 ### Simulateur
@@ -100,7 +111,17 @@ Les commandes répondent `{ "changed": boolean, "status": … }`.
 | `POST /api/v1/simulator/reset` | `{ "confirm": "RESET" }` | Nouveau monde simulé vide ; l'ancien est **conservé** dans `world-reset-<date>` |
 | `POST /api/v1/simulator/agent/reset` | `{}` | Remet l'agent simulé à ses ressources de départ |
 | `POST /api/v1/simulator/external-edit` | `{ "count" }` | Démonstration : un « autre acteur » efface jusqu'à `count` pixels du modèle (détectés, puis repeints) |
-| `GET /api/v1/simulator/canvas` | `?x&y&w&h` (les quatre, ou aucun) | Région de la toile (par défaut, la zone du modèle sélectionné) avec le numéro de séquence qu'elle inclut (voir [websocket.md](websocket.md)). 2048 × 2048 pixels au plus ; par défaut, un modèle plus grand est limité à son coin supérieur gauche (`truncated: true`) |
+| `GET /api/v1/simulator/canvas` | `?x&y&w&h&s` (région : les quatre, ou aucune ; `s` facultatif) | Région de la toile (par défaut, la zone du modèle sélectionné), un pixel sur `s`, avec le numéro de séquence qu'elle inclut (voir [websocket.md](websocket.md)). Réponse : `stream`, `seq`, `rect`, `scale`, `width`, `height`, `yAxis: "down"`, `observedAt`, `data` |
+
+**Lectures réduites (Phase 1B.10).** Une lecture porte sur 4096 × 4096
+pixels de toile au plus, et renvoie 2048 × 2048 pixels au plus **après**
+réduction ; `s` va de 1 à 256. Sans `s`, le serveur choisit la plus petite
+échelle qui respecte cette limite : un modèle de 4096 × 4096 est donc lu
+en entier, un pixel sur 2 (le champ `truncated` de la 1B.9 n'existe plus).
+Au-delà : 400 `INVALID_REQUEST`. L'interface demande seulement la zone
+visible, à l'échelle de l'affichage. Le pixel réduit est celui du coin
+supérieur gauche de chaque bloc `s × s` ; un point hors de la toile vaut `-2`. L'axe Y de la toile va vers le bas
+(`yAxis: "down"`), comme l'image.
 
 ### Ressources et améliorations simulées
 
@@ -117,6 +138,14 @@ Aucune dépense n'est jamais automatique.
 |---|---|---|
 | `GET /api/v1/journal/diagnosis` | — | À l'arrêt : diagnostic complet des fichiers (lecture seule, noms relatifs, aucun contenu). Pendant l'exécution : statistiques seulement, pour ne pas lire des fichiers en cours d'écriture |
 | `POST /api/v1/journal/compact` | `{}` | Compacte le journal, puis écrit un checkpoint de la toile simulée. Un seul à la fois |
+
+### Sauvegarde et démonstration (Phase 1B.10)
+
+| Méthode et route | Corps | Effet |
+|---|---|---|
+| `POST /api/v1/backup` | `{}` | Sauvegarde le dossier du moteur, **simulation à l'arrêt seulement** (`ENGINE_BUSY` sinon, même en pause). Le dossier de destination est fixé par le serveur (`sauvegardes\` ou `GEOPLACER_BACKUP_DIR`) : aucun chemin n'est accepté. Réponse : `name`, `files`, `bytes`, `createdAt`. La restauration se fait GeoPlacer arrêté, en ligne de commande (voir [sauvegarde-restauration.md](sauvegarde-restauration.md)) |
+| `GET /api/v1/demo` | — | `{ available, reason, active }` : la démonstration est-elle possible (projet vide) ou déjà en place ? |
+| `POST /api/v1/demo` | `{}` | Règle le simulateur et l'agent de démonstration, importe et sélectionne le modèle d'exemple. Sur un projet vide seulement (`DEMO_NEEDS_EMPTY_PROJECT` sinon) ; à l'arrêt seulement. Voir [demonstration.md](demonstration.md) |
 
 ## 4. Statut
 

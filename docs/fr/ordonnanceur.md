@@ -232,8 +232,10 @@ chacun en 2000².
 ## 10. Limites
 
 - **Calcul à chaque cycle** : la progression et l'ETA sont recalculées à
-  chaque cycle, ce qui représente environ 110 à 140 ms en 2000². Un calcul
-  moins fréquent ou incrémental n'est pas fait.
+  chaque cycle, ce qui représente environ 110 à 140 ms en 2000². Depuis
+  la Phase 1B.10, un mode incrémental vérifié existe
+  (`progressMode: 'incremental'`, utilisé par le serveur) : voir
+  [progression.md](progression.md), § 6.
 - **Un seul agent et un seul modèle par ordonnanceur** : le choix entre
   plusieurs modèles (priorités) n'est pas fait.
 - **Contexte local uniquement** : aucun branchement au serveur, au

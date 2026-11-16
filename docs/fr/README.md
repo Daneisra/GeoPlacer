@@ -6,10 +6,41 @@ GeoPlacer est un fork de
 pour GeoPixels, avec un moteur développé et testé **uniquement sur simulateur
 local** (voir l'ADR 0001).
 
-## État actuel : Phase 1B.9, serveur et tableau de bord sur la simulation locale
+## État actuel : Phase 1B.10, première version de démonstration
 
 **La V1 est un environnement de simulation local** : aucune connexion à
-GeoPixels ou à Wplace, aucun compte.
+GeoPixels ou à Wplace, aucun compte. Un seul agent simulé. Vérifié sous
+Windows 10 ; Linux et macOS ne sont pas vérifiés.
+
+**Pour commencer** : [installation-windows.md](installation-windows.md)
+(une commande : `npm run setup:windows`), puis
+[demonstration.md](demonstration.md) (`npm run demo`) et
+[guide-utilisateur.md](guide-utilisateur.md). Toutes les commandes :
+[commandes.md](commandes.md). Limites : [problemes-connus.md](problemes-connus.md).
+
+Réalisé en Phase 1B.10 :
+- **isolation du code hérité** : routes refusées côté serveur
+  (410 `LEGACY_DISABLED`), client réseau hérité fermé, keep-alive
+  supprimé, pages retirées du menu (voir [securite.md](securite.md)) ;
+- **installation Windows en une commande** (`npm run setup:windows`,
+  `setup.bat`), vérifiée sur un clone neuf avec un cache npm vide ;
+  `start.bat` lance GeoPlacer ;
+- **sauvegarde et restauration** vérifiées, avec reprise d'une
+  restauration interrompue (voir
+  [sauvegarde-restauration.md](sauvegarde-restauration.md)) ;
+- **interface en français**, avec une table de traduction centralisée ;
+- **démonstration** : modèle original, données synthétiques, dossier
+  séparé (voir [demonstration.md](demonstration.md)) ;
+- **grands modèles** affichés en entier jusqu'à 4096², avec zoom et
+  déplacement ;
+- **progression incrémentale** vérifiée, adoptée après mesure (voir
+  [progression.md](progression.md), § 6) ;
+- **lint de l'interface à zéro**, inclus dans `npm run check` ;
+- recettes Edge et Firefox (Playwright) ; vrai événement Ctrl+C testé
+  sur `start.bat` (voir [recette-navigateur.md](recette-navigateur.md)) ;
+- **push de la Phase 1B.9** : branche `feat/phase1b9-server-dashboard`.
+
+## Phase 1B.9, serveur et tableau de bord sur la simulation locale
 
 Réalisé en Phase 1B.9 :
 - **service d'orchestration** (`@geoplacer/engine-service`) qui relie
@@ -119,9 +150,8 @@ Réalisé en Phase 1B.0 :
 Voir [architecture.md](architecture.md). V1 : **un seul agent actif** ; les
 essais multi-agents se feront uniquement sur le simulateur local.
 
-**Interface** : recette navigateur automatisée effectuée (Edge,
-28 contrôles), F12 et F13 corrigés. Restent manuels : le vrai Ctrl+C,
-l'aspect visuel et Firefox (voir
+**Interface** : recettes navigateur automatisées (Edge ; Firefox de
+Playwright depuis la 1B.10). L'aspect visuel reste à juger à l'œil (voir
 [recette-navigateur.md](recette-navigateur.md)).
 
 Acquis de la Phase 1A, fondation et sécurité :
@@ -137,7 +167,8 @@ Acquis de la Phase 1A, fondation et sécurité :
   des fichiers corrompus.
 - Paramètres réellement validés et sauvegardés.
 
-Le moteur de dessin hérité n'est **pas** fonctionnel et sera remplacé.
+Le moteur de dessin hérité n'est **pas** fonctionnel ; depuis la
+Phase 1B.10, il est neutralisé (voir [securite.md](securite.md)).
 
 ## Documents
 
@@ -152,17 +183,21 @@ Le moteur de dessin hérité n'est **pas** fonctionnel et sera remplacé.
 | [journal.md](journal.md) | Compactage, checkpoints, générations, diagnostic et réparation, historique |
 | [simulateur.md](simulateur.md) | Toile simulée locale, pannes déterministes, scénarios de réconciliation |
 | [ordonnanceur.md](ordonnanceur.md) | Ordonnanceur mono-agent : boucle, états, commandes, attentes, scénarios, performances |
-| [guide-utilisateur.md](guide-utilisateur.md) | Parcours complet de la simulation dans le navigateur, arrêt par Ctrl+C |
+| [installation-windows.md](installation-windows.md) | Installation en une commande, `start.bat`, lancement, configuration |
+| [guide-utilisateur.md](guide-utilisateur.md) | Parcours complet de la simulation dans le navigateur, grands modèles, arrêt par Ctrl+C |
+| [demonstration.md](demonstration.md) | Guide de démonstration |
+| [sauvegarde-restauration.md](sauvegarde-restauration.md) | Sauvegarde, vérification, restauration, reprise après interruption |
+| [commandes.md](commandes.md) | Toutes les commandes |
+| [problemes-connus.md](problemes-connus.md) | Problèmes connus et limites de la V1 |
 | [api-v1.md](api-v1.md) | Routes `/api/v1`, protections, codes d'erreur, statut |
 | [websocket.md](websocket.md) | Canal temps réel `/api/v1/ws` : messages, cohérence, fiabilité |
 | [reprise-apres-crash.md](reprise-apres-crash.md) | Garanties, procédure et limites de la reprise |
 | [diagnostic.md](diagnostic.md) | Symptômes, outils, fichiers du moteur |
 | [geometrie-couleurs.md](geometrie-couleurs.md) | Repères, projection, OKLab, palettes, quantification, performances |
-| [installation-windows.md](installation-windows.md) | Installation et lancement vérifiés sous Windows |
-| [securite.md](securite.md) | Modèle de menace, protections, limites |
-| [persistance.md](persistance.md) | Fichiers de données, écriture atomique, sauvegarde et restauration |
-| [qualite.md](qualite.md) | Tests, lint, évaluation de Vitest |
-| [recette-navigateur.md](recette-navigateur.md) | Procédure de vérification manuelle dans un navigateur |
+| [securite.md](securite.md) | Modèle de menace, protections, isolation du code hérité, limites |
+| [persistance.md](persistance.md) | Fichiers de données hérités, écriture atomique |
+| [qualite.md](qualite.md) | Tests, mesures, lint, délais intermittents, évaluation de Vitest |
+| [recette-navigateur.md](recette-navigateur.md) | Recettes automatisées (Edge, Firefox) et procédure manuelle |
 | [../decisions/0001-fork-et-perimetre.md](../decisions/0001-fork-et-perimetre.md) | Décision de fork et périmètre |
 | [../decisions/0002-moteur-phase-1b.md](../decisions/0002-moteur-phase-1b.md) | Nouveau moteur (statut : accepté avec ajustements) |
 | [../decisions/0003-migration-api-v1.md](../decisions/0003-migration-api-v1.md) | Migration des routes vers `/api/v1/` (statut : proposé, inventaire complet) |

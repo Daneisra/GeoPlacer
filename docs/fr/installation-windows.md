@@ -1,7 +1,13 @@
 # Installation sous Windows
 
-Ce guide décrit le chemin d'installation **vérifié pendant la Phase 1A** sur
-Windows 10 Pro (x64), avec Node.js 22.23.2 et npm 10.9.8.
+Ce guide décrit l'installation **vérifiée** sur Windows 10 Pro (x64), avec
+Node.js 22.23.2 et npm 10.9.8 : chemin manuel depuis la Phase 1A,
+installation en une commande depuis la Phase 1B.10. Linux et macOS ne sont
+pas vérifiés.
+
+**En bref** : installer Node.js 22 LTS, récupérer le projet, puis
+double-cliquer sur `setup.bat` (ou `npm run setup:windows`). Ensuite,
+`start.bat` lance GeoPlacer et `start.bat --demo` la démonstration.
 
 ## 1. Prérequis
 
@@ -21,20 +27,70 @@ node -v   # v22.12.0 ou plus récent
 npm -v
 ```
 
-## 2. Installation automatique (`start.bat`)
+Node.js s'installe avec l'installateur Windows de https://nodejs.org
+(version 22 LTS) ; il fournit npm. Rien d'autre n'est installé
+globalement.
+
+## 2. Installation en une commande (Phase 1B.10)
 
 Depuis le dossier du projet :
 
 ```powershell
-# Installe les dépendances sans lancer les serveurs
+npm run setup:windows
+```
+
+ou un double-clic sur **`setup.bat`**, qui lance la même commande puis
+attend une touche pour laisser lire le résultat.
+
+Six étapes, chacune expliquée en français en cas d'échec (« ÉCHEC à
+l'étape … », puis « Que faire : … ») :
+
+1. Node.js 22.12 ou plus récent, npm 10 ou plus récent ;
+2. dépendances exactes des lockfiles, scripts d'installation désactivés :
+   racine (avec les paquets du moteur, workspaces npm), puis interface ;
+3. module natif `canvas` : son **binaire officiel précompilé**, sans
+   compilation, puis un vrai chargement ;
+4. compilation : paquets du moteur, serveur, interface ;
+5. dossiers `data\` et `sauvegardes\`, et `.env` copié depuis
+   `.env.example` **seulement s'il est absent** (aucun secret) ;
+6. démarrage de contrôle dans un **dossier temporaire** (vos données ne
+   sont pas utilisées) : le serveur démarre, l'API répond, l'arrêt contrôlé
+   réussit.
+
+Aucune modification globale : ni paquet npm global, ni réglage de
+Windows, ni droits administrateur. La sortie complète est conservée dans
+`test-logs\<date>-setup.log`. Options : `--verbose` (affiche toute la
+sortie), `--skip-install` (saute l'étape 2).
+
+**Vérifié sur un clone neuf** (16/11/2026) : dépôt cloné dans un dossier
+vide, **cache npm vide** (aucune dépendance déjà présente), puis
+`npm run setup:windows` : six étapes réussies en 3 min 40 environ (597
+paquets à la racine, 262 pour l'interface), binaire `canvas` téléchargé
+avec l'empreinte SHA-256 attendue (§ 3).
+
+### `start.bat`
+
+`start.bat` (double-clic) est le lanceur :
+
+- au premier lancement, ou si l'installation est incomplète
+  (`node_modules`, `frontend\node_modules`, `dist\server.js` ou
+  `frontend\dist\index.html` absent), il lance l'installation ci-dessus ;
+- puis il lance GeoPlacer **dans la même fenêtre** (`npm start`) ;
+  `start.bat --demo` lance la démonstration (`npm run demo`) ;
+- Ctrl+C l'arrête proprement.
+
+Avec `GEOPLACER_SETUP_ONLY=1`, il s'arrête après l'installation :
+
+```powershell
 $env:GEOPLACER_SETUP_ONLY = "1"; .\start.bat; Remove-Item Env:GEOPLACER_SETUP_ONLY
 ```
 
-`start.bat` exécute exactement les étapes manuelles ci-dessous. Sans
-`GEOPLACER_SETUP_ONLY`, il ouvre ensuite deux fenêtres (backend et frontend en
-mode développement).
+Jusqu'à la Phase 1B.9, `start.bat` ouvrait deux fenêtres de développement
+(`tsx watch` et Vite). Le mode développement reste `npm run dev` (§ 5).
 
 ## 3. Installation manuelle (chemin vérifié)
+
+C'est ce que fait `npm run setup:windows`, étape par étape.
 
 ```powershell
 # 1. Backend : dépendances exactes du lockfile, scripts d'installation désactivés
@@ -128,7 +184,11 @@ listening on http://127.0.0.1:3000`. L'interface compilée
 (`frontend/dist`) est servie à la même adresse ; le tableau de bord pilote
 la simulation locale (voir [guide-utilisateur.md](guide-utilisateur.md)).
 
-Sur un **clone neuf**, `npm run build` exige aussi `cd frontend; npm ci`.
+Sur un **clone neuf**, `npm run build` exige aussi `cd frontend; npm ci`
+(fait par `npm run setup:windows`).
+
+**Démonstration** : `npm run demo` lance le même serveur sur un dossier
+séparé, `data\demo` (voir [demonstration.md](demonstration.md)).
 
 **Arrêt** : une fois **Ctrl+C**. Le moteur s'arrête après l'écriture en
 cours, libère son dossier et le serveur affiche `Graceful shutdown
@@ -262,15 +322,22 @@ commité. Il ne doit contenir aucun secret.
 | `ALLOWED_ORIGINS` | `http://localhost:*,http://127.0.0.1:*,chrome-extension://*` | Origines navigateur autorisées |
 | `JSON_BODY_LIMIT` | `12mb` | Taille maximale d'un corps JSON (un modèle de 2000×2000 pèse environ 11,4 Mo). Format : un entier, suivi éventuellement de `b`, `kb` ou `mb` ; toute autre forme (`1gb`, `1.5mb`) est remplacée par `12mb`, avec un avertissement |
 | `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX` | `60000` / `300` | Limiteur de débit, appliqué à toutes les routes |
-| `GEOPLACER_ENGINE_DIR` | `data\engine` | Dossier du moteur : modèles, journal, toile simulée, réglages (Phase 1B.9) |
-| `LEGACY_KEEPALIVE` | *(absent)* | `1` rétablit le keep-alive hérité, qui **contacte Wplace** pour les comptes enregistrés. Laisser absent |
+| `GEOPLACER_ENGINE_DIR` | `data\engine` | Dossier du moteur : modèles, journal, toile simulée, réglages (Phase 1B.9). `npm run demo` utilise `data\demo` |
+| `GEOPLACER_BACKUP_DIR` | `sauvegardes` | Dossier des sauvegardes, pour le serveur et pour `npm run backup` (Phase 1B.10) |
+| `LEGACY_KEEPALIVE` | *(ignoré)* | Depuis la Phase 1B.10, le keep-alive hérité n'existe plus : la variable est ignorée, avec un avertissement au démarrage |
 
 Voir `docs/fr/securite.md` pour le détail des protections.
 
 ## 7. Dépannage
 
-- **`Cannot find module '../build/Release/canvas.node'`** : l'étape 2 de
-  l'installation manuelle n'a pas été exécutée.
+- **L'installation s'arrête sur « ÉCHEC à l'étape … »** : lire la ligne
+  « Que faire », puis le journal `test-logs\<date>-setup.log`. Relancer
+  `npm run setup:windows` après correction ne casse rien.
+- **`Cannot find module '../build/Release/canvas.node'`** : l'étape 3 de
+  l'installation n'a pas abouti (relancer `npm run setup:windows`).
+- **« GeoPlacer cannot start on this data directory »** : une autre
+  instance tourne sur ce dossier, ou une restauration a été interrompue
+  (voir [sauvegarde-restauration.md](sauvegarde-restauration.md), § 4).
 - **`npm ci` échoue avec `EBADENGINE`** : la version de Node.js est
   inférieure à 22.12.
 - **Le pare-feu Windows demande une autorisation** : le serveur écoute sur

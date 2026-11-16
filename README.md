@@ -7,9 +7,73 @@
 <a href="LISEZMOI.md"><img src="https://img.shields.io/badge/traduction-français-blue"></a>
 <a href="README_zh-cn.md"><img src="https://img.shields.io/badge/翻译-简体中文-red"></a></p>
 
-> **GeoPlacer** : fork en cours de développement de ce projet (AGPL-3.0-only).
-> Documentation en français : [docs/fr/README.md](docs/fr/README.md) ; modifications : [MODIFICATIONS.md](MODIFICATIONS.md).
-> **GeoPlacer V1 est un environnement de simulation local** : le tableau de bord pilote un moteur sur une toile simulée, sans connexion à un service réel ([guide](docs/fr/guide-utilisateur.md)).
+## GeoPlacer
+
+**GeoPlacer** est un fork de wplacer (`Arknight38/wplacer-dev`), sous
+licence AGPL-3.0-only. **GeoPlacer V1 est un environnement de simulation
+local** : un moteur de placement de pixels, piloté par un tableau de bord,
+sur une toile **simulée** sur votre machine. Aucune connexion à GeoPixels,
+à Wplace ou à un autre service ; aucun compte, aucune session, aucun jeton.
+
+### Installer (Windows)
+
+Prérequis : [Node.js 22 LTS](https://nodejs.org) (fournit npm) et Git.
+
+```powershell
+git clone https://github.com/Daneisra/GeoPlacer.git
+cd GeoPlacer
+npm run setup:windows      # ou double-clic sur setup.bat
+```
+
+Une seule commande : dépendances exactes, binaire `canvas` précompilé (sans
+compilateur), compilation, configuration sans secret, démarrage de
+contrôle. Rien n'est modifié globalement sur Windows.
+Détails : [installation Windows](docs/fr/installation-windows.md).
+
+### Utiliser
+
+```powershell
+npm start                  # ou start.bat ; puis ouvrir http://127.0.0.1:3000
+npm run demo               # ou start.bat --demo : démonstration, dossier séparé data\demo
+```
+
+- **Arrêter** : Ctrl+C, une fois, dans la fenêtre du serveur. La
+  progression est retrouvée au démarrage suivant.
+- **Sauvegarder** : bouton « Sauvegarder » (simulation arrêtée) ou
+  `npm run backup` ; **restaurer** : `npm run restore -- <dossier>`
+  (GeoPlacer arrêté).
+
+### Documentation (en français)
+
+| Document | Contenu |
+|---|---|
+| [Guide de démonstration](docs/fr/demonstration.md) | Découvrir GeoPlacer en deux minutes |
+| [Guide utilisateur](docs/fr/guide-utilisateur.md) | Tableau de bord, modèles, simulation, grands modèles |
+| [Installation Windows](docs/fr/installation-windows.md) | Installation, `start.bat`, configuration, dépannage |
+| [Sauvegarde et restauration](docs/fr/sauvegarde-restauration.md) | Sauvegarder, vérifier, restaurer, reprendre une restauration interrompue |
+| [Sécurité et isolation](docs/fr/securite.md) | Protections du serveur local, neutralisation du code hérité |
+| [Simulateur](docs/fr/simulateur.md) | Toile simulée locale |
+| [Commandes](docs/fr/commandes.md) | Toutes les commandes |
+| [Problèmes connus](docs/fr/problemes-connus.md) | Limites de la V1 |
+| [Index complet](docs/fr/README.md) | Architecture, moteur, API, qualité, décisions |
+| [MODIFICATIONS.md](MODIFICATIONS.md) | Historique des modifications apportées au projet d'origine (AGPL §5a) |
+
+### Limites de la V1
+
+- Simulation locale uniquement ; un seul agent simulé.
+- Vérifié sous Windows 10 ; Linux et macOS non vérifiés.
+- Le code hérité de wplacer (comptes réels, ancien moteur, jetons, proxys)
+  reste dans le dépôt pour la traçabilité, mais il est **désactivé** :
+  routes refusées par le serveur, client réseau fermé.
+
+<details>
+<summary><b>README du projet d'origine (wplacer)</b> : fonctions héritées, <b>désactivées dans GeoPlacer V1</b></summary>
+
+> Le texte ci-dessous est celui du projet d'origine, conservé pour
+> l'attribution et l'historique. Les fonctions qu'il décrit (comptes,
+> extension, jetons Turnstile, proxys, achats automatiques) ne sont **pas**
+> disponibles dans GeoPlacer V1. Ne suivez pas ces instructions pour
+> GeoPlacer.
 
 A massively updated auto-drawing bot for [wplace.live](https://wplace.live/).
 
@@ -153,6 +217,8 @@ For more detailed information, see:
 - [x] Template share codes with RLE compression
 - [x] WebSocket support for real-time token requests
 - [x] Graceful shutdown with state persistence
+
+</details>
 
 ### Credits
 

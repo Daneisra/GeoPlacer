@@ -285,3 +285,65 @@ compteurs par couleur.
 - Les intervalles de régénération sont supposés constants. Une
   amélioration achetée en cours de route n'est pas prise en compte
   (Phase 1B.5).
+
+## 6. Progression incrémentale (Phase 1B.10)
+
+**Constat.** Sur un modèle de 2000 × 2000, le calcul complet de la
+progression représentait environ la moitié d'un cycle de l'ordonnanceur
+(profil : `scanEligibleRows` 25 %, rappel de progression 20 %).
+
+**Principe** (`packages/core/src/progress/incremental.ts`,
+`createIncrementalProgress`) : le calculateur garde les valeurs observées
+au cycle précédent et les compteurs par couleur. À chaque appel, il relit
+les lignes éligibles de l'instantané, les compare aux valeurs précédentes,
+et ne reclasse **que les pixels qui ont changé**, quelle que soit
+l'origine du changement (l'agent ou un acteur extérieur) : aucune
+hypothèse sur la cause, donc les modifications extérieures restent vues.
+
+**Garde-fous** :
+- une seule définition de l'état d'un pixel, `classifyValue`, partagée
+  avec le calcul complet ;
+- reconstruction complète à tout changement de modèle, de révision,
+  d'image, de placement, de repère ou de rectangle lu, après
+  `invalidate()` (restauration, nouveau monde) et tous les 100 appels ;
+- **comparaison au calcul complet tous les 10 appels** : en cas d'écart,
+  le résultat complet est utilisé, l'état est reconstruit et l'écart est
+  compté (`stats.mismatches`) ; jamais de compteur périmé ;
+- un instantané sans `readRow` utilise toujours le calcul complet ;
+- chaque nouvel ordonnanceur (redémarrage, restauration) repart d'un
+  calcul complet.
+
+`SchedulerConfig.progressMode` vaut `'full'` par défaut dans le cœur ; le
+service du serveur utilise `'incremental'`.
+
+**Mesures** (`npm run bench:responsiveness -- <côté> <secondes>
+full|incremental`, même machine, même build) :
+
+| Modèle | Mode | Cycle médian | Cycle p95 | Débit | Mémoire | HTTP médian |
+|---|---|---|---|---|---|---|
+| 256² | complet | 17 ms | — | ~52 000 px/s | — | ~2 ms |
+| 256² | incrémental | 16 ms | — | ~52 000 px/s | — | ~2 ms |
+| 2000² | complet | 199 ms | 212 ms | 4 948 px/s | — | ~2 ms |
+| 2000² | incrémental | 121 ms | 216 ms | 7 392 px/s | — | ~2 ms |
+| 4096² | complet | 743 ms | — | 1 303 px/s | 551 Mio | ~2 ms |
+| 4096² | incrémental | 434 ms | — | 2 036 px/s | 560 Mio | ~2 ms |
+
+Pour 4096² : import en 4,4 s environ, premier lot après 1,5 à 1,8 s, dans
+les deux modes. Latence HTTP maximale d'environ 15 à 18 ms dans tous les
+cas.
+
+**Décision : adoptée par le service.** Le bénéfice est démontré sur les
+grands modèles (cycle médian −39 % à 2000², −42 % à 4096², débit +49 % et
++56 %), sans effet sur les petits. Contreparties mesurées : les cycles de
+vérification et de reconstruction restent aussi longs qu'un cycle complet
+(p95 inchangé), et l'attente maximale observée de la boucle d'événements à
+2000² est passée de 223 à 369 ms ; la latence HTTP n'en est pas affectée
+dans ces mesures. Mémoire : +9 Mio à 4096².
+
+**Tests** : égalité exacte avec le calcul complet à chaque pas
+d'historiques aléatoires (écritures, modifications extérieures, inconnus,
+valeurs invalides, lectures partielles, deux sens de l'axe Y),
+reconstructions, désaccord provoqué détecté et corrigé
+(`packages/core/test/progress-incremental.test.ts`) ; ordonnanceur avec
+modifications extérieures : mêmes compteurs finaux dans les deux modes
+(`packages/simulator/test/scheduler.test.ts`).

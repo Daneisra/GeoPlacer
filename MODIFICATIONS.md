@@ -27,6 +27,52 @@ licence. L'historique Git complet du projet d'origine est conservé.
 - `start.bat` : installation des deux projets par le chemin vérifié.
 - Documentation française (`docs/fr/`, `docs/decisions/`).
 
+## 2026-11-16 — Phase 1B.10 : stabilisation, sécurisation, démonstration
+
+- Isolation du code hérité de Wplacer (conservé pour la traçabilité,
+  neutralisé) :
+  - `src/middleware/legacy-guard.ts` (nouveau) : les routes héritées de
+    comptes réels, de l'ancien moteur, des jetons anti-bot, du pont de
+    l'extension et des proxys répondent 410 `LEGACY_DISABLED` avant leur
+    traitement ;
+  - `src/services/http-client.ts` : le client réseau hérité refuse toute
+    requête (`LegacyNetworkDisabledError`) ;
+  - `src/server.ts` : keep-alive hérité supprimé (`LEGACY_KEEPALIVE`
+    ignoré avec un avertissement) ;
+  - interface : pages Users, Templates et Add template retirées du menu,
+    remplacées par une page « Désactivé dans GeoPlacer V1 ».
+- Installation Windows en une commande : `scripts/setup-windows.mjs`
+  (`npm run setup:windows`), `setup.bat` ; `start.bat` réécrit (installe si
+  nécessaire, puis lance `npm start` ou `npm run demo` dans la même
+  fenêtre).
+- Sauvegarde et restauration du dossier du moteur :
+  `packages/engine-service/src/backup.ts` et `backup-cli.ts` (nouveaux),
+  `npm run backup`, `backup:verify`, `restore` ; route `POST /api/v1/backup`
+  et bouton « Sauvegarder ».
+- Démonstration : `packages/engine-service/src/demo.ts` (nouveau, modèle
+  original dessiné par le code), routes `GET/POST /api/v1/demo`,
+  `npm run demo` (dossier `data\demo`), carte « Démonstration ».
+- Traduction française de l'interface : table centralisée
+  `frontend/src/lib/i18n.ts` (codes d'erreur, raisons d'état, avis,
+  réglages, améliorations), repli marqué « (message du moteur) ».
+- Grands modèles (jusqu'à 4096²) : lectures réduites (`s`) côté serveur,
+  `frontend/src/lib/viewport.ts` et `CanvasView.tsx` réécrit (modèle entier,
+  zoom, déplacement, zone visible seule lue).
+- Progression incrémentale vérifiée (`packages/core/src/progress/incremental.ts`),
+  `SchedulerConfig.progressMode`, adoptée par le service après mesure.
+- Frontend : 17 erreurs et 3 avertissements de lint hérités corrigés sans
+  désactiver de règle ; `npm run check` inclut le lint et les types de
+  l'interface.
+- Tests : isolation (`legacy-isolation.test.ts`), sécurité du serveur réel,
+  absence de connexion réseau, sauvegarde et restauration (processus tués
+  à chaque étape), démonstration, traductions, grands affichages,
+  progression incrémentale ; recettes navigateur (Edge, Firefox de
+  Playwright) mises à jour.
+- Documentation : `demonstration.md`, `sauvegarde-restauration.md`,
+  `commandes.md`, `problemes-connus.md` (nouveaux) ; installation, guide
+  utilisateur, sécurité, API, progression, qualité, recette, README ;
+  ADR 0002 § 19.
+
 ## 2026-11-15 — Phase 1B.9 : serveur et tableau de bord sur la simulation locale
 
 - `packages/engine-service` (nouveau) :

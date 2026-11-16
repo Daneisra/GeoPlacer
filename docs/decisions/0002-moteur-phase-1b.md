@@ -554,3 +554,24 @@ comportement du core, une correction de l'ordonnanceur (ci-dessous).
 Détails : [api-v1.md](../fr/api-v1.md), [websocket.md](../fr/websocket.md),
 [reprise-apres-crash.md](../fr/reprise-apres-crash.md),
 [architecture.md](../fr/architecture.md).
+
+## 19. Mise en œuvre de la Phase 1B.10 : stabilisation et démonstration
+
+Les contrats du core restent en version 9. Un seul ajout facultatif au
+core : `SchedulerConfig.progressMode` (`'full'` par défaut).
+
+| Élément | Décision | Raison |
+|---|---|---|
+| Code hérité | Deux verrous : routes refusées avant leur traitement (410 `LEGACY_DISABLED`), client réseau hérité qui refuse tout. Code conservé ; keep-alive supprimé (`LEGACY_KEEPALIVE` ignoré) | Une interface masquée ne suffit pas ; un refus stable et testable vaut mieux qu'une suppression de code dans le fork |
+| Installation | `npm run setup:windows` (et `setup.bat`) : un seul chemin, celui déjà vérifié (lockfiles, scripts désactivés, binaire `canvas` précompilé) ; `start.bat` le réutilise puis lance `npm start` | Installer sans manipuler le code, sans modification globale |
+| Sauvegarde | Dossier daté, manifeste SHA-256, écrit en `.partial` puis renommé ; moteur arrêté (verrou du dossier pris) | Une sauvegarde est complète ou absente, et cohérente |
+| Restauration | Ligne de commande seulement ; vérifiée, copiée et revérifiée avant tout déplacement ; état journalisé (`<dossier>.restauration.json`), reprise `--resume` ; données actuelles conservées à côté | Une archive corrompue ou une coupure ne détruisent jamais les données |
+| Démonstration | Modèle original généré par le code, réglages synthétiques ; uniquement sur un projet vide, ou dans `data\demo` (`npm run demo`) | Jamais de modification automatique d'un projet existant ; aucun téléchargement |
+| Traduction | Le serveur garde des codes stables et des messages en anglais ; l'interface traduit avec une table centralisée, repli marqué pour l'inconnu | Ne pas réécrire le moteur ; les codes restent le contrat |
+| Grandes images | Lectures réduites (`s`, un pixel sur `s`, 2048² au plus après réduction, 4096² avant) ; l'interface lit la seule zone visible | Afficher le modèle entier jusqu'à 4096² sans charge massive |
+| Progression | Mode incrémental vérifié (comparaison au calcul complet tous les 10 cycles, reconstruction tous les 100), adopté par le service après mesure | Moitié du cycle à 2000² ; bénéfice mesuré, voir [progression.md](../fr/progression.md) § 6 |
+
+Détails : [securite.md](../fr/securite.md),
+[sauvegarde-restauration.md](../fr/sauvegarde-restauration.md),
+[demonstration.md](../fr/demonstration.md),
+[installation-windows.md](../fr/installation-windows.md).

@@ -85,7 +85,23 @@ Une réinitialisation n'est jamais silencieuse. Un checkpoint est écrit
 tous les 2 000 changements, et à chaque compactage. Garanties et limites :
 voir [reprise-apres-crash.md](reprise-apres-crash.md).
 
-## 5. Limites
+## 5. Dans le serveur (Phase 1B.10)
+
+- **Démonstration** : réglages synthétiques dédiés (toile 128 × 96,
+  énergie maximale 400, une unité toutes les 25 ms, monnaie 1 500), appliqués
+  seulement sur un projet vide ou dans `data\demo` (voir
+  [demonstration.md](demonstration.md)).
+- **Grandes toiles** : jusqu'à 4096 × 4096. Le serveur lit une région
+  réduite (un pixel sur `s`) pour l'affichage ; la simulation, elle, porte
+  toujours sur tous les pixels (voir [api-v1.md](api-v1.md)).
+- **Sauvegarde** : la toile durable fait partie de la sauvegarde du dossier
+  du moteur ; une restauration est vérifiée en rouvrant la toile avant de
+  remplacer les données (voir
+  [sauvegarde-restauration.md](sauvegarde-restauration.md)).
+- **Aucun réseau** : une simulation complète n'ouvre aucune connexion
+  (test `service.test.ts`, « no network »).
+
+## 6. Limites
 
 - Une seule toile ; un seul agent actif dans le serveur.
 - La boucle autonome est l'ordonnanceur mono-agent de la Phase 1B.8 :

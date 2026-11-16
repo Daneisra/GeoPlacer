@@ -1,5 +1,94 @@
 # Recette navigateur (Windows)
 
+## Recette de la Phase 1B.10
+
+### Parcours dans le navigateur
+
+`scripts/recette-simulation.mjs` (réécrit) joue le parcours de la 1B.10
+contre le serveur compilé, lancé dans un dossier temporaire : les données
+du dépôt ne sont jamais touchées, rien ne sort de la machine.
+`playwright-core` est installé **hors du dépôt**.
+
+```powershell
+$env:GEOPLACER_PLAYWRIGHT_CORE = "<dossier>\node_modules\playwright-core"
+npm run build
+node scripts/recette-simulation.mjs recette-edge              # Edge (ou Chrome)
+$env:GEOPLACER_BROWSER_ENGINE = "firefox"                     # Firefox de Playwright
+node scripts/recette-simulation.mjs recette-firefox --quick   # --quick : démonstration arrêtée au lieu d'aller au bout
+```
+
+Contrôles : ouverture (bandeau, temps réel) ; démonstration proposée sur
+un projet vide ; fonctions héritées absentes du menu ; modèle d'exemple
+chargé ; ressources de démonstration ; pixels placés sur la toile
+affichée ; pause et reprise ; fin de la démonstration ; raisons d'état et
+refus en français ; heures au format français ; accès direct à `/users`
+désactivé ; sauvegarde depuis l'interface ; modèle de 2000 × 2000 affiché
+entier avec l'échelle, zoom et déplacement annoncés, « Ajuster » ; arrêt
+contrôlé ; restauration par `npm run restore` ; après redémarrage, le
+modèle et la progression sauvegardés sont retrouvés sans rien repeindre ;
+console sans erreur inattendue.
+
+**Résultats du 16/11/2026, sur le clone neuf** (installé par
+`npm run setup:windows`) :
+
+| Navigateur | Parcours | Résultat |
+|---|---|---|
+| Edge (Windows 10) | complet | **0 échec** ; démonstration terminée 143 s après la reprise |
+| Firefox 132 de Playwright (isolé, navigateur en anglais) | complet | **0 échec** ; 142 s après la reprise. Défaut vu dans le journal : heures affichées « 12:56:19 AM » |
+| Firefox (correctif des heures) | rapide | contre-épreuve sur l'ancienne interface : **1 échec attendu** (« 1:03:35 AM ») ; après correctif : **0 échec** |
+| Edge (après correctif) | rapide | **0 échec** |
+
+La recette de la Phase 1B.7 (`scripts/recette-navigateur.mjs`), adaptée
+aux pages désactivées (accès direct à `/users`, `/templates`,
+`/templates/add` : page « désactivé » ; démarrage hérité refusé par le
+serveur, 410), donne **29 contrôles, 0 KO** sur le clone neuf.
+
+**Firefox** : seule la version fournie par Playwright (132), installée à
+part, a été testée. Une version officielle de Firefox n'est pas installée
+sur la machine de développement : la procédure manuelle (§ « Recette
+manuelle ») reste valable pour elle.
+
+### Arrêt par Ctrl+C, reprise, sauvegarde et restauration (Windows)
+
+`scripts/recette-arret-windows.mjs`, sur une copie **installée** (il
+refuse de tourner si `data\demo` existe déjà) :
+
+```powershell
+node scripts/recette-arret-windows.mjs <dossier de GeoPlacer> <dossier du compte rendu>
+```
+
+1. `start.bat --demo` dans sa **propre fenêtre de console** ;
+2. démonstration préparée et démarrée par l'API ;
+3. un **événement CTRL_C_EVENT** est envoyé à cette console
+   (`GenerateConsoleCtrlEvent`) : c'est l'événement que Windows produit
+   pour la touche Ctrl+C, **mais pas une frappe au clavier** ;
+4. redémarrage : la toile simulée et le modèle doivent être retrouvés ;
+5. démonstration menée au bout, sauvegarde par l'API, nouvel arrêt ;
+6. toile simulée supprimée, sauvegarde vérifiée puis restaurée en ligne
+   de commande ;
+7. redémarrage : l'état restauré est complet (un démarrage se termine
+   aussitôt, rien à repeindre).
+
+**Résultat sur le clone neuf** (deux passages, dont un avec le script
+versionné) :
+- à chaque Ctrl+C : « Received SIGINT. Starting graceful shutdown… »,
+  « Engine stopped and data directory released », puis « Graceful shutdown
+  completed » en 14 à 16 ms ; port libéré ;
+- Windows affiche ensuite « Terminer le programme de commandes (O/N) ? »
+  dans la fenêtre de `start.bat`, le serveur étant déjà arrêté ;
+- au redémarrage : « simulated world restored (generation 1, 37 change(s)
+  replayed) », même modèle ; démonstration terminée 127 s après la reprise
+  (142 à 143 s dans les recettes navigateur, interrompues plus tôt) ;
+- sauvegarde de 10 fichiers ; vérification et restauration réussies ;
+  données précédentes conservées dans `data\demo.avant-restauration-<date>` ;
+- après restauration : état « Terminé », « the canvas matches the
+  template ».
+
+**Reste manuel** : une vraie frappe de Ctrl+C dans un terminal, et la
+réponse à « Terminer le programme de commandes ». Le chemin de code est le
+même (signal SIGINT reçu par le serveur), mais une frappe réelle n'a pas
+été faite par l'automate.
+
 ## Recette de la simulation (Phase 1B.9)
 
 `scripts/recette-simulation.mjs` joue tout le parcours utilisateur dans un
@@ -39,7 +128,9 @@ bord a changé : **28 contrôles, 0 KO**. Deux contrôles ont été adaptés :
 - la reconnexion refusée du canal du moteur pendant le redémarrage
   volontaire est attendue.
 
-**Restent manuels** :
+**Restent manuels** (en Phase 1B.9 ; voir la Phase 1B.10 ci-dessus pour
+l'événement Ctrl+C envoyé à une vraie console et pour le Firefox de
+Playwright) :
 - un vrai **Ctrl+C** sous Windows (voir
   [guide-utilisateur.md](guide-utilisateur.md) § 4). L'arrêt contrôlé
   est testé automatiquement par IPC, car Windows ne transmet pas SIGINT à
