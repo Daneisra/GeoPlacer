@@ -52,12 +52,12 @@ const format = winston.format.combine(
 class WebSocketTransport extends Transport {
   private levelFilter: string;
 
-  constructor(opts: any = {}) {
+  constructor(opts: Transport.TransportStreamOptions & { levelFilter?: string } = {}) {
     super(opts);
     this.levelFilter = opts.levelFilter || 'info';
   }
 
-  log(info: any, callback: () => void): void {
+  log(info: { level: string; message: unknown; timestamp?: string; stack?: string }, callback: () => void): void {
     setImmediate(() => this.emit!('logged', info));
 
     const message = `[${info.timestamp}] ${info.level}: ${info.message}${info.stack ? '\n' + info.stack : ''}`;
