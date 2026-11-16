@@ -24,6 +24,13 @@
  * exists the engine refuses to open, and `resume` finishes the restore or
  * puts the previous data back. A corrupt backup never touches the current
  * data (refused at step 1, or at step 3 before any move).
+ *
+ * Phase 1C.0: the demonstration (data/demo) and the project (data/engine)
+ * must not be mixed by accident. The manifest records the name of the backed-up
+ * directory (`summary.dataDirName`, optional: older backups have none and stay
+ * restorable), a demonstration backup is named `geoplacer-sauvegarde-demo-<date>`,
+ * and a restore across kinds (demonstration into a project directory, or the
+ * reverse) is refused (BACKUP_KIND_MISMATCH) unless explicitly allowed.
  */
 
 import { createHash, randomUUID } from 'node:crypto';
@@ -39,7 +46,18 @@ const MANIFEST = 'MANIFEST.json';
 const MANIFEST_HASH = 'MANIFEST.sha256';
 const DATA = 'donnees';
 
-export type BackupErrorCode = 'ENGINE_RUNNING' | 'BACKUP_CORRUPT' | 'BACKUP_INCOMPATIBLE' | 'BACKUP_INCONSISTENT' | 'RESTORE_IN_PROGRESS' | 'NOTHING_TO_RESUME' | 'NOT_FOUND';
+export type BackupErrorCode =
+  | 'ENGINE_RUNNING'
+  | 'BACKUP_CORRUPT'
+  | 'BACKUP_INCOMPATIBLE'
+  | 'BACKUP_INCONSISTENT'
+  | 'BACKUP_KIND_MISMATCH'
+  | 'RESTORE_IN_PROGRESS'
+  | 'NOTHING_TO_RESUME'
+  | 'NOT_FOUND';
+
+/** The demonstration directory is named `demo` (npm run demo); every other one is a project. */
+export const dataDirKind = (name: string): 'demonstration' | 'project' => (name === 'demo' ? 'demonstration' : 'project');
 
 export class BackupError extends Error {
   readonly code: BackupErrorCode;
@@ -67,6 +85,8 @@ export interface BackupManifest {
     readonly selectedTemplate: string | null;
     readonly canvas: { readonly width: number; readonly height: number };
     readonly rulesVersion: number;
+    /** Phase 1C.0: name of the backed-up directory (`demo` for the demonstration); absent before. */
+    readonly dataDirName?: string;
   };
   readonly files: readonly BackupFileEntry[];
 }
@@ -77,6 +97,8 @@ export type RestoreStep = 'verified' | 'staged' | 'state-written' | 'previous-mo
 export interface RestoreOptions {
   /** Test hook, called after each named step. */
   readonly onStep?: (step: RestoreStep) => void;
+  /** Phase 1C.0: allows a demonstration backup into a project directory, or the reverse. */
+  readonly allowKindChange?: boolean;
 }
 
 export interface RestoreReport {
@@ -192,7 +214,7 @@ export async function createBackup(dataDir: string, outDir: string, options: { r
   const lock = options.lock ?? (await lockOrRefuse(root));
   try {
     const settings = await loadSettings(root);
-    const name = `geoplacer-sauvegarde-${stamp()}`;
+    const name = `geoplacer-sauvegarde-${dataDirKind(path.basename(root)) === 'demonstration' ? 'demo-' : ''}${stamp()}`;
     const final = path.join(path.resolve(outDir), name);
     const partial = `${final}.partial`;
     await rm(partial, { recursive: true, force: true });
@@ -222,6 +244,7 @@ export async function createBackup(dataDir: string, outDir: string, options: { r
         selectedTemplate: settings.selection?.templateId ?? null,
         canvas: { width: settings.simulator.width, height: settings.simulator.height },
         rulesVersion: settings.simulator.rulesVersion,
+        dataDirName: path.basename(root),
       },
       files,
     };
@@ -321,6 +344,13 @@ export async function restoreBackup(backupDir: string, dataDir: string, options:
   const target = path.resolve(dataDir);
   await assertNoRestoreInProgress(target);
   const manifest = await verifyBackup(backupDir);
+  const from = manifest.summary.dataDirName;
+  if (from !== undefined && dataDirKind(from) !== dataDirKind(path.basename(target)) && options.allowKindChange !== true) {
+    throw new BackupError(
+      'BACKUP_KIND_MISMATCH',
+      `a ${dataDirKind(from)} backup (${from}) into a ${dataDirKind(path.basename(target))} directory (${path.basename(target)}): refused, nothing was changed`
+    );
+  }
   options.onStep?.('verified');
   const hadData = await exists(target);
   const lock = hadData ? await lockOrRefuse(target) : null;

@@ -50,6 +50,7 @@ export {
   BackupError,
   assertNoRestoreInProgress,
   createBackup,
+  dataDirKind,
   restoreBackup,
   restoreStateFile,
   resumeRestore,

@@ -7,7 +7,8 @@
  *   npm run restore -- --resume             termine ou annule une restauration interrompue
  *
  * Options: --data <dossier du moteur> (default GEOPLACER_ENGINE_DIR or data\engine),
- * --out <dossier des sauvegardes> (default sauvegardes\). Messages in French.
+ * --out <dossier des sauvegardes> (default sauvegardes\), --allow-kind-change (Phase 1C.0: restore
+ * a demonstration backup into a project directory, or the reverse). Messages in French.
  */
 
 import path from 'node:path';
@@ -18,6 +19,8 @@ const MESSAGES: Record<string, string> = {
   BACKUP_CORRUPT: 'Sauvegarde corrompue ou incomplète : rien n’a été modifié.',
   BACKUP_INCOMPATIBLE: 'Sauvegarde faite par une version plus récente ou inconnue de GeoPlacer : rien n’a été modifié.',
   BACKUP_INCONSISTENT: 'Le contenu de la sauvegarde est incohérent : rien n’a été modifié.',
+  BACKUP_KIND_MISMATCH:
+    'Cette sauvegarde vient de la démonstration et le dossier cible est un projet (ou l’inverse) : refusé, rien n’a été modifié. Pour la démonstration : --data data\\demo ; pour forcer quand même : --allow-kind-change.',
   RESTORE_IN_PROGRESS: 'Une restauration a été interrompue : lancez « npm run restore -- --resume ».',
   NOTHING_TO_RESUME: 'Aucune restauration interrompue pour ce dossier.',
   NOT_FOUND: 'Dossier introuvable.',
@@ -58,9 +61,10 @@ async function main(argv: string[]): Promise<number> {
         console.log(done === 'finished' ? 'Restauration interrompue terminée.' : done === 'rolled-back' ? 'Restauration interrompue annulée : les données précédentes sont remises en place.' : 'La restauration était déjà terminée.');
         return 0;
       }
-      const source = args[0];
+      const allowKindChange = args.includes('--allow-kind-change');
+      const source = args.filter((a) => a !== '--allow-kind-change')[0];
       if (source === undefined) throw new Error('indiquez le dossier de la sauvegarde à restaurer');
-      const report = await restoreBackup(source, data);
+      const report = await restoreBackup(source, data, { allowKindChange });
       console.log(`Restauration terminée : ${report.restoredFiles} fichiers dans ${data}.`);
       if (report.previous !== null) console.log(`Les données précédentes sont conservées dans ${report.previous}.`);
       for (const w of report.warnings) console.log(`Avertissement : ${w}`);
@@ -68,7 +72,7 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     default:
-      console.error('usage : backup | verify <dossier> | restore <dossier> | restore --resume  [--data <dossier du moteur>] [--out <dossier des sauvegardes>]');
+      console.error('usage : backup | verify <dossier> | restore <dossier> [--allow-kind-change] | restore --resume  [--data <dossier du moteur>] [--out <dossier des sauvegardes>]');
       return 2;
   }
 }
