@@ -40,6 +40,14 @@ async function treeHash(dir: string): Promise<string> {
   return h.digest('hex');
 }
 
+/** Pixels of the template that the canvas already has right (counted on the canvas itself). */
+async function correctOnCanvas(service: EngineService, templateId: string): Promise<number> {
+  const img = await service.templateImage(templateId);
+  const region = decodeRegion((await service.canvasRegion({ minX: img.x, minY: img.y, width: img.width, height: img.height })).data);
+  const want = decodeRegion(img.data);
+  return want.reduce((n, v, i) => (v !== -1 && region[i] === v ? n + 1 : n), 0);
+}
+
 /** The canvas under a template equals the template (every non-transparent pixel). */
 async function matchesTemplate(service: EngineService, templateId: string): Promise<boolean> {
   const img = await service.templateImage(templateId);
@@ -62,7 +70,9 @@ describe('backup and restore: realistic scenarios (Phase 1C.0)', () => {
     const stopped = service.status();
     expect(stopped.state).toBe('stopped');
     expect(stopped.journal.openAttempts).toBe(0);
-    const correctBefore = stopped.scheduler!.correct!;
+    // Counted on the canvas: the status's `correct` is the progress at the START of the last cycle,
+    // before that cycle's batch was written (a stop right after a write differs by one batch).
+    const correctBefore = await correctOnCanvas(service, templateId);
     expect(correctBefore).toBeGreaterThan(0);
     const backup = await service.backup();
     expect(backup.name).toMatch(/^geoplacer-sauvegarde-demo-/);

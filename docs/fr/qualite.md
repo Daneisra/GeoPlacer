@@ -87,6 +87,13 @@ et d'arrêt échouent (bail pris après la demande) ; le test des validateurs
   passages consécutifs réussis.
 - **Cause démontrée** : un délai de test trop court pour une démonstration
   qui avance en temps réel (scénario de sauvegarde) ; porté à 240 s.
+- **Cause démontrée** : échec du contrôle complet final (commit `ff55fe9`,
+  journal conservé) dans le même scénario, écart de 40 pixels, exactement un
+  lot de la démonstration. Le test prenait pour référence le `correct` du
+  statut de l'ordonnanceur, calculé au début du dernier cycle, avant
+  l'écriture de son lot ; un arrêt juste après une écriture le décalait d'un
+  lot. Le test compte désormais les pixels corrects sur la toile ; le
+  produit n'était pas en cause.
 - **Charge de la machine** : les mesures de performance faites quand la
   machine était occupée à 85-97 % par un autre logiciel sont environ deux
   fois plus lentes ; elles sont identifiées comme telles, et les mesures de
