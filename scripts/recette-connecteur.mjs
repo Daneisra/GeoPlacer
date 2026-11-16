@@ -109,7 +109,10 @@ try {
   record('OK actual browser cache reader at tile edges and missing tiles');
   await fixture.locator('#capability').fill(capability);
   await fixture.locator('#connect').click();
-  await page.locator('#connectorConnection').filter({ hasText: 'Connecté' }).waitFor();
+  await page
+    .locator('#connectorConnection')
+    .filter({ hasText: /^Connecté$/ })
+    .waitFor();
   // Transport connection can precede the first observation; wait for the observed project.
   await page.getByText('Modèle du navigateur : 64 × 64, origine (-1001, 1001)', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Lier ce modèle' }).click();
@@ -122,6 +125,33 @@ try {
   record('OK 64 x 64 planning, transparent pixels excluded, browser execution, zero incorrect/unknown');
   await page.screenshot({ path: path.join(out, 'dashboard-completed.png'), fullPage: true });
   await fixture.screenshot({ path: path.join(out, 'browser-fixture.png'), fullPage: true });
+  const operationCount = JSON.parse(await fixture.locator('#details').textContent()).operations;
+  assert.ok(operationCount > 0);
+  await fixture.reload();
+  await fixture.locator('#load').click();
+  await fixture.waitForFunction(() => JSON.parse(document.querySelector('#details').textContent || '{}').operations > 0);
+  assert.equal(JSON.parse(await fixture.locator('#details').textContent()).operations, operationCount);
+  await page
+    .locator('#connectorConnection')
+    .filter({ hasText: /^Déconnecté$/ })
+    .waitFor();
+  await page.getByRole('button', { name: 'Coupler un navigateur factice' }).click();
+  await page.waitForFunction((previous) => {
+    const input = document.querySelector('input[aria-label="Code de couplage"]');
+    return input && input.value.length === 64 && input.value !== previous;
+  }, capability);
+  const nextCapability = await page.getByLabel('Code de couplage', { exact: true }).inputValue();
+  await fixture.locator('#capability').fill(nextCapability);
+  await fixture.locator('#connect').click();
+  await page
+    .locator('#connectorConnection')
+    .filter({ hasText: /^Connecté$/ })
+    .waitFor();
+  await page.getByText('Modèle du navigateur : 64 × 64, origine (-1001, 1001)', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Lier ce modèle' }).click();
+  await page.getByText('Modèle lié', { exact: true }).waitFor();
+  assert.equal((await page.locator('#observedIncorrect').textContent()).trim(), '0');
+  record('OK browser reload preserves durable fake pixels and operation results');
   await fixture.locator('#damage').click();
   await fixture.locator('#observe').click();
   await page.waitForFunction(() => Number(document.querySelector('#observedIncorrect').textContent.replace(/\s/g, '')) > 0);
@@ -134,10 +164,49 @@ try {
   await details.locator('li').first().waitFor();
   record('OK policy costs/benefits and explicit non-executable proposals');
   await page.getByRole('button', { name: 'Révoquer le canal' }).click();
-  await page.locator('#connectorConnection').filter({ hasText: 'Déconnecté' }).waitFor();
+  await page
+    .locator('#connectorConnection')
+    .filter({ hasText: /^Déconnecté$/ })
+    .waitFor();
   await page.getByLabel('Source de toile').selectOption('simulation');
   await page.locator('#simulationDashboard').waitFor();
   record('OK revocation and return to existing simulation dashboard');
+  await api('simulator/settings', { simulator: { width: 2048, height: 2048 }, resetWorld: true }, 'PUT');
+  for (const [width, height] of [
+    [595, 894],
+    [2000, 2000],
+  ]) {
+    const large = new PNG({ width, height });
+    for (let i = 3; i < large.data.length; i += 4) large.data[i] = 255;
+    const local = await api('templates', {
+      name: `Storage ${width} x ${height}`,
+      pngBase64: PNG.sync.write(large).toString('base64'),
+      x: 0,
+      y: 0,
+      strategy: 'top-to-bottom',
+    });
+    await api('engine/selection', { templateId: local.templateId }, 'PUT');
+    await fixture.reload();
+    await fixture.locator('#load').click();
+    await fixture.waitForFunction((w) => JSON.parse(document.querySelector('#details').textContent || '{}').project?.width === w, width);
+    await fixture.reload();
+    await fixture.locator('#load').click();
+    await fixture.waitForFunction((w) => JSON.parse(document.querySelector('#details').textContent || '{}').project?.width === w, width);
+    const stored = await fixture.evaluate(async (id) => {
+      const db = await new Promise((resolve, reject) => {
+        const r = indexedDB.open('geoplacer-fixture-v1', 1);
+        r.onsuccess = () => resolve(r.result);
+        r.onerror = reject;
+      });
+      return new Promise((resolve, reject) => {
+        const r = db.transaction('worlds', 'readonly').objectStore('worlds').get(`geoplacer.fixture.v1.${id}.1`);
+        r.onsuccess = () => resolve(r.result?.pixels.length);
+        r.onerror = reject;
+      });
+    }, local.templateId);
+    assert.equal(stored, width * height);
+    record(`OK browser fixture stores and reloads ${width} x ${height} without placement`);
+  }
   assert.equal(external.length, 0, JSON.stringify(external));
   assert.equal(errors.length, 0, JSON.stringify(errors));
   record(`OK ${engineName}, no page errors, no external requests`);

@@ -12,7 +12,14 @@ async function run(name, test) {
   const pairing = new ConnectorPairing(),
     connector = new GeoPixelsProvider(),
     clients = [];
-  const api = { pairing, connector, connectorView: async () => connector.status() };
+  const api = {
+    pairing,
+    connector,
+    connectorView: async () => connector.status(),
+    bindConnector: async () => {
+      throw new Error('private filesystem details');
+    },
+  };
   const app = express();
   app.use(express.json());
   app.use('/api/v1/connector', createConnectorRouter(api));
@@ -95,5 +102,8 @@ await run('HTTP control origin, strict schema and secret-free status', async ({ 
   assert.equal((await request({ mode: 'local-fake', origin })).status, 200);
   const status = await (await fetch(base + '/status')).text();
   assert.doesNotMatch(status, /synthetic-secret|tokenUser|"token"/);
+  const failed = await fetch(base + '/bind', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  assert.equal(failed.status, 500);
+  assert.doesNotMatch(await failed.text(), /private filesystem/);
 });
 console.log(JSON.stringify({ passed: results.length, results }));

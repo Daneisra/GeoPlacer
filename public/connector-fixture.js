@@ -15,8 +15,35 @@
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return r.json();
   }
-  function save() {
-    localStorage.setItem(storageKey, JSON.stringify(world));
+  const database = new Promise((resolve, reject) => {
+    const request = indexedDB.open('geoplacer-fixture-v1', 1);
+    request.onupgradeneeded = () => request.result.createObjectStore('worlds');
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(new Error('Stockage du navigateur indisponible'));
+  });
+  async function storedWorld(key) {
+    const db = await database;
+    return new Promise((resolve, reject) => {
+      const request = db.transaction('worlds', 'readonly').objectStore('worlds').get(key);
+      request.onsuccess = () => resolve(request.result ?? null);
+      request.onerror = () => reject(new Error('Lecture du stockage impossible'));
+    });
+  }
+  async function save() {
+    const db = await database;
+    try {
+      await new Promise((resolve, reject) => {
+        const transaction = db.transaction('worlds', 'readwrite');
+        transaction.objectStore('worlds').put(world, storageKey);
+        transaction.oncomplete = resolve;
+        transaction.onerror = () => reject(new Error('Enregistrement du monde factice impossible'));
+        transaction.onabort = () => reject(new Error('Enregistrement du monde factice interrompu'));
+      });
+    } catch (error) {
+      world = null;
+      ws?.close();
+      throw error;
+    }
   }
   function render() {
     $('state').textContent = ws?.readyState === 1 ? 'Connecté — fournisseur factice' : 'Déconnecté';
@@ -58,12 +85,12 @@
     };
     rules = status.settings.simulator;
     storageKey = `geoplacer.fixture.v1.${project.id}.${project.generation}`;
-    world = JSON.parse(localStorage.getItem(storageKey) ?? 'null') ?? {
-      pixels: new Array(project.width * project.height).fill(-1),
+    world = (await storedWorld(storageKey)) ?? {
+      pixels: new Int32Array(project.width * project.height).fill(-1),
       energy: 1_000_000,
       applied: {},
     };
-    save();
+    await save();
     render();
   }
   async function observe(partial = false) {
@@ -144,7 +171,7 @@
       });
       entry = { payload, outcomes };
       world.applied[command.attemptId] = entry;
-      save(); // World + operation results in ONE localStorage value, before acknowledging.
+      await save(); // World + operation results in ONE IndexedDB transaction, before acknowledging.
     }
     render();
     if ($('cut').checked) {
@@ -174,7 +201,7 @@
     const index = world.pixels.findIndex((color) => color >= 0);
     if (index < 0) return;
     world.pixels[index] = world.pixels[index] === 0 ? 0xffffff : 0;
-    save();
+    await save();
     render();
     await observe();
   });

@@ -80,6 +80,7 @@ export function ConnectorDashboard() {
   }
   const active = !!view?.scheduler && !['stopped', 'completed', 'error'].includes(view.scheduler.state);
   async function pair(mode: 'local-fake' | 'read-only') {
+    setCapability('');
     const origin = mode === 'local-fake' ? location.origin : 'https://www.geopixels.net';
     const result = await engineHttp.post<{ token: string }>('/connector/pair', { mode, origin });
     setCapability(result.data.token);

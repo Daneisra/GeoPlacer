@@ -2,3 +2,7 @@
 # (cmd.exe labels and goto are unreliable with LF only).
 *.bat text eol=crlf
 *.cmd text eol=crlf
+
+# Generated browser assets use canonical LF on every platform.
+public/geopixels-capture.js text eol=lf
+public/geopixels-connector.user.js text eol=lf

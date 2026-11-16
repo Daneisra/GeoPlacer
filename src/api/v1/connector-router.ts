@@ -38,14 +38,18 @@ export function createConnectorRouter(engine: EngineApi): Router {
       res.json(await fn(req));
     } catch (error) {
       const e = error as { code?: string; message?: string; status?: number };
-      res
-        .status(error instanceof z.ZodError ? 400 : (e.status ?? 409))
-        .json({
-          error: {
-            code: e.code ?? 'CONNECTOR_INVALID',
-            message: error instanceof z.ZodError ? 'invalid connector request' : (e.message ?? 'connector request refused'),
-          },
-        });
+      const invalid = error instanceof z.ZodError;
+      const known = typeof e.status === 'number' && e.status >= 400 && e.status <= 599 && typeof e.code === 'string';
+      res.status(invalid ? 400 : known ? e.status! : 500).json({
+        error: {
+          code: invalid ? 'CONNECTOR_INVALID' : known ? e.code : 'CONNECTOR_FAILED',
+          message: invalid
+            ? 'invalid connector request'
+            : known
+              ? (e.message ?? 'connector request refused')
+              : 'the connector could not complete the request',
+        },
+      });
     }
   };
   router.get(
