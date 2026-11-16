@@ -35,6 +35,11 @@
   [qualite.md](qualite.md)).
 - **Page « Paramètres hérités »** : ces réglages concernent l'ancien code et
   n'ont aucun effet sur la simulation ; la page l'indique.
+- **Débit sur les très grands modèles** : le planificateur reclasse tout
+  le modèle à chaque cycle ; environ 2 000 pixels par seconde à 4096²
+  (machine calme). Le serveur reste réactif (calcul découpé), mais le dessin
+  est plus lent ; sur une machine très chargée, le débit baisse encore de
+  7 à 10 %.
 - Le limiteur de débit (300 requêtes par minute par défaut) est partagé par
   tous les onglets : au-delà de quelques onglets ouverts, des commandes
   peuvent recevoir un refus 429.
@@ -76,6 +81,17 @@
   [sauvegarde-restauration.md](sauvegarde-restauration.md)).
 - Les dossiers `*.avant-restauration-*` et `world-reset-*` ne sont jamais
   supprimés automatiquement.
+
+## Qualité du code
+
+- 47 avertissements `no-explicit-any` restent dans le serveur (65 avant la
+  Phase 1C.0), aucune règle désactivée : 26 dans l’ancien moteur et ses
+  clients, neutralisés (`template-manager`, `bridge`, `http-client`,
+  `tile-manager`, keep-alive jamais appelé) ; 18 dans les routes héritées
+  de comptes et de modèles, dont seules les parties locales restent
+  actives (liste, suppression) ; 3 dans des tests. Les retirer demanderait
+  de réécrire du code hérité destiné à disparaître (voir
+  [qualite.md](qualite.md)).
 
 ## Tests
 

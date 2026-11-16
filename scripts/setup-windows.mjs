@@ -86,7 +86,7 @@ function makeDir(dir) {
 const logDirProblem = makeDir(path.join(root, 'test-logs'));
 if (logDirProblem !== null) {
   console.log(`ÉCHEC : impossible de créer le dossier des journaux (${logDirProblem}).`);
-  console.log('Que faire : placez GeoPlacer dans un dossier où vous avez le droit d’écrire (par exemple Documents), puis relancez.');
+  console.log('Que faire : vérifiez qu’aucun fichier ne porte ce nom et que vous avez le droit d’écrire dans ce dossier (sinon, placez GeoPlacer par exemple dans Documents), puis relancez.');
   process.exit(1);
 }
 const logFile = path.join(root, 'test-logs', `${new Date().toISOString().replace(/[:.]/g, '-')}-setup.log`);
@@ -228,7 +228,7 @@ async function main() {
   say('[5/6] Dossiers et configuration…');
   for (const dir of ['data', 'sauvegardes']) {
     const problem = makeDir(path.join(root, dir));
-    if (problem !== null) return fail('dossiers', `impossible de créer ${problem}`, 'placez GeoPlacer dans un dossier où vous avez le droit d’écrire (par exemple Documents), puis relancez.');
+    if (problem !== null) return fail('dossiers', `impossible de créer ${problem}`, 'vérifiez qu’aucun fichier ne porte ce nom et que vous avez le droit d’écrire dans ce dossier (sinon, placez GeoPlacer par exemple dans Documents), puis relancez.');
   }
   if (!existsSync(path.join(root, '.env')) && existsSync(path.join(root, '.env.example'))) {
     try {

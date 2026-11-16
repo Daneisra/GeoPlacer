@@ -11,11 +11,11 @@ double-cliquer sur `setup.bat` (ou `npm run setup:windows`). Ensuite,
 
 ## 1. Prérequis
 
-| Outil | Version | Remarque |
-|---|---|---|
-| Node.js | **≥ 22.12.0** | Exigé par Vite 8 (`engines` du `package.json`) |
-| npm | ≥ 10 | Livré avec Node.js 22 |
-| Git | récent | Pour cloner le dépôt |
+| Outil | Minimum (vérifié par l'installation) | Recommandé (vérifié en recette) | Remarque |
+|---|---|---|---|
+| Node.js | **22.12.0** | **22 LTS**, testé en 22.23.2 | Exigé par Vite 8 (`engines` du `package.json`) ; 23 et plus non testés |
+| npm | 10 | 10.9.8 (livré avec Node.js 22) | Ne pas mettre npm à jour globalement pour GeoPlacer |
+| Git | récent | — | Pour cloner et mettre à jour ; facultatif avec l'archive ZIP |
 
 Aucun compilateur, Python, GTK ou Visual Studio Build Tools n'est nécessaire :
 le module natif `canvas` est installé depuis son binaire officiel précompilé.
@@ -82,13 +82,50 @@ npm vide, `core.autocrlf=false` : les `.bat` restent en CRLF grâce à
 | `npm start` | dans Edge : bandeau, temps réel connecté, API 200, route héritée refusée (410), aucune erreur console, aucune requête externe |
 | `npm run dev` | idem à travers Vite (`http://localhost:<port>`), ports libérés à l'arrêt |
 
+### Audit de l'installation (Phase 1C.0)
+
+`scripts/audit-installation-windows.mjs` rejoue, sur un **clone neuf**, les
+cas qu'un utilisateur rencontre. Résultat du 16/11/2026 : **0 échec**.
+
+| Cas | Résultat |
+|---|---|
+| Clone dans un chemin **avec espaces et accent**, installation par un Node.js placé dans un chemin **avec espaces** (comme `C:\Program Files\nodejs`), cache npm vide | Installation complète en 140 s ; empreinte SHA-256 de l'archive `canvas` vérifiée et conforme |
+| Installation **interrompue** pendant `npm ci` (processus tué) | Jamais vue comme complète (`--check` = 1) ; `start.bat` la reprend entièrement |
+| Installation **répétée** sur une installation existante | Réussie ; `.env` et `data\` conservés |
+| **Nouveau commit** (comme après `git pull`) | `--check` = 2 ; `start.bat` recompile sans réinstaller (18 s) |
+| **Dépendances modifiées** (lockfile) | `--check` = 1 : réinstallation |
+| Dossier **impossible à créer** (un fichier porte son nom) | Échec expliqué (« ÉCHEC à l'étape « dossiers » », « Que faire »), sans pile d'erreur ; corrigé puis relancé : réussi |
+| **Aucune modification globale** | Paquets npm globaux et préfixe identiques avant et après |
+
+Défauts trouvés et corrigés pendant la Phase 1C.0 :
+- l'étape `canvas` lançait Node.js à travers le shell : avec Node.js dans
+  `C:\Program Files\nodejs` (installation standard), elle échouait
+  (« … n'est pas reconnu en tant que commande interne », reproduit) ;
+- une première version de la vérification d'empreinte plantait à chaque
+  installation (constante utilisée avant son initialisation), puis ne
+  vérifiait rien (npm 10 refuse `npm config get cache`) : trouvés par cet
+  audit, corrigés, puis audit refait en entier.
+
+Rejouer l'audit (télécharge les dépendances, n'écrit que dans le dossier
+indiqué) :
+
+```powershell
+node scripts/audit-installation-windows.mjs <dépôt> <branche> <dossier neuf>
+```
+
+Les **droits d'administration** ne sont jamais demandés. Un dossier en
+lecture seule (ACL Windows) n'a pas été testé tel quel : son effet est le
+même échec expliqué que le cas « dossier impossible à créer ».
+
 ### `start.bat`
 
 `start.bat` (double-clic) est le lanceur :
 
-- au premier lancement, ou si l'installation est incomplète
-  (`node_modules`, `frontend\node_modules`, `dist\server.js` ou
-  `frontend\dist\index.html` absent), il lance l'installation ci-dessus ;
+- il demande d'abord l'état de l'installation
+  (`node scripts\setup-windows.mjs --check`, Phase 1C.0) : au premier
+  lancement, après une installation interrompue ou si les dépendances ont
+  changé, il lance l'installation complète ; si seul le code a changé
+  (après un `git pull`), il recompile seulement ;
 - puis il lance GeoPlacer **dans la même fenêtre** (`npm start`) ;
   `start.bat --demo` lance la démonstration (`npm run demo`) ;
 - Ctrl+C l'arrête proprement.
@@ -217,6 +254,13 @@ GeoPlacer instance ». Pour deux instances, lancer la seconde depuis un
 
 `start.bat`, `start.sh`, `npm start`, `npm run dev` et `npm run
 dev:backend` construisent d'abord les paquets du moteur (Phase 1B.9).
+
+### Mettre à jour
+
+`git pull`, puis `start.bat` (il recompile, ou réinstalle si les
+dépendances ont changé). `update.bat` (hérité) fait la même chose ; s'il ne
+trouve pas Git, il explique comment l'installer et s'arrête, sans rien
+installer lui-même (branche testée avec un `PATH` sans Git).
 
 ### Mode développement (corrigé en Phase 1B.3)
 

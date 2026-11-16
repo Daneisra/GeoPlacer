@@ -6,7 +6,25 @@ GeoPlacer est un fork de
 pour GeoPixels, avec un moteur développé et testé **uniquement sur simulateur
 local** (voir l'ADR 0001).
 
-## État actuel : Phase 1B.10, première version de démonstration
+## État actuel : Phase 1C.0, version candidate de démonstration
+
+Réalisé en Phase 1C.0 (voir [version-candidate.md](version-candidate.md)) :
+- **serveur réactif sur les grands modèles** : ordonnanceur coopératif et
+  calculs découpés ; à 4096², blocage maximal de la boucle 1 339 → 75 ms,
+  latence HTTP médiane 234 → 3 ms, débit inchangé (voir
+  [progression.md](progression.md), § 7) ;
+- **installation fiabilisée** et auditée sur clone neuf (chemins avec
+  espaces et accents, Node.js dans `C:\Program Files`, installation
+  interrompue, mises à jour, empreinte de `canvas`) ;
+- **sauvegardes** : démonstration et projet jamais mélangés par accident ;
+  scénarios réalistes testés ;
+- **sécurité** de la version candidate vérifiée (scripts, keep-alive,
+  `.env.example`) ; un défaut latent des validateurs corrigé ;
+- **proposition de version** `6.0.0-rc.1` et notes de release (non
+  publiées) ;
+- **push de la Phase 1B.10** : branche `feat/phase1b10-demo-hardening`.
+
+## Phase 1B.10, première version de démonstration
 
 **La V1 est un environnement de simulation local** : aucune connexion à
 GeoPixels ou à Wplace, aucun compte. Un seul agent simulé. Vérifié sous
@@ -189,6 +207,8 @@ Phase 1B.10, il est neutralisé (voir [securite.md](securite.md)).
 | [sauvegarde-restauration.md](sauvegarde-restauration.md) | Sauvegarde, vérification, restauration, reprise après interruption |
 | [commandes.md](commandes.md) | Toutes les commandes |
 | [problemes-connus.md](problemes-connus.md) | Problèmes connus et limites de la V1 |
+| [version-candidate.md](version-candidate.md) | Version candidate : version proposée, fonctionnalités, plateformes, risques, checklist |
+| [notes-release-6.0.0-rc.1.md](notes-release-6.0.0-rc.1.md) | Notes de release proposées (non publiées) |
 | [api-v1.md](api-v1.md) | Routes `/api/v1`, protections, codes d'erreur, statut |
 | [websocket.md](websocket.md) | Canal temps réel `/api/v1/ws` : messages, cohérence, fiabilité |
 | [reprise-apres-crash.md](reprise-apres-crash.md) | Garanties, procédure et limites de la reprise |
