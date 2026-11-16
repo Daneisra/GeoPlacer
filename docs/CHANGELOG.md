@@ -215,3 +215,11 @@ Détail : `MODIFICATIONS.md` et `docs/fr/`.
 - [GitHub Repository](https://github.com/luluwaffless/wplacer)
 - [Issues](https://github.com/luluwaffless/wplacer/issues)
 - [Discord Server](https://discord.gg/wplacerbot)
+
+## Phase 2A — travail local non publié (16 novembre 2026)
+
+Fournisseur navigateur expérimental, couplage local à capacités limitées, observations
+partielles et datées, raccordement au scheduler existant, journal séparé et reprise,
+politiques d'améliorations sur données factices, dashboard et recettes Edge/Firefox.
+Aucun placement ni achat réel. Voir [le rapport](fr/RAPPORT-PHASE2A.md).
+L'archive et la version RC consolidées restent distinctes de cette branche expérimentale.

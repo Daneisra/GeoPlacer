@@ -312,3 +312,15 @@ licence. L'historique Git complet du projet d'origine est conservé.
 - Identité principale GeoPlacer/GP, sans logo téléchargé ; attribution et AGPL préservées.
 - Documentation du PNG et du Ctrl+C validés par l’utilisateur, pas par Codex.
 - Version conservée à 6.0.0-rc.1 ; aucun push, tag, release ou publication.
+
+## 16 novembre 2026 — Phase 2A (développement local)
+
+- Ajout d'un fournisseur d'observations navigateur GeoPixels et d'un canal local couplé,
+  sans transmission de secrets de session et sans écrivain réel.
+- Réutilisation du scheduler existant, journaux séparés par source, liaison durable et
+  réconciliation des opérations incertaines ; sauvegarde/restauration étendues au journal.
+- Politiques sur l'UpgradePlanner existant, propositions synthétiques sans achats.
+- Dashboard expérimental, lecteur passif, service factice navigateur, tests et recettes.
+- Version 6.0.0-rc.1 conservée ; archive consolidée et attributions AGPL inchangées.
+- Sources publiques et limites : docs/fr/RAPPORT-PHASE2A.md. Implémentations originales
+  préparées avec Codex ; aucun moteur d'un bot tiers n'est fusionné dans GeoPlacer.

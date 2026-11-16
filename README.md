@@ -9,6 +9,14 @@ cookie, jeton ou proxy. Le dessin sur GeoPixels reste manuel.
 La version **6.0.0-rc.1** consolidée est locale, sur
 `integrate/6.0.0-rc.1-geopixels`, et attend une validation de publication.
 
+La branche de développement locale `feat/phase2a-geopixels-provider` ajoute un
+**connecteur navigateur expérimental** : observations passives du cache GeoPixels,
+couplage local contrôlé et parcours d'écriture testé uniquement sur une page factice.
+Le vrai site ne dispose ici d'aucun exécuteur de placement ou d'achat. La simulation
+reste l'environnement de référence ; l'archive RC consolidée ne contient pas cette phase.
+Voir le [guide Phase 2A](docs/fr/phase2a-geopixels.md) et son
+[rapport technique](docs/fr/RAPPORT-PHASE2A.md). Cette branche n'est pas publiée.
+
 **Origine** : GeoPlacer est un fork de wplacer (`Arknight38/wplacer-dev`,
 issu de `luluwaffless/wplacer`), œuvre de JinxTheCatto, luluwaffless,
 Arknight38 et de leurs contributeurs (voir « Credits » plus bas), sous
