@@ -64,6 +64,25 @@ export interface EngineApi {
   /** Demonstration (Phase 1B.10): availability (empty project only), and its setup. */
   demoAvailability(): Promise<unknown>;
   setupDemo(): Promise<CommandResultLike>;
+
+  /**
+   * Phase 1C.1: GeoPixels ghost image export. Local only: the PNG is imported by hand in the
+   * native tool of GeoPixels; nothing is ever sent to GeoPixels.
+   */
+  importGhost(input: {
+    readonly name: string;
+    readonly png: Uint8Array;
+    readonly palette: readonly string[];
+    readonly width?: number;
+    readonly height?: number;
+    readonly alphaThreshold?: number;
+    readonly x?: number;
+    readonly y?: number;
+  }): Promise<unknown>;
+  listGhosts(): Promise<unknown>;
+  ghostInfoOf(templateId: string): Promise<unknown>;
+  exportGhost(templateId: string): Promise<{ readonly png: Uint8Array; readonly filename: string }>;
+  deleteGhost(templateId: string): Promise<unknown>;
 }
 
 /** True for an error thrown by the engine with a stable code (EngineServiceError and the like). */

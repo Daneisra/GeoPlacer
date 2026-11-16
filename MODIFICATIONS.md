@@ -27,6 +27,16 @@ licence. L'historique Git complet du projet d'origine est conservé.
 - `start.bat` : installation des deux projets par le chemin vérifié.
 - Documentation française (`docs/fr/`, `docs/decisions/`).
 
+## 2026-11-16 — Phase 1C.1 : préparation d'images pour GeoPixels (branche distincte)
+
+- `packages/core/src/template/resize.ts` (nouveau) : redimensionnement avant quantification.
+- `packages/engine-service/src/ghost.ts` (nouveau) : préparation et export PNG pour l'outil natif
+  d'image fantôme de GeoPixels, par le TemplateManager (projet `geopixels`).
+- API `/api/v1/geopixels/templates` ; page « Préparer pour GeoPixels » de l'interface.
+- `scripts/recette-geopixels.mjs` (nouveau) ; tests du cœur, du service et des routes.
+- Documentation : `docs/fr/geopixels.md` (nouveau), API, sauvegarde, commandes, README.
+- Aucune connexion à GeoPixels, aucun compte, aucune modification de son client.
+
 ## 2026-11-16 — Phase 1C.0 : préparation d'une version candidate
 
 - Réactivité du serveur : ordonnanceur coopératif (`packages/core/src/scheduler`),

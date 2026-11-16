@@ -60,6 +60,7 @@ sauvegardes>`.
 |---|---|
 | `node scripts/recette-simulation.mjs <dossier> [--quick]` | Recette de la Phase 1B.10 dans Edge ; Firefox avec `GEOPLACER_BROWSER_ENGINE=firefox`. Demande `GEOPLACER_PLAYWRIGHT_CORE`, un `playwright-core` installé **hors du dépôt** (voir [recette-navigateur.md](recette-navigateur.md)) |
 | `node scripts/recette-navigateur.mjs` | Recette de l'interface (Phase 1B.7, mise à jour en 1B.10) |
+| `node scripts/recette-geopixels.mjs <dossier>` | Recette de la préparation pour GeoPixels (Edge ; Firefox avec `GEOPLACER_BROWSER_ENGINE=firefox`) ; ne va jamais sur geopixels.net |
 | `npm run bench:responsiveness -- <côté> <secondes> [full\|incremental]` | Réactivité du serveur pendant une simulation (voir [qualite.md](qualite.md)) |
 | `node --expose-gc --import tsx packages/engine-service/bench/blocking.bench.ts <côté> <secondes>` | Ce qui bloque la boucle d'événements : blocages horodatés, attribués par profil CPU (Phase 1C.0) |
 | `node --import tsx packages/engine-service/bench/worker-transfer.bench.ts <côté>` | Coût d'un worker thread (envoi d'un instantané) |

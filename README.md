@@ -83,6 +83,10 @@ npm run demo               # ou start.bat --demo : démonstration, dossier sépa
   GeoPlacer arrêté ([guide](docs/fr/sauvegarde-restauration.md)).
 - **Mettre à jour** : `git pull`, puis `start.bat` (ou
   `npm run setup:windows`).
+- **GeoPixels** : menu « Préparer pour GeoPixels » : votre image dans vos
+  couleurs, aux dimensions voulues, exportée en PNG pour l'outil d'image
+  fantôme du site, que vous importez **vous-même** ; GeoPlacer ne se
+  connecte jamais à GeoPixels ([guide](docs/fr/geopixels.md)).
 
 ### Dépannage courant
 

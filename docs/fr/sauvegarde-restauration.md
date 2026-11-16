@@ -59,6 +59,7 @@ compte, ni session, ni jeton.
 | `projects\simulation\templates\<id>\manifest.json` | Modèle : nom, révisions, position, stratégie | oui |
 | `projects\simulation\templates\<id>\reservations\` | Numéros de révision réservés (jamais réutilisés) | oui |
 | `projects\simulation\blobs\<empreinte>.png` | Images des modèles | oui |
+| `projects\geopixels\…` | Images préparées pour GeoPixels (Phase 1C.1), même organisation | oui |
 | `journal\attempts.log`, checkpoints et générations | Journal des tentatives | oui |
 | `journal\history-*.log` | Historique des tentatives closes | oui |
 | `world\CURRENT`, `world-<n>.ckpt`, `world-<n>.log` | Toile simulée durable et agent simulé | oui |
