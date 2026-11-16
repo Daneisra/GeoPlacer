@@ -32,7 +32,7 @@ import { createHash } from 'node:crypto';
 import { copyFileSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -146,14 +146,15 @@ if (!atLeast(nodeVersion, [22, 12, 0])) {
   }
 }
 
-/** Published SHA-256 of the canvas prebuilt archives that this installation can check. */
-const CANVAS_ARCHIVES = {
-  // https://github.com/Automattic/node-canvas/releases/tag/v3.2.3 (asset digest shown by GitHub)
-  'canvas-v3.2.3-napi-v7-win32-x64.tar.gz': 'ba953cc8c38303ab94cc83461c7561506a5a3af37d6c678de4a47914d2d0bb48',
-};
-
 /** Checks the canvas archive kept by prebuild-install in the npm cache; a message, or null if fine. */
 function checkCanvasArchive() {
+  // Published SHA-256 of the canvas prebuilt archives that this installation can check. Declared
+  // here, not at the module level: main() runs from the top-level code above, before any later
+  // module-level constant is initialised (found by the Phase 1C.0 installation audit).
+  const CANVAS_ARCHIVES = {
+    // https://github.com/Automattic/node-canvas/releases/tag/v3.2.3 (asset digest shown by GitHub)
+    'canvas-v3.2.3-napi-v7-win32-x64.tar.gz': 'ba953cc8c38303ab94cc83461c7561506a5a3af37d6c678de4a47914d2d0bb48',
+  };
   let version;
   try {
     version = JSON.parse(readFileSync(path.join(root, 'node_modules', 'canvas', 'package.json'), 'utf8')).version;
@@ -163,12 +164,14 @@ function checkCanvasArchive() {
   const name = `canvas-v${version}-napi-v7-${process.platform}-${process.arch}.tar.gz`;
   const expected = CANVAS_ARCHIVES[name];
   if (expected === undefined) return { ok: true, text: `archive ${name} : aucune empreinte connue sur cette plateforme (non vérifiée)` };
-  const cache = spawnSync(npm, ['config', 'get', 'cache'], { encoding: 'utf8', shell: isWindows });
-  const dir = path.join(cache.stdout.trim(), '_prebuilds');
+  // The directory prebuild-install downloads into (its own rule, node_modules/prebuild-install/util.js);
+  // `npm config get cache` is refused by npm 10 (« protected »).
+  const npmCache = process.env.npm_config_cache || (process.env.APPDATA ? path.join(process.env.APPDATA, 'npm-cache') : path.join(homedir(), '.npm'));
+  const dir = path.join(npmCache, '_prebuilds');
   const files = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(name)) : [];
   if (files.length === 0) return { ok: true, text: 'archive absente du cache npm (binaire déjà présent) : non vérifiée' };
   for (const f of files) {
-    if (sha256(path.join(dir, f)) !== expected) return { ok: false, text: `empreinte SHA-256 inattendue pour ${f}` };
+    if (sha256(path.join(dir, f)) !== expected) return { ok: false, text: `empreinte SHA-256 inattendue pour ${f}`, dir };
   }
   return { ok: true, text: `archive ${name} : empreinte SHA-256 conforme` };
 }
@@ -207,7 +210,7 @@ async function main() {
   log.write(`canvas archive: ${archive.text}\n`);
   if (!archive.ok) {
     rmSync(binary, { force: true });
-    return fail('canvas', archive.text, 'l’archive téléchargée ne correspond pas à la version officielle : supprimez le dossier _prebuilds du cache npm (npm config get cache) puis relancez.');
+    return fail('canvas', archive.text, `l’archive téléchargée ne correspond pas à la version officielle : supprimez le dossier ${archive.dir} puis relancez.`);
   }
   const load = spawnSync(process.execPath, ['-e', "require('canvas'); console.log('ok')"], { cwd: root, encoding: 'utf8' });
   log.write(`canvas load: ${load.stdout}${load.stderr}\n`);
