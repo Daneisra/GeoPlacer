@@ -13,8 +13,9 @@ Ne pas le considérer comme fait tant qu'il ne l'a pas été.
    ```
    (`node` directement : le code de sortie est alors celui du serveur ; avec
    `start.bat`, Windows ajoute sa propre question, voir l'étape 5.)
-   Attendre la ligne `Server listening on http://127.0.0.1:3000` (le port
-   peut différer : utiliser celui affiché).
+   La bannière affiche `GeoPlacer 6.0.0-rc.1 : simulation locale` (version
+   candidate). Attendre la ligne `Server listening on http://127.0.0.1:3000`
+   (le port peut différer : utiliser celui affiché).
 2. **Ouvrir** cette adresse, cliquer « Préparer la démonstration »
    (si la carte le propose), puis « Démarrer ». Attendre que la progression
    dépasse 10 %. Noter la valeur.
