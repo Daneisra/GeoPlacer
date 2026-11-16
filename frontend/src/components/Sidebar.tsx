@@ -8,8 +8,8 @@ export function Sidebar() {
   return (
     <nav className="sidebar">
       <div className="sidebar-header">
-        <img src="/icons/icon.png" alt="wplacer" className="sidebar-logo" />
-        <span className="sidebar-title">wplacer</span>
+        <span aria-hidden="true" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-current font-mono text-sm font-bold">GP</span>
+        <span className="sidebar-title">GeoPlacer</span>
       </div>
       <ul className="sidebar-nav">
         {navItems.map((item) => (
@@ -36,7 +36,7 @@ export function Sidebar() {
             {status === 'checking' && 'Connexion…'}
           </span>
         </div>
-        <p className="sidebar-credits">Made by Arknight</p>
+        <p className="sidebar-credits">Issu de wplacer · Arknight38 et contributeurs · AGPL-3.0</p>
       </div>
     </nav>
   );
