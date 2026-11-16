@@ -26,6 +26,72 @@ ses propres dépendances hors des workspaces. Il faut donc lancer
 dans `frontend` (modules `react`, `vite`… introuvables). C'est vérifié en
 Phase 1B.8 : les tests passent sans cette étape, le build la requiert.
 
+## Phase 1C.0 : version candidate
+
+**`npm run check:logged`** (dépôt, commit `2a52df2`, code de sortie 0, 407 s,
+machine à 35 %) :
+- Jest : 16 suites, **151 tests** (145 en 1B.10) ;
+- Vitest : 49 fichiers, **546 tests** + 1 exhaustif optionnel :
+  - core 368 ;
+  - adapters-node 66 ;
+  - engine-service 62 ;
+  - simulator 50 ;
+- lint du serveur : 0 erreur, **47 avertissements** (65 en 1B.10 ; aucune
+  règle désactivée) ; paquets et interface : 0 ;
+- `npm run build` : réussi.
+
+**Clone neuf** (même commit, cache npm vide, `npm run setup:windows`) :
+mêmes résultats (151 + 546 tests, 0 échec) ; build réussi ; recettes Edge et
+Firefox complètes à 0 échec, recette 1B.7 à 29/0, recette d'arrêt réussie
+(voir [recette-navigateur.md](recette-navigateur.md)). Audit d'installation :
+0 échec (voir [installation-windows.md](installation-windows.md)).
+
+**Tests ajoutés** :
+
+| Où | Fichier | Couvre |
+|---|---|---|
+| core | `slices.test.ts` | Calcul découpé = calcul synchrone pour toutes les tailles de tranche ; progression incrémentale découpée = calcul complet à chaque pas ; appel abandonné à **chaque** frontière de tranche sans effet ; `invalidate()` pendant un appel ; abandon asynchrone |
+| simulator | `cooperative.test.ts` | Ordonnanceur coopératif : même course qu'avant avec des cessions vides ; action injectée à la k-ième cession, pour k réparti sur toute la course et pour toutes les cessions des premiers cycles : acteur extérieur, déplacement du modèle, pause, arrêt avec abandon ; aucun bail après une pause ou un arrêt, rien à l'ancienne position après un déplacement, rien appliqué deux fois |
+| engine-service | `backup-scenarios.test.ts` | Démonstration interrompue, sauvegardée, restaurée dans un nouveau dossier puis terminée ; plusieurs modèles et révisions ; restauration répétée ; démonstration et projet jamais mélangés |
+| engine-service | `service.test.ts` | Acteur extérieur simulé : nombre exact, seulement des pixels peints, plafonné, repeints |
+| serveur | `release-safety.test.ts` | Keep-alive jamais appelé ; `.env.example`, scripts et `package.json` sans fonction héritée ; `update.bat` sans winget |
+| serveur | `validation-express5.test.ts` | Validateurs de requête sur une vraie application Express 5 |
+
+**Contre-épreuves (mutations)** : sans la vérification de révision avant le
+bail, le test de déplacement échoue (pixels peints à l'ancienne position) ;
+sans la vérification de pause et d'arrêt avant le bail, les tests de pause
+et d'arrêt échouent (bail pris après la demande) ; le test des validateurs
+échoue sur l'ancien code (500 au lieu de 200).
+
+**Défauts trouvés pendant la phase** :
+- par l'audit d'installation : Node.js dans un chemin avec espaces (étape
+  `canvas`), constante utilisée avant son initialisation, empreinte jamais
+  vérifiée (npm 10) ; voir [installation-windows.md](installation-windows.md) ;
+- par la revue des avertissements de lint : `validateQuery` répondait 500
+  sous Express 5 ;
+- par la recette Firefox de la 1B.10 : heures au format anglais (corrigé
+  en 1B.10) ;
+- par le diagnostic : l'acteur extérieur simulé créait un objet par pixel ;
+  le banc de réactivité mesurait mal la latence HTTP.
+
+**Délais intermittents et échecs : suivi.**
+- **Cause démontrée (nouvelle)** : le test de crash exigeait, aux étapes de
+  point de contrôle de la toile, qu'une écriture soit démarrée au moment où
+  le processus est tué. C'est une course entre deux suites d'E/S
+  indépendantes (le point de contrôle, le journal de la tentative suivante) ;
+  le produit ne la garantit pas. Échecs constatés avec et sans cession,
+  journaux conservés ; la version de la 1B.9 passait par chance. Exigence
+  retirée à ces étapes, garanties de reprise toujours vérifiées ; trois
+  passages consécutifs réussis.
+- **Cause démontrée** : un délai de test trop court pour une démonstration
+  qui avance en temps réel (scénario de sauvegarde) ; porté à 240 s.
+- **Charge de la machine** : les mesures de performance faites quand la
+  machine était occupée à 85-97 % par un autre logiciel sont environ deux
+  fois plus lentes ; elles sont identifiées comme telles, et les mesures de
+  référence ont été refaites au calme.
+- Les causes supposées des phases précédentes (antivirus sur un clone neuf)
+  restent non démontrées.
+
 ## Phase 1B.10 : stabilisation, sécurisation, démonstration
 
 **Clone neuf, procédure documentée seulement** (16/11/2026) : dépôt cloné

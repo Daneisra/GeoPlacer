@@ -49,6 +49,23 @@ Ne pas le considérer comme fait tant qu'il ne l'a pas été.
 Un **second** Ctrl+C pendant l'arrêt force la sortie (code 1) ; la reprise
 de l'étape 7 doit fonctionner aussi dans ce cas (facultatif).
 
+## Recettes de la Phase 1C.0 (clone neuf, commit `2a52df2`)
+
+Clone neuf, cache npm vide, `npm run setup:windows` (empreinte de `canvas`
+conforme), puis :
+
+| Recette | Résultat |
+|---|---|
+| `recette-simulation.mjs`, Edge, parcours complet | **0 échec** ; démonstration terminée 143 s après la reprise ; heures en français ; aucune requête vers un autre site |
+| `recette-simulation.mjs`, Firefox 132 de Playwright, parcours complet | **0 échec** ; 142 s après la reprise |
+| `recette-navigateur.mjs` (Phase 1B.7) | **29 contrôles, 0 KO** |
+| `recette-arret-windows.mjs` | Réussie : événement Ctrl+C à trois reprises (arrêt propre en 20 à 25 ms, port libéré, question « Terminer le programme de commandes » posée) ; progression retrouvée (35 changements rejoués) ; démonstration terminée ; sauvegarde nommée `geoplacer-sauvegarde-demo-…` vérifiée puis restaurée dans `data\demo` ; état restauré complet |
+
+Le **Ctrl+C au clavier** reste à faire par l'utilisateur (procédure
+ci-dessus). Firefox officiel : non testé (non installé sur la machine de
+développement ; aucune installation faite pour ne pas modifier
+l'environnement).
+
 ## Recette de la Phase 1B.10
 
 ### Parcours dans le navigateur
