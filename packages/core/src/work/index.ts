@@ -1,4 +1,5 @@
-export { canvasPointKey, createWorkPlanner, nextBatch, prepareTemplate, prepareTemplateSync, taskIdOf } from './planner.js';
+export { canvasPointKey, createWorkPlanner, nextBatch,
+  nextBatchSliced, prepareTemplate, prepareTemplateSync, taskIdOf } from './planner.js';
 export { AttemptError, DEFAULT_AUTO_COMPACTION, createAttemptManager, historyOf, isObservedValue, createMemoryHistory, createMemoryJournal, type AttemptErrorCode, type AttemptManagerDeps } from './attempts.js';
 export { JournalStateBuilder, OPEN_STATES, eventAttemptId, replayJournal, summarize, transition } from './journal-state.js';
 export {

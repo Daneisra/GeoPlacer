@@ -126,6 +126,10 @@ const ACTIVE: ReadonlySet<SchedulerState> = new Set(['initializing', 'running', 
 /** Default: world checkpoint after this many logged changes. */
 export const WORLD_CHECKPOINT_RECORDS = 2_000;
 const RECENT_ATTEMPTS = 100;
+/** Phase 1C.0: pixels of work between two yields to the event loop (about 5 to 15 ms of work). */
+export const DEFAULT_SLICE_PIXELS = 262_144;
+/** Lets the pending I/O (HTTP, WebSocket, timers) run, then continues. */
+const yieldToEventLoop = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 /** Output pixels of one read (after the scale). */
 const MAX_REGION_PIXELS = 2048 * 2048;
 /** Source pixels of one read (the largest canvas). */
@@ -170,6 +174,12 @@ export interface EngineServiceOptions {
   readonly backupDir?: string;
   /** Progress computation of the scheduler (Phase 1B.10): see SchedulerConfig.progressMode. */
   readonly progressMode?: 'full' | 'incremental';
+  /**
+   * Phase 1C.0: the scheduler yields to the event loop (setImmediate) between the phases of a
+   * cycle and every `slicePixels` pixels of long computations (default on, 262 144 pixels);
+   * false: never (behaviour before 1C.0, for comparisons).
+   */
+  readonly cooperative?: false | { readonly slicePixels?: number };
   /** Measurement hook (benches): called after every cycle with the scheduler status. */
   readonly onCycle?: (status: SchedulerStatus) => void;
 }
@@ -296,6 +306,7 @@ export class EngineService {
   private readonly checkpointRecords: number;
   private readonly backupDir: string;
   private readonly progressMode: 'full' | 'incremental';
+  private readonly cooperative: false | { readonly slicePixels: number };
   private readonly onCycle: ((status: SchedulerStatus) => void) | undefined;
   private backingUp = false;
   /** Decoded templates by id (current revision only), a few at most. */
@@ -313,6 +324,7 @@ export class EngineService {
     this.backupDir = path.resolve(options.backupDir ?? path.join(root, '..', 'sauvegardes'));
     // Phase 1B.10: incremental by default (measured: -39 % per cycle at 2000², -42 % at 4096²; verified every 10 cycles).
     this.progressMode = options.progressMode ?? 'incremental';
+    this.cooperative = options.cooperative === false ? false : { slicePixels: options.cooperative?.slicePixels ?? DEFAULT_SLICE_PIXELS };
     this.onCycle = options.onCycle;
     this.hub = new EngineEventHub({ intervalMs: options.eventIntervalMs ?? 250, now: () => this.clock.now() });
     this.templates = createTemplateManager({ storage: new NodeTemplateStorage(lock), hasher: nodeSha256Hasher, codec: pngjsCodec, ids: randomIdSource, clock: systemClock });
@@ -644,6 +656,7 @@ export class EngineService {
       resources: this.resources,
       attempts: this.attempts,
       hasher: nodeSha256Hasher,
+      ...(this.cooperative === false ? {} : { cooperative: { yieldTo: yieldToEventLoop, slicePixels: this.cooperative.slicePixels } }),
     });
     this.scheduler = scheduler;
     this.schedulerEnded = false;

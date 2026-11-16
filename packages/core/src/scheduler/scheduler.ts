@@ -45,10 +45,11 @@ import type {
   Timestamp,
 } from '../contracts/index.js';
 import { templateBounds } from '../geometry/projection.js';
-import { computeProgress } from '../progress/progress.js';
+import { computeProgressSliced } from '../progress/progress.js';
+import { SliceAbandoned, SliceBudget, runSliced, runSlicedAsync, unsliced, type Sliced } from '../progress/slices.js';
 import { createIncrementalProgress } from '../progress/incremental.js';
 import { estimateEta } from '../progress/eta.js';
-import { nextBatch, prepareTemplate, prepareTemplateSync } from '../work/planner.js';
+import { nextBatchSliced, prepareTemplate, prepareTemplateSync } from '../work/planner.js';
 
 export class SchedulerConfigError extends Error {
   constructor(message: string) {
@@ -127,6 +128,21 @@ export function createScheduler(config: SchedulerConfig, deps: SchedulerDependen
   // A new scheduler (restart, restore, new world) starts with a new calculator: nothing is reused.
   const incremental = config.progressMode === 'incremental' ? createIncrementalProgress({ options: progressOptions }) : null;
   const cost = resources.rules.energy.costPerPixel;
+  const cooperative = deps.cooperative;
+  if (cooperative !== undefined && !(Number.isSafeInteger(cooperative.slicePixels) && cooperative.slicePixels > 0)) {
+    throw new SchedulerConfigError('cooperative.slicePixels must be a positive integer');
+  }
+  /** Phase 1C.0: lets the host run other work; true when the cycle must stop here (pause, stop). */
+  const breathe = async (): Promise<boolean> => {
+    if (cooperative === undefined) return false;
+    await cooperative.yieldTo();
+    return pauseRequested || stopRequested !== null;
+  };
+  let cycling = false;
+  /** Runs a sliced computation: yielding between slices when cooperative, otherwise at once. */
+  const drive = <T>(work: Sliced<T>): T | Promise<T> =>
+    cooperative === undefined ? runSliced(work) : runSlicedAsync(work, () => cooperative.yieldTo(), () => pauseRequested || stopRequested !== null);
+  const budget = (): SliceBudget => (cooperative === undefined ? unsliced() : new SliceBudget(cooperative.slicePixels));
 
   let state: SchedulerState = 'stopped';
   let reason: string | null = null;
@@ -342,6 +358,7 @@ export function createScheduler(config: SchedulerConfig, deps: SchedulerDependen
       return { kind: 'sleep', ms: config.reconcileRetryMs };
     }
     canvasSeen = { at: snapshot.observedAt, source: snapshot.source };
+    if (await breathe()) return { kind: 'continue' };
     now = clock.now();
     const pending = await reconcileUncertain(snapshot, now);
     try {
@@ -355,18 +372,24 @@ export function createScheduler(config: SchedulerConfig, deps: SchedulerDependen
     // continues at the later time, never asking for a state before the observation.
     now = Math.max(clock.now(), resources.observed(agent)?.at ?? 0);
     const resourcesNow = resources.stateAt(agent, now, now);
-    progress = incremental !== null ? incremental.compute(current, snapshot, now) : computeProgress(current, snapshot, now, progressOptions);
+    progress = await drive(incremental !== null ? incremental.computeSliced(current, snapshot, now, budget()) : computeProgressSliced(current, snapshot, now, progressOptions, budget()));
     eta = estimateEta(progress, [{ id: agent, state: resourcesNow }], { rules: resources.rules, msPerPixel: config.eta.msPerPixel, minCoveragePercent: config.eta.minCoveragePercent, maxResourceAgeMs: config.maxResourceAgeMs, ...(config.eta.pauses === undefined ? {} : { pauses: config.eta.pauses }) }, now);
     emit({ type: 'progress', at: now, progress });
     const open = attempts.open().length;
     if ((progress.completion === 'complete' || progress.completion === 'no-eligible-pixels') && open === 0) {
+      if (cooperative !== undefined) {
+        // The host ran other work during this cycle: a template moved meanwhile is not complete.
+        const latest = await deps.templates.current(ref);
+        if (latest.revision !== current.revision) return { kind: 'continue' };
+      }
       setState('completed', 'the canvas matches the template');
       return { kind: 'end' };
     }
     if (pauseRequested || stopRequested !== null) return { kind: 'continue' };
+    if (await breathe()) return { kind: 'continue' };
 
     const damage = attempts.damage();
-    const plan = nextBatch(prepared!, {
+    const plan = await drive(nextBatchSliced(prepared!, {
       agent,
       snapshot,
       resources: resourcesNow,
@@ -380,7 +403,7 @@ export function createScheduler(config: SchedulerConfig, deps: SchedulerDependen
       resourcesUncertainSince: attempts.resourcesUncertainSince(agent),
       damageFloor: damage === null ? null : damage.at,
       now,
-    });
+    }, budget()));
 
     switch (plan.status) {
       case 'refused': {
@@ -424,6 +447,13 @@ export function createScheduler(config: SchedulerConfig, deps: SchedulerDependen
           nextAvailabilityAt = now + wait;
           setState('waiting-resources', `waiting for the energy of ${wanted} pixel(s)`);
           return { kind: 'sleep', ms: Math.max(1, Math.min(wait, config.maxWaitMs)) };
+        }
+        if (cooperative !== undefined) {
+          // The host ran other work since the plan began: a pause, a stop or a move of the
+          // template (new revision) made meanwhile must win over this plan, never be leased past.
+          if (await breathe()) return { kind: 'continue' };
+          const latest = await deps.templates.current(ref);
+          if (latest.revision !== current.revision) return { kind: 'continue' };
         }
         setState('running', null);
         return execute(plan, snapshot, now);
@@ -469,7 +499,7 @@ export function createScheduler(config: SchedulerConfig, deps: SchedulerDependen
       try {
         result = await cycle();
       } catch (error) {
-        result = fail(codeOf(error), messageOf(error));
+        result = error instanceof SliceAbandoned ? { kind: 'continue' } : fail(codeOf(error), messageOf(error));
       }
       emit({ type: 'cycle', status: status() });
       if (result.kind === 'end') break;
@@ -531,11 +561,16 @@ export function createScheduler(config: SchedulerConfig, deps: SchedulerDependen
     },
     async step() {
       if (loop !== null) throw new SchedulerConfigError('step() is for a scheduler that is not running');
+      // Phase 1C.0: a cycle may yield; two steps at once would overlap two cycles.
+      if (cycling) throw new SchedulerConfigError('step() while another step is in progress');
+      cycling = true;
       let result: CycleResult;
       try {
         result = await cycle();
       } catch (error) {
-        result = fail(codeOf(error), messageOf(error));
+        result = error instanceof SliceAbandoned ? { kind: 'continue' } : fail(codeOf(error), messageOf(error));
+      } finally {
+        cycling = false;
       }
       if (result.kind === 'continue' && state !== 'running' && state !== 'error' && state !== 'completed') setState('running', null);
       emit({ type: 'cycle', status: status() });

@@ -32,7 +32,8 @@ import type {
   WorkPlanner,
 } from '../contracts/index.js';
 import { canvasToImage, placementTransform } from '../geometry/projection.js';
-import { PixelState, scanEligibleRows } from '../progress/classify.js';
+import { PixelState, scanEligibleRowsSliced } from '../progress/classify.js';
+import { runSliced, unsliced, type SliceBudget, type Sliced } from '../progress/slices.js';
 import { snapshotFreshness } from '../progress/progress.js';
 import { timeUntilEnergy } from '../resources/energy.js';
 import { validateState } from '../resources/state.js';
@@ -92,6 +93,14 @@ function sameSystem(a: Template['coordinateSystem'], b: PlanRequest['snapshot'][
 const isInt = (v: unknown, min = 0): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= min;
 
 export function nextBatch(prepared: PreparedTemplate, request: PlanRequest): PlanResult {
+  return runSliced(nextBatchSliced(prepared, request, unsliced()));
+}
+
+/**
+ * nextBatch cut into slices of `slices` pixels (Phase 1C.0): same result. The snapshot, the
+ * prepared template and the request must not change until it returns.
+ */
+export function* nextBatchSliced(prepared: PreparedTemplate, request: PlanRequest, slices: SliceBudget): Sliced<PlanResult> {
   const { template } = prepared;
   const { keys } = prepared as Prepared;
   const { snapshot, resources, rules, now } = request;
@@ -216,7 +225,7 @@ export function nextBatch(prepared: PreparedTemplate, request: PlanRequest): Pla
   // Rows in the direction of increasing keys when the strategy goes upward:
   // fewer heap replacements, same result (the k smallest keys).
   const descending = template.strategy.id === 'bottom-to-top';
-  scanEligibleRows(template, snapshot, (row) => {
+  yield* scanEligibleRowsSliced(template, snapshot, (row) => {
     const base = row.iy * width + row.ix0;
     for (let c = 0; c < row.count; c++) {
       const state = row.states[c]!;
@@ -252,7 +261,7 @@ export function nextBatch(prepared: PreparedTemplate, request: PlanRequest): Pla
         siftDown(0);
       }
     }
-  }, descending);
+  }, descending, slices);
   const unavailableColors = [...missingColors.entries()].sort((a, b) => a[0] - b[0]).map(([color, count]) => ({ color: color as Rgb, pixels: count }));
   const stats = { candidates, unavailableColors, skippedInFlight, skippedUnknown, budget };
   if (candidates === 0) return empty('nothing-to-do', basis, stats);

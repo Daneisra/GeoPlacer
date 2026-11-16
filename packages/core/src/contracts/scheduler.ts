@@ -79,6 +79,24 @@ export interface SchedulerConfig {
   readonly progressMode?: 'full' | 'incremental';
 }
 
+/**
+ * Phase 1C.0: cooperative scheduling. A cycle is CPU work between rare real I/O waits: without
+ * yields, the whole cycle (canvas copy, progress, plan) blocks the host's event loop. With this
+ * option the scheduler awaits `yieldTo()` between the phases of a cycle, and long computations
+ * are cut into slices of about `slicePixels` pixels with a yield between slices.
+ *
+ * Consistency: every slice of a cycle works on the SAME snapshot (a copy taken at the start of
+ * the cycle): changes made meanwhile (an outside actor, a write) are seen at the next cycle, as
+ * for any read. Pause, stop and a new template revision are checked after the last yield, before
+ * any lease: a plan computed for an old revision or before a pause is never leased.
+ */
+export interface CooperativeOptions {
+  /** Lets other work run (Node: setImmediate). */
+  yieldTo(): Promise<void>;
+  /** Pixels of work between two yields inside a long computation (positive integer). */
+  readonly slicePixels: number;
+}
+
 export interface SchedulerDependencies {
   readonly clock: Clock;
   /** Must be writable: a read-only snapshot provider is rejected at compile time. */
@@ -90,6 +108,8 @@ export interface SchedulerDependencies {
   /** To prepare the random order (and its verified cache); optional. */
   readonly hasher?: Hasher;
   readonly orderCache?: OrderCacheStore;
+  /** Phase 1C.0 (optional): absent, a cycle never yields on its own (behaviour before 1C.0). */
+  readonly cooperative?: CooperativeOptions;
 }
 
 export interface SchedulerError {

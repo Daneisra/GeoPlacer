@@ -22,6 +22,8 @@ const service = await EngineService.open({
   dataDir: dir,
   // A low threshold puts automatic world checkpoints inside the run (GP_WORLD_CHECKPOINT).
   worldCheckpointRecords: Number(process.env.GP_WORLD_CHECKPOINT ?? 2000),
+  // Phase 1C.0: GP_COOPERATIVE=0 runs the scheduler without yields (the timing before 1C.0).
+  ...(process.env.GP_COOPERATIVE === '0' ? { cooperative: false as const } : {}),
   worldStore: {
     onStep: (s: WorldStoreStep) => {
       if (!armed || s !== kind) return;

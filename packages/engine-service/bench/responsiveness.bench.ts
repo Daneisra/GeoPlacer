@@ -15,21 +15,39 @@
  * Phase 1B.10: progress mode (full | incremental), cycle median and p95,
  * real HTTP latency (a local server answering the status during the run),
  * largest gap between two status events (WebSocket fluidity).
- * usage: node --expose-gc --import tsx bench/responsiveness.bench.ts [side] [seconds] [full|incremental]
+ * Phase 1C.0: event loop blocks measured by a 2 ms heartbeat (max block at startup, i.e. during the
+ * first cycle, and in the steady state after it), cycle p99, first cycle duration, optional external
+ * edits (`edits`: 25 pixels erased every 2 s while the engine runs), machine load during the run
+ * (all processors, from os.cpus) and this process's CPU share, so that runs on a busy machine are
+ * recognisable.
+ * usage: node --expose-gc --import tsx bench/responsiveness.bench.ts [side] [seconds] [full|incremental] [edits]
  */
 
 import { mkdtemp, rm } from 'node:fs/promises';
 import http from 'node:http';
+import os from 'node:os';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
+import { Worker } from 'node:worker_threads';
 import { pngjsCodec } from '@geoplacer/adapters-node';
 import { DEMO_COLORS, EngineService, type EngineEventEnvelope } from '../src/index.js';
 
 const SIDE = Number(process.argv[2] ?? 2000);
 const SECONDS = Number(process.argv[3] ?? 20);
 const MODE = (process.argv[4] ?? 'full') as 'full' | 'incremental';
+const EDITS = process.argv[5] === 'edits';
+const machineTimes = () =>
+  os.cpus().reduce(
+    (a, c) => {
+      const t = c.times;
+      a.busy += t.user + t.nice + t.sys + t.irq;
+      a.total += t.user + t.nice + t.sys + t.irq + t.idle;
+      return a;
+    },
+    { busy: 0, total: 0 }
+  );
 const quantile = (values: number[], q: number): number | null => {
   if (values.length === 0) return null;
   const sorted = [...values].sort((a, b) => a - b);
@@ -41,12 +59,12 @@ const sampleRss = () => (peakRss = Math.max(peakRss, process.memoryUsage().rss))
 const rssTimer = setInterval(sampleRss, 100);
 
 const dir = await mkdtemp(path.join(tmpdir(), 'gp-bench-'));
-const out: Record<string, unknown> = { side: SIDE, seconds: SECONDS, mode: MODE, node: process.version };
+const out: Record<string, unknown> = { side: SIDE, seconds: SECONDS, mode: MODE, edits: EDITS, cooperative: process.env.BENCH_COOPERATIVE === '0' ? false : (process.env.BENCH_SLICE ?? 'default'), node: process.version };
 const cycleAt: number[] = [];
 let service: EngineService | null = null;
 try {
   let t = performance.now();
-  service = await EngineService.open({ dataDir: dir, progressMode: MODE, onCycle: () => cycleAt.push(performance.now()) });
+  service = await EngineService.open({ dataDir: dir, progressMode: MODE, onCycle: () => cycleAt.push(performance.now()), ...(process.env.BENCH_COOPERATIVE === '0' ? { cooperative: false as const } : process.env.BENCH_SLICE !== undefined ? { cooperative: { slicePixels: Number(process.env.BENCH_SLICE) } } : {}) });
   const side = SIDE > 2048 ? 4096 : 2048;
   await service.configure({
     simulator: { width: side, height: side, costPerPixel: 1, capacity: 1_000_000, regenIntervalMs: 3_600_000, writeLatencyMs: 0 },
@@ -77,21 +95,34 @@ try {
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
   const port = (server.address() as AddressInfo).port;
-  const httpTimes: number[] = [];
-  let httpRunning = true;
-  const httpLoop = (async () => {
-    while (httpRunning) {
-      const t0 = performance.now();
-      await new Promise<void>((resolve) => {
-        http.get({ host: '127.0.0.1', port, path: '/' }, (res) => {
-          res.resume();
-          res.on('end', () => resolve());
-        });
-      });
-      httpTimes.push(performance.now() - t0);
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  })();
+  // Phase 1C.0: the client runs in a WORKER THREAD (its own event loop), like a browser in another
+  // process: a request sent while the engine blocks the server's loop waits for the block to end.
+  // Open loop: one request every 100 ms whatever the previous answers (at most 5 in flight).
+  // Before 1C.0 the client shared the server's loop and only measured between blocks.
+  const client = new Worker(
+    `const http = require('node:http');
+     const { parentPort, workerData } = require('node:worker_threads');
+     const agent = new http.Agent({ keepAlive: true, maxSockets: 5 });
+     const times = [];
+     let inFlight = 0;
+     const timer = setInterval(() => {
+       if (inFlight >= 5) return;
+       inFlight++;
+       const t0 = performance.now();
+       http.get({ host: '127.0.0.1', port: workerData.port, path: '/', agent }, (res) => {
+         res.resume();
+         res.on('end', () => { times.push(performance.now() - t0); inFlight--; });
+       }).on('error', () => inFlight--);
+     }, 100);
+     parentPort.on('message', () => {
+       clearInterval(timer);
+       const wait = () => (inFlight === 0 ? (parentPort.postMessage(times), agent.destroy()) : setTimeout(wait, 20));
+       wait();
+     });`,
+    { eval: true, workerData: { port } }
+  );
+  const httpLoop = new Promise<number[]>((resolve) => client.once('message', (times: number[]) => resolve(times)));
+  let httpTimes: number[] = [];
   const statusEventAt: number[] = [];
   let events = 0;
   let canvasPixels = 0;
@@ -109,6 +140,32 @@ try {
 
   const lag = monitorEventLoopDelay({ resolution: 10 });
   lag.enable();
+  // Event loop blocks (> 20 ms) with their time, from a 2 ms heartbeat.
+  const blocks: { start: number; end: number }[] = [];
+  let lastBeat = performance.now();
+  let beating = true;
+  const beat = () => {
+    const now = performance.now();
+    if (now - lastBeat > 20) blocks.push({ start: lastBeat, end: now });
+    lastBeat = now;
+    if (beating) setTimeout(beat, 2);
+  };
+  setTimeout(beat, 2);
+  const machine0 = machineTimes();
+  const cpu0 = process.cpuUsage();
+  let edits = 0;
+  let editedPixels = 0;
+  const editTimer = EDITS
+    ? setInterval(() => {
+        void svc.simulateExternalEdit(25).then(
+          (r) => {
+            edits++;
+            editedPixels += r.changed;
+          },
+          () => undefined
+        );
+      }, 2000)
+    : null;
   const started = performance.now();
   await service.start();
   const statusTimes: number[] = [];
@@ -121,8 +178,13 @@ try {
   const until = Date.now() + SECONDS * 1000;
   while (Date.now() < until && service.status().state !== 'completed') await new Promise((r) => setTimeout(r, 100));
   clearInterval(statusTimer);
-  httpRunning = false;
-  await httpLoop;
+  if (editTimer !== null) clearInterval(editTimer);
+  beating = false;
+  const machine1 = machineTimes();
+  const cpu1 = process.cpuUsage(cpu0);
+  client.postMessage('stop');
+  httpTimes = await httpLoop;
+  await client.terminate();
   server.close();
   out.endState = service.status().state;
 
@@ -145,7 +207,26 @@ try {
   out.cycles = st.scheduler?.cycles;
   out.msPerCycle = st.scheduler?.cycles ? ms((elapsed * 1000) / st.scheduler.cycles) : null;
   const cycles = cycleAt.slice(1).map((t, i) => t - cycleAt[i]!);
-  out.cycleMs = { median: quantile(cycles, 0.5), p95: quantile(cycles, 0.95), count: cycles.length };
+  out.cycleMs = { median: quantile(cycles, 0.5), p95: quantile(cycles, 0.95), p99: quantile(cycles, 0.99), max: quantile(cycles, 1), count: cycles.length };
+  out.firstCycleMs = cycleAt.length > 0 ? ms(cycleAt[0]! - started) : null;
+  const steadyFrom = cycleAt[0] ?? Infinity;
+  const blockMs = (list: { start: number; end: number }[]) => list.map((b) => b.end - b.start);
+  const startup = blockMs(blocks.filter((b) => b.end <= steadyFrom));
+  const steady = blockMs(blocks.filter((b) => b.end > steadyFrom));
+  out.blocksMs = {
+    startupMax: startup.length === 0 ? 0 : ms(Math.max(...startup)),
+    steadyMax: steady.length === 0 ? 0 : ms(Math.max(...steady)),
+    steadyP95: quantile(steady, 0.95),
+    steadyOver100: steady.filter((b) => b > 100).length,
+    steadyOver300: steady.filter((b) => b > 300).length,
+  };
+  const wallMs = performance.now() - started;
+  out.load = {
+    machineBusyPercent: Math.round(((machine1.busy - machine0.busy) / Math.max(1, machine1.total - machine0.total)) * 100),
+    processCpuPercentOfOneCore: Math.round(((cpu1.user + cpu1.system) / 1000 / wallMs) * 100),
+    cores: os.cpus().length,
+  };
+  if (EDITS) out.externalEdits = { edits, editedPixels };
   out.httpMs = { median: quantile(httpTimes, 0.5), p95: quantile(httpTimes, 0.95), max: quantile(httpTimes, 1), requests: httpTimes.length };
   const gaps = statusEventAt.slice(1).map((t, i) => t - statusEventAt[i]!);
   out.statusEventGapMs = { median: quantile(gaps, 0.5), max: quantile(gaps, 1) };

@@ -30,7 +30,8 @@ import type {
 import { TRANSPARENT_U32 } from '../contracts/index.js';
 import { assertRect } from '../geometry/validate.js';
 import { assertImage } from '../strategy/common.js';
-import { PixelState, scanEligibleRows } from './classify.js';
+import { PixelState, scanEligibleRowsSliced } from './classify.js';
+import { runSliced, unsliced, type SliceBudget, type Sliced } from './slices.js';
 
 export type ProgressErrorCode =
   /** now / observedAt not a non-negative safe integer, malformed rect, image or policy. */
@@ -79,6 +80,11 @@ function sameSystem(a: ProgressTemplate['coordinateSystem'], b: CanvasSnapshot['
 const percent = (part: number, total: number): number | null => (total === 0 ? null : (part * 100) / total);
 
 export function computeProgress(template: ProgressTemplate, snapshot: CanvasSnapshot, now: Timestamp, options: ProgressOptions = {}): ProgressSnapshot {
+  return runSliced(computeProgressSliced(template, snapshot, now, options, unsliced()));
+}
+
+/** computeProgress cut into slices of `budget` pixels (Phase 1C.0): same result. */
+export function* computeProgressSliced(template: ProgressTemplate, snapshot: CanvasSnapshot, now: Timestamp, options: ProgressOptions, budget: SliceBudget): Sliced<ProgressSnapshot> {
   assertTimestamp(now, 'now');
   assertTimestamp(snapshot.observedAt, 'snapshot.observedAt');
   assertPolicies(options);
@@ -101,7 +107,7 @@ export function computeProgress(template: ProgressTemplate, snapshot: CanvasSnap
   let lastColor = TRANSPARENT_U32;
   let slot = -1;
   // The shared classification (also used by the work planner).
-  scanEligibleRows(template, snapshot, (row) => {
+  yield* scanEligibleRowsSliced(template, snapshot, (row) => {
     const base = row.iy * template.image.width + row.ix0;
     for (let k = 0; k < row.count; k++) {
       const state = row.states[k]!;
@@ -132,11 +138,16 @@ export function computeProgress(template: ProgressTemplate, snapshot: CanvasSnap
         if (state === PixelState.INVALID) invalid++;
       }
     }
-  });
+  }, false, budget);
 
-  // Excluded pixels, over the whole image.
+  // Excluded pixels, over the whole image (by rows, a slice boundary between rows).
   let transparent = 0;
-  for (let i = 0; i < pixels.length; i++) if (pixels[i] === TRANSPARENT_U32) transparent++;
+  const imageWidth = template.image.width;
+  for (let row = 0; row < pixels.length; row += imageWidth) {
+    const end = Math.min(pixels.length, row + imageWidth);
+    for (let i = row; i < end; i++) if (pixels[i] === TRANSPARENT_U32) transparent++;
+    if (budget.add(end - row)) yield;
+  }
   return assembleProgress(template, snapshot, now, options, colors, counters, invalid, transparent);
 }
 

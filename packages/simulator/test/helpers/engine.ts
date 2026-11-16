@@ -9,6 +9,7 @@ import type {
   AttemptJournal,
   AttemptManager,
   AutoCompactionPolicy,
+  CooperativeOptions,
   JournalEvent,
   ProjectId,
   ResourceManager,
@@ -106,6 +107,8 @@ export interface EngineOptions {
   readonly templates?: TemplateSource;
   /** Time moves forward by this much at EVERY reading of the clock (a real clock does; Phase 1B.9). */
   readonly tickMs?: number;
+  /** Phase 1C.0: cooperative scheduling (yields between phases and slices). */
+  readonly cooperative?: CooperativeOptions;
 }
 
 /** A process of the engine: a new one over the same journal and canvas is a restart. */
@@ -168,6 +171,7 @@ export class Engine {
         resourceSource: this.canvas.resourceSource(),
         resources: this.resources,
         attempts: this.attempts,
+        ...(this.options.cooperative === undefined ? {} : { cooperative: this.options.cooperative }),
       },
     );
     this.scheduler.subscribe((e) => this.events.push(e));

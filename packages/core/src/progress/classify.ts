@@ -13,6 +13,7 @@ import type { CanvasPixel, CanvasSnapshot, ImageRect, ProgressTemplate } from '.
 import { TRANSPARENT, TRANSPARENT_U32, UNKNOWN } from '../contracts/index.js';
 import { placementTransform } from '../geometry/projection.js';
 import { eligibleRegion } from '../strategy/common.js';
+import { runSliced, unsliced, type SliceBudget, type Sliced } from './slices.js';
 
 /** Per-pixel state codes written into the row's state buffer. */
 export const PixelState = {
@@ -62,6 +63,20 @@ export interface RowScan {
  * callers).
  */
 export function scanEligibleRows(template: ProgressTemplate, snapshot: CanvasSnapshot, onRow: (row: RowScan) => void, descending = false): ImageRect {
+  return runSliced(scanEligibleRowsSliced(template, snapshot, onRow, descending, unsliced()));
+}
+
+/**
+ * scanEligibleRows cut into slices (Phase 1C.0): yields after the row that completes a slice of
+ * `budget` (rows are never split). The snapshot and the template must not change meanwhile.
+ */
+export function* scanEligibleRowsSliced(
+  template: ProgressTemplate,
+  snapshot: CanvasSnapshot,
+  onRow: (row: RowScan) => void,
+  descending: boolean,
+  budget: SliceBudget
+): Sliced<ImageRect> {
   const { image, placement, coordinateSystem } = template;
   const { width, pixels } = image;
   const region = eligibleRegion(image, placement, coordinateSystem);
@@ -98,6 +113,7 @@ export function scanEligibleRows(template: ProgressTemplate, snapshot: CanvasSna
     const base = iy * width + region.ix;
     for (let k = 0; k < region.width; k++) states[k] = classifyValue(pixels[base + k]!, observed[k]!);
     onRow({ iy, ix0: region.ix, x0, y, count: region.width, states });
+    if (budget.add(region.width)) yield;
   }
   return region;
 }
