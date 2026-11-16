@@ -26,6 +26,13 @@ export interface CommandResultLike {
 }
 
 export interface EngineApi {
+  readonly connector?: import('@geoplacer/engine-service').GeoPixelsProvider;
+  readonly pairing?: import('@geoplacer/engine-service').ConnectorPairing;
+  selectSource?(source: 'simulation' | 'geopixels'): Promise<CommandResultLike>;
+  bindConnector?(): Promise<unknown>;
+  connectorView?(): Promise<unknown>;
+  connectorProposals?(policy: import('@geoplacer/core').UpgradePolicy): Promise<unknown>;
+
   status(): unknown;
   start(): Promise<CommandResultLike>;
   pause(): Promise<CommandResultLike>;

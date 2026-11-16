@@ -330,6 +330,8 @@ async function checkContent(dir: string): Promise<string[]> {
   } else warnings.push('the backup holds no simulated world: a new one will be created');
   const journal = await diagnoseJournal(dir);
   if (journal.verdict !== 'healthy' && journal.verdict !== 'empty') warnings.push(`attempt journal: ${journal.verdict} (it is reconciled or repaired at the next start)`);
+  const connectorJournal = await diagnoseJournal(path.join(dir, 'providers', 'geopixels'));
+  if (connectorJournal.verdict !== 'healthy' && connectorJournal.verdict !== 'empty') warnings.push(`browser attempt journal: ${connectorJournal.verdict} (requires connector reconciliation or repair)`);
   return warnings;
 }
 

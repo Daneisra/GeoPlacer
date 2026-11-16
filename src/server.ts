@@ -43,6 +43,8 @@ import { applyBaseProtections } from './app-base.js';
 import { legacyGuard } from './middleware/legacy-guard.js';
 // New engine (Phase 1B.9): local simulation only
 import { createEngineRouter, isEngineOriginAllowed } from './api/v1/engine-router.js';
+import { CONNECTOR_WS_PATH, createConnectorRouter, isLoopbackChannel } from './api/v1/connector-router.js';
+import { attachConnectorSocket } from './api/v1/connector-socket.js';
 import { ENGINE_WS_PATH, attachEngineSocket } from './api/v1/engine-socket.js';
 import { EngineLockedError, engineDataDir, openEngine, type OpenedEngine } from './engine/bootstrap.js';
 
@@ -177,7 +179,7 @@ applyBaseProtections(app, {
     logger.warn(`Blocked request (${reason}): ${req.method} ${req.path}`);
   },
 });
-app.use(express.static('public'));
+app.use(express.static(path.join(__dirname, '../public')));
 
 // Phase 1B.10: the inherited routes that could reach Wplace or run the inherited engine are
 // refused before their handlers (local simulation only).
@@ -466,8 +468,9 @@ async function startServer(): Promise<void> {
       }
       throw error;
     }
+    apiV1.use('/connector', createConnectorRouter(engine.api));
     apiV1.use(createEngineRouter(engine.api));
-    logger.info('Engine ready: local simulation only (no connection to a real service).');
+    logger.info('Engine ready: simulation and opt-in browser observer; real placement and purchases disabled.');
 
     // Attempt to bind to available ports
     const ports = [APP_PRIMARY_PORT, ...APP_FALLBACK_PORTS];
@@ -505,9 +508,14 @@ async function startServer(): Promise<void> {
     // WebSocket server
     const wss = new WebSocketServer({
       server,
-      verifyClient: createWebSocketVerifier(accessPolicy, (reason) => {
-        logger.warn(`Blocked WebSocket handshake (${reason})`);
-      }),
+      maxPayload: 1_000_000,
+      verifyClient: (info, callback) => {
+        if (info.req.url === CONNECTOR_WS_PATH) {
+          callback(wss.clients.size < MAX_WS_CONNECTIONS && isLoopbackChannel(info.req) && !!engine?.api.pairing?.acceptsOrigin(info.origin), 403, 'connector pairing required');
+          return;
+        }
+        callback(createWebSocketVerifier(accessPolicy, (reason) => logger.warn(`Blocked WebSocket handshake (${reason})`))(info), 403);
+      },
     });
     serverState.wss = wss;
 
@@ -526,6 +534,10 @@ async function startServer(): Promise<void> {
     });
 
     wss.on('connection', (ws: TrackedSocket, req) => {
+      if (req.url === CONNECTOR_WS_PATH && engine !== null) {
+        attachConnectorSocket(ws, req.headers.origin ?? '', engine.api);
+        return;
+      }
       // Check connection limit
       if (wsConnections.size >= MAX_WS_CONNECTIONS) {
         ws.close(1013, 'Server overloaded');

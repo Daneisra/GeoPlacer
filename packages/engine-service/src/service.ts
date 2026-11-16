@@ -1,19 +1,20 @@
 /**
- * EngineService (Phase 1B.9): the orchestration service of the server.
+ * EngineService (Phase 1B.9, provider extension Phase 2A): the orchestration service of the server.
  *
- * It only WIRES the existing components (TemplateManager, WorkPlanner and
- * AttemptManager through the scheduler, AttemptJournal, ResourceManager,
- * progress, ETA, UpgradePlanner) to the ONLY canvas provider of V1, the
- * local SimulatedCanvasProvider, made durable by FileWorldStore. It
- * re-implements no rule: it decides which command is allowed in which
- * state, keeps the settings, and feeds the event stream.
+ * Wires the existing planner, attempts, resources and single scheduler to a selected
+ * canvas provider. Simulation retains its durable FileWorldStore; Phase 2A adds
+ * browser observations and an independently journaled local fixture writer.
+ * Real service placements and purchases remain disabled.
  *
  * One data directory = one engine: the directory lock (plus the named pipe
  * guard on Windows) is taken first; a second instance is refused.
  */
 
 import { randomUUID } from 'node:crypto';
-import { rename } from 'node:fs/promises';
+import { rename, readFile, open } from 'node:fs/promises';
+import { GeoPixelsProvider } from './geopixels/provider.js';
+import { ConnectorPairing } from './geopixels/pairing.js';
+import { check } from './geopixels/protocol.js';
 import path from 'node:path';
 import type {
   AgentId,
@@ -34,6 +35,7 @@ import type {
   TemplateManager,
   TemplateRef,
   UpgradeProposal,
+  UpgradePolicy,
 } from '@geoplacer/core';
 import {
   DEFAULT_AUTO_COMPACTION,
@@ -51,6 +53,7 @@ import {
   createScheduler,
   createTemplateManager,
   proposeUpgrades,
+  evaluateUpgradePolicy,
   regenIntervalOf,
   stateFingerprint,
 } from '@geoplacer/core';
@@ -205,8 +208,8 @@ export interface TemplateInfo {
 }
 
 export interface EngineStatus {
-  /** V1: always a local simulation. */
-  readonly mode: 'simulation';
+  /** Explicit source; GeoPixels writes currently use the local fixture only. */
+  readonly mode: 'simulation' | 'geopixels';
   readonly state: SchedulerState;
   readonly reason: string | null;
   readonly stream: string;
@@ -282,8 +285,17 @@ export class EngineService {
   private readonly hub: EngineEventHub;
   private readonly log: NonNullable<EngineServiceOptions['log']>;
   readonly templates: TemplateManager;
-  private readonly journal: FileAttemptJournal;
-  private readonly history: FileHistoryStore;
+  readonly connector = new GeoPixelsProvider();
+  readonly pairing = new ConnectorPairing();
+  private connectorControl = false;
+  private source: 'simulation' | 'geopixels' = 'simulation';
+  private readonly simulationJournal: FileAttemptJournal;
+  private readonly simulationHistory: FileHistoryStore;
+  private readonly connectorJournal: FileAttemptJournal;
+  private readonly connectorHistory: FileHistoryStore;
+  private get journal(): FileAttemptJournal { return this.source === 'simulation' ? this.simulationJournal : this.connectorJournal; }
+  private get history(): FileHistoryStore { return this.source === 'simulation' ? this.simulationHistory : this.connectorHistory; }
+
   private settingsValue: EngineSettings;
   private rules: ResourceRules;
   private world: { canvas: SimulatedCanvasProvider; store: FileWorldStore } | null = null;
@@ -330,8 +342,10 @@ export class EngineService {
     this.onCycle = options.onCycle;
     this.hub = new EngineEventHub({ intervalMs: options.eventIntervalMs ?? 250, now: () => this.clock.now() });
     this.templates = createTemplateManager({ storage: new NodeTemplateStorage(lock), hasher: nodeSha256Hasher, codec: pngjsCodec, ids: randomIdSource, clock: systemClock });
-    this.journal = new FileAttemptJournal(lock);
-    this.history = new FileHistoryStore(lock);
+    this.simulationJournal = new FileAttemptJournal(lock);
+    this.simulationHistory = new FileHistoryStore(lock);
+    this.connectorJournal = new FileAttemptJournal(lock, { namespace: 'geopixels' });
+    this.connectorHistory = new FileHistoryStore(lock, { namespace: 'geopixels' });
   }
 
   /** Opens the engine on `dataDir`; throws DataDirectoryLockedError when another instance holds it. */
@@ -344,6 +358,11 @@ export class EngineService {
       const settings = await loadSettings(root);
       const service = new EngineService(root, lock, settings, options.clock ?? monotonicClock(), options);
       await service.openWorld();
+      try {
+        const source = JSON.parse(await readFile(path.join(root, 'provider.json'), 'utf8')) as unknown;
+        check(source === 'simulation' || source === 'geopixels', 'invalid saved provider');
+        service.source = source;
+      } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
       await service.newManagers();
       const selection = settings.selection;
       if (selection !== null) await service.currentTemplate(service.ref(selection.templateId)).catch(() => service.log('warn', `selected template ${selection.templateId} cannot be loaded`));
@@ -434,7 +453,7 @@ export class EngineService {
     const report = await this.attempts.recover(this.clock.now());
     this.toReconcileAtStart = report.toReconcile.length;
     this.journalDamaged = report.damaged;
-    if (report.toReconcile.length > 0) this.log('warn', `${report.toReconcile.length} attempt(s) interrupted before their answer: reconciled against the simulated canvas at the next start`);
+    if (report.toReconcile.length > 0) this.log('warn', `${report.toReconcile.length} attempt(s) interrupted before their answer: reconciled against the selected provider after a fresh observation`);
   }
 
   private get state(): SchedulerState {
@@ -489,7 +508,7 @@ export class EngineService {
       minBatchSize: run.minBatchSize,
       leaseTtlMs: 120_000,
       unknownPixels: 'skip',
-      freshness: { simulated: { maxAgeMs: 60_000 } },
+      freshness: { simulated: { maxAgeMs: 60_000 }, 'geopixels-fixture': { maxAgeMs: 30_000 }, 'geopixels-observed': { maxAgeMs: 30_000 } },
       maxResourceAgeMs: 30_000,
       eta: { msPerPixel: this.msPerPixel(), minCoveragePercent: 0 },
       reconcileRetryMs: 1_000,
@@ -563,14 +582,14 @@ export class EngineService {
     const selected = this.settingsValue.selection;
     const ended = this.scheduler === null || this.schedulerEnded || !ACTIVE.has(state);
     return {
-      mode: 'simulation',
+      mode: this.source,
       state,
       reason: sched?.reason ?? (this.worldError !== null ? `simulated world unavailable: ${this.worldError.code}` : null),
       stream: this.hub.stream,
       seq: this.hub.seq,
       selection: this.selectedTemplate === null ? null : this.templateInfo(this.selectedTemplate),
       commands: {
-        start: ended && selected !== null && this.world !== null && this.stopping === null && this.starting === null,
+        start: ended && selected !== null && (this.source === 'geopixels' || this.world !== null) && (this.source === 'simulation' || this.connector.canWrite()) && this.stopping === null && this.starting === null,
         pause: !ended && state !== 'paused' && this.stopping === null,
         resume: !ended && state === 'paused' && this.stopping === null,
         stop: !ended && this.stopping === null,
@@ -611,6 +630,7 @@ export class EngineService {
   }
 
   private requireIdle(what: string): void {
+    check(!this.connectorControl, 'provider control in progress');
     if (this.active || this.stopping !== null) throw new EngineServiceError('ENGINE_BUSY', 409, `${what} is refused while the simulation runs: stop it first`);
   }
 
@@ -631,13 +651,91 @@ export class EngineService {
     }
   }
 
+  /** Single scheduler, two providers, independent attempt domains. Source changes require idle state. */
+  async selectSource(source: 'simulation' | 'geopixels'): Promise<CommandResult> {
+    this.guard();
+    check(!this.connectorControl, 'provider control in progress');
+    check(source === 'simulation' || source === 'geopixels', 'invalid source');
+    if (source === this.source) return { changed: false, status: this.status() };
+    this.requireIdle('changing the canvas provider');
+    check(this.attempts.open().length === 0, 'reconcile open attempts before changing source');
+    this.connectorControl = true;
+    try {
+      await this.durableConnectorJson('provider.json', source);
+      this.source = source;
+      this.scheduler = null;
+      this.schedulerEnded = true;
+      this.lastProgress = null;
+      this.recent.length = 0;
+      await this.newManagers();
+      this.hub.statusNow(this.status());
+      return { changed: true, status: this.status() };
+    } finally { this.connectorControl = false; }
+  }
+
+  private async durableConnectorJson(filename: string, value: unknown): Promise<void> {
+    const target = path.join(this.root, filename);
+    const tmp = `${target}.${randomUUID()}.partial`;
+    const file = await open(tmp, 'wx');
+    try { await file.writeFile(JSON.stringify(value) + '\n'); await file.sync(); } finally { await file.close(); }
+    await rename(tmp, target);
+    // Windows does not expose directory fsync. The attempt journal retains its existing guarantees.
+    if (process.platform !== 'win32') { const dir = await open(this.root, 'r'); try { await dir.sync(); } finally { await dir.close(); } }
+  }
+
+  async bindConnector(): Promise<unknown> {
+    this.guard();
+    check(!this.connectorControl, 'provider control in progress');
+    this.requireIdle('binding the browser ghost');
+    this.connectorControl = true;
+    try {
+      check(this.source === 'geopixels', 'select the GeoPixels source first');
+      const t = this.selectedTemplate;
+      check(t !== null, 'select a local model first');
+      const identity = { project: this.connector.status().project, template: t.id, revision: t.revision, hash: t.quantizedImageHash, placement: t.placement };
+      check(identity.project !== null, 'no browser project');
+      if (this.attempts.open().length > 0) {
+        const saved = JSON.parse(await readFile(path.join(this.root, 'connector-binding.json'), 'utf8')) as unknown;
+        check(JSON.stringify(saved) === JSON.stringify(identity), 'open attempts belong to another browser project or position');
+      }
+      // Validate before persistence; a failed durable save invalidates the binding.
+      this.connector.bind(t);
+      try { await this.durableConnectorJson('connector-binding.json', identity); }
+      catch (error) { this.connector.disconnect('binding could not be saved'); throw error; }
+      return await this.connectorView();
+    } finally { this.connectorControl = false; }
+  }
+
+  async connectorProposals(policy: UpgradePolicy) {
+    this.guard();
+    check(this.source === 'geopixels' && this.connector.status().mode === 'local-fake', 'purchase catalogue is not verified for the real service');
+    const observation = await this.connector.resourceSource(this.rules).observe(SIMULATED_AGENT);
+    const state = createResourceManager(this.rules).observe(observation).state;
+    const view = await this.connectorView();
+    check(view.progress !== null, 'bind a model first');
+    const effectivePolicy = { ...policy, requiredColors: policy.requiredColors.length === 0 ? view.progress.byColor.map((c) => c.color) : policy.requiredColors };
+    const proposals = evaluateUpgradePolicy({ agent: SIMULATED_AGENT, agents: [{ id: SIMULATED_AGENT, state }], progress: view.progress, parameters: { rules: this.rules, msPerPixel: this.msPerPixel(), minCoveragePercent: 0 }, now: this.clock.now() }, effectivePolicy);
+    await this.durableConnectorJson('connector-policy.json', effectivePolicy);
+    return { simulated: true, executable: false, proposals };
+  }
+
+  async connectorView() {
+    const view = this.connector.status();
+    const t = this.selectedTemplate;
+    let bound = view.bound;
+    if (t !== null && bound) { try { this.connector.assertBinding(t); } catch { bound = false; } }
+    const progress = bound && t !== null ? computeProgress(t, await this.connector.reader.readRegion({ minX: t.placement.topLeft.x, minY: t.placement.topLeft.y, width: t.image.width, height: t.image.height }), this.clock.now(), { freshness: { 'geopixels-observed': { maxAgeMs: 30_000 }, 'geopixels-fixture': { maxAgeMs: 30_000 } } }) : null;
+    return { ...view, bound, source: this.source, selection: t === null ? null : this.templateInfo(t), progress, scheduler: this.source === 'geopixels' ? this.scheduler?.status() ?? null : null, rules: this.source === 'geopixels' && view.mode === 'local-fake' ? this.rules : null };
+  }
+
   private async startNow(): Promise<CommandResult> {
+    check(!this.connectorControl, 'provider control in progress');
     if (this.stopping !== null) throw new EngineServiceError('ENGINE_BUSY', 409, 'a stop is in progress');
     if (this.active) {
       if (this.state === 'paused') throw new EngineServiceError('PAUSED_USE_RESUME', 409, 'the simulation is paused: use resume');
       return { changed: false, status: this.status() };
     }
-    const world = this.requireWorld();
+    const world = this.source === 'simulation' ? this.requireWorld() : null;
     const selection = this.settingsValue.selection;
     if (selection === null) throw new EngineServiceError('NO_TEMPLATE_SELECTED', 409, 'select a template first');
     const ref = this.ref(selection.templateId);
@@ -647,14 +745,18 @@ export class EngineService {
     } catch {
       throw new EngineServiceError('TEMPLATE_NOT_FOUND', 404, `template ${selection.templateId} cannot be loaded`);
     }
-    this.assertInsideCanvas(template.image.width, template.image.height, template.placement.topLeft.x, template.placement.topLeft.y);
+    if (this.source === 'simulation') this.assertInsideCanvas(template.image.width, template.image.height, template.placement.topLeft.x, template.placement.topLeft.y);
+    if (this.source === 'geopixels') {
+      this.connector.assertBinding(template);
+      check(this.connector.canWrite(), 'real placement is unavailable; only local fixture writes are enabled in Phase 2A');
+    }
     this.unsubscribe?.();
     await this.newManagers();
     const scheduler = createScheduler(this.schedulerConfig(ref.templateId), {
       clock: this.clock,
-      canvas: world.canvas,
-      templates: { current: (r) => this.currentTemplate(r) },
-      resourceSource: world.canvas.resourceSource(),
+      canvas: this.source === 'simulation' ? world!.canvas : this.connector,
+      templates: { current: async (r) => { const t = await this.currentTemplate(r); if (this.source === 'geopixels') this.connector.assertBinding(t); return t; } },
+      resourceSource: this.source === 'simulation' ? world!.canvas.resourceSource() : this.connector.resourceSource(this.rules),
       resources: this.resources,
       attempts: this.attempts,
       hasher: nodeSha256Hasher,
@@ -779,7 +881,7 @@ export class EngineService {
     const info = await this.templateInfoOf(templateId);
     if (this.settingsValue.selection?.templateId === templateId) return { changed: false, status: this.status() };
     this.requireIdle('changing the template');
-    this.assertInsideCanvas(info.width, info.height, info.placement?.x ?? 0, info.placement?.y ?? 0);
+    if (this.source === 'simulation') this.assertInsideCanvas(info.width, info.height, info.placement?.x ?? 0, info.placement?.y ?? 0);
     await this.saveSettingsValue({ ...this.settingsValue, selection: { templateId } });
     await this.currentTemplate(this.ref(templateId));
     this.scheduler = null;
@@ -916,6 +1018,7 @@ export class EngineService {
    */
   async configure(patch: { readonly simulator?: Partial<Omit<SimulatorSettings, 'rulesVersion'>>; readonly agent?: Partial<AgentSettings>; readonly run?: Partial<RunSettings>; readonly resetWorld?: boolean }): Promise<CommandResult> {
     this.guard();
+    check(this.source === 'simulation', 'this operation belongs to the simulation source');
     this.requireIdle('changing the settings');
     const current = this.settingsValue;
     const simulator = { ...current.simulator, ...patch.simulator, rulesVersion: current.simulator.rulesVersion };
@@ -957,6 +1060,7 @@ export class EngineService {
    */
   async resetWorld(confirm: string): Promise<CommandResult> {
     this.guard();
+    check(this.source === 'simulation', 'this operation belongs to the simulation source');
     this.requireIdle('resetting the simulated world');
     if (confirm !== 'RESET') throw new EngineServiceError('CONFIRMATION_REQUIRED', 400, 'confirm the reset with "RESET"');
     await this.saveSettingsValue({ ...this.settingsValue, simulator: { ...this.settingsValue.simulator, rulesVersion: this.settingsValue.simulator.rulesVersion + 1 } });
@@ -987,6 +1091,7 @@ export class EngineService {
   /** Puts the agent back to its configured start resources (stopped only, explicit). */
   async resetAgent(): Promise<CommandResult> {
     this.guard();
+    check(this.source === 'simulation', 'this operation belongs to the simulation source');
     this.requireIdle('resetting the agent');
     const world = this.requireWorld();
     await world.canvas.setAgent(this.agentSeed(this.settingsValue.agent), 'agent reset');
@@ -1003,6 +1108,18 @@ export class EngineService {
    * that fits one read). `scale` s keeps one pixel out of s in each direction.
    */
   async canvasRegion(rect?: CanvasRect, scale?: number): Promise<CanvasRegion> {
+    if (this.source === 'geopixels') {
+      const t = this.selectedTemplate;
+      check(t !== null, 'select a local model first');
+      const region = rect ?? { minX: t.placement.topLeft.x, minY: t.placement.topLeft.y, width: t.image.width, height: t.image.height };
+      const k = scale ?? autoScale(region.width, region.height);
+      checkRegion(region, k);
+      const snapshot = await this.connector.reader.readRegion(region);
+      const width = Math.ceil(region.width / k), height = Math.ceil(region.height / k);
+      const out = new Int32Array(width * height);
+      for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) out[y * width + x] = snapshot.get({ x: region.minX + x * k, y: region.minY + y * k });
+      return { stream: this.hub.stream, seq: this.hub.seq, rect: region, scale: k, width, height, yAxis: 'down', observedAt: snapshot.observedAt, data: base64(out) };
+    }
     const world = this.requireWorld();
     const s = this.settingsValue.simulator;
     let r = rect;
@@ -1038,6 +1155,7 @@ export class EngineService {
    */
   async simulateExternalEdit(count: number): Promise<{ readonly changed: number }> {
     this.guard();
+    check(this.source === 'simulation', 'this operation belongs to the simulation source');
     const world = this.requireWorld();
     const t = this.selectedTemplate;
     if (t === null) throw new EngineServiceError('NO_TEMPLATE_SELECTED', 409, 'select a template first');
@@ -1075,6 +1193,7 @@ export class EngineService {
 
   /** Resources of the simulated agent and the upgrade proposals (computed, never applied automatically). */
   async resourcesView(): Promise<ResourcesView> {
+    check(this.source === 'simulation', 'use connector/status for observed browser resources');
     const world = this.requireWorld();
     const now = this.clock.now();
     const state = world.canvas.agentState(SIMULATED_AGENT);
@@ -1126,6 +1245,7 @@ export class EngineService {
    */
   async applyUpgrade(proposalId: string, confirmed: boolean): Promise<{ readonly applied: UpgradeProposal; readonly resources: ResourcesView }> {
     this.guard();
+    check(this.source === 'simulation', 'this operation belongs to the simulation source');
     if (!confirmed) throw new EngineServiceError('CONFIRMATION_REQUIRED', 400, 'a simulated upgrade needs an explicit confirmation');
     if (this.active && this.state !== 'paused') throw new EngineServiceError('ENGINE_BUSY', 409, 'pause or stop the simulation before an upgrade');
     const world = this.requireWorld();
@@ -1179,7 +1299,7 @@ export class EngineService {
     if (this.active) {
       return { mode: 'live', diagnosis: { stats: await this.journal.stats(), compaction: this.attempts.compactionStatus(), damage: this.attempts.damage(), openAttempts: this.attempts.open().length } };
     }
-    return { mode: 'full', diagnosis: await diagnoseJournal(this.root) };
+    return { mode: 'full', diagnosis: await diagnoseJournal(this.source === 'simulation' ? this.root : path.join(this.root, 'providers', 'geopixels')) };
   }
 
   /** Compacts the attempt journal (and checkpoints the simulated world); one at a time. */
@@ -1231,6 +1351,7 @@ export class EngineService {
    */
   async setupDemo(): Promise<CommandResult> {
     this.guard();
+    check(this.source === 'simulation', 'this operation belongs to the simulation source');
     this.requireIdle('the demonstration setup');
     const availability = await this.demoAvailability();
     if (!availability.available) {
@@ -1298,8 +1419,12 @@ export class EngineService {
     this.hub.close();
     await this.checkpointing;
     await this.world?.store.close();
-    await this.journal.close();
-    await this.history.close();
+    this.pairing.revoke();
+    this.connector.close();
+    await this.simulationJournal.close();
+    await this.simulationHistory.close();
+    await this.connectorJournal.close();
+    await this.connectorHistory.close();
     await this.lock.release();
   }
 }
