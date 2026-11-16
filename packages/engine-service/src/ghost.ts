@@ -12,8 +12,8 @@
  * The only new image algorithm is the optional resizing (core resizeRgba), applied BEFORE the
  * import, so that the colors are reduced by the usual single path.
  *
- * The palette is the player's: a list of hex colors entered by the user (GeoPixels publishes no
- * fixed palette; each player unlocks colors). The coordinates are the top-left corner as the user
+ * The palette is chosen locally (preset or custom); it never proves which colors a player has
+ * unlocked on GeoPixels. The coordinates are the top-left corner as the user
  * types it, kept as is: GeoPixels does not document its axes, so nothing is converted.
  */
 
@@ -45,6 +45,10 @@ export interface GhostInfo {
   readonly revision: number;
   readonly width: number;
   readonly height: number;
+  /** Image surface, including transparent pixels. */
+  readonly totalPixels: number;
+  /** Pixels retained after the alpha filter; no live-canvas comparison is performed. */
+  readonly retainedPixels: number;
   readonly paintablePixels: number;
   readonly transparentPixels: number;
   /** Colors used, most used first. */
@@ -132,6 +136,8 @@ export function ghostInfo(t: Template): GhostInfo {
     revision: t.revision,
     width: t.image.width,
     height: t.image.height,
+    totalPixels: t.image.pixels.length,
+    retainedPixels: t.image.pixels.length - transparent,
     paintablePixels: t.image.pixels.length - transparent,
     transparentPixels: transparent,
     colors,

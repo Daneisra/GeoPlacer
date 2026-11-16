@@ -99,8 +99,50 @@ describe('GeoPixels ghost image export (Phase 1C.1)', () => {
     const max = await png(4096, 4096, (x) => (x % 2 ? [255, 0, 0, 255] : [0, 0, 255, 255]));
     const m = await service.importGhost({ name: 'Maximum', png: max, palette: PALETTE });
     expect({ w: m.width, h: m.height, painted: m.paintablePixels }).toEqual({ w: 4096, h: 4096, painted: 4096 * 4096 });
+    const exportedMax = await pngjsCodec.decode((await service.exportGhost(m.templateId)).png);
+    const gotMax = rgbaToQuantized(exportedMax.width, exportedMax.height, exportedMax.rgba).pixels;
+    const expectedMax = (await templateOf(service, m.templateId)).image.pixels;
+    expect(Buffer.from(gotMax.buffer, gotMax.byteOffset, gotMax.byteLength).equals(Buffer.from(expectedMax.buffer, expectedMax.byteOffset, expectedMax.byteLength))).toBe(true);
     await expect(service.importGhost({ name: 'Trop', png: max, palette: PALETTE, width: 4097, height: 10 })).rejects.toBeInstanceOf(TemplateError);
   }, 180_000);
+
+  it('595 × 894 separates surface, opaque/retained pixels and transparency; PNG matches the core', async () => {
+    const service = await engine();
+    const source = await png(595, 894, (x, y) => y * 595 + x < 294_647 ? (x % 2 ? [255, 255, 255, 255] : [0, 0, 0, 255]) : [255, 159, 28, 0]);
+    const info = await service.importGhost({ name: 'Fixture 595 × 894', png: source, palette: ['#ffffff', '#000000'] });
+    expect({ total: info.totalPixels, opaque: info.paintablePixels, retained: info.retainedPixels, transparent: info.transparentPixels }).toEqual({ total: 531_930, opaque: 294_647, retained: 294_647, transparent: 237_283 });
+    expect(info.palette).toEqual(['#ffffff', '#000000']);
+    const decoded = await pngjsCodec.decode((await service.exportGhost(info.templateId)).png);
+    const got = rgbaToQuantized(decoded.width, decoded.height, decoded.rgba).pixels;
+    const wanted = (await templateOf(service, info.templateId)).image.pixels;
+    expect(Buffer.from(got.buffer).equals(Buffer.from(wanted.buffer))).toBe(true);
+    // Synthetic fixture with the reported counts, not the user's original image.
+  });
+
+  it('all-transparent and partially transparent images use the existing alpha filter, never an alpha palette color', async () => {
+    const service = await engine();
+    const transparent = await png(4, 3, () => [1, 2, 3, 0]);
+    const empty = await service.importGhost({ name: 'Transparent', png: transparent, palette: ['#ffffff', '#000000'] });
+    expect([empty.totalPixels, empty.paintablePixels, empty.retainedPixels, empty.transparentPixels, empty.colors.length]).toEqual([12, 0, 0, 12, 0]);
+    const bytes = await pngjsCodec.decode((await service.exportGhost(empty.templateId)).png);
+    expect(bytes.rgba.every((value) => value === 0)).toBe(true);
+    const partial = await png(3, 1, (x) => [0, 0, 0, [0, 127, 128][x]!]);
+    const kept = await service.importGhost({ name: 'Seuil', png: partial, palette: ['#ffffff', '#000000'], alphaThreshold: 128 });
+    expect([kept.totalPixels, kept.paintablePixels, kept.retainedPixels, kept.transparentPixels]).toEqual([3, 1, 1, 2]);
+    expect(kept.colors).toEqual([{ hex: '#000000', pixels: 1 }]);
+  });
+
+  it('more than 256 source colors are reduced by the existing quantizer; a new palette does not mutate an earlier model', async () => {
+    const service = await engine();
+    const source = await png(257, 1, (x) => [x & 255, x >> 8, 80, 255]);
+    const first = await service.importGhost({ name: 'Noir et blanc', png: source, palette: ['#000000', '#ffffff'] });
+    const before = (await service.exportGhost(first.templateId)).png;
+    const second = await service.importGhost({ name: 'Nouvelle palette', png: source, palette: ['#ff0000'] });
+    expect(second.colors).toEqual([{ hex: '#ff0000', pixels: 257 }]);
+    expect((await service.exportGhost(first.templateId)).png).toEqual(before);
+    expect((await service.exportGhost(second.templateId)).png).not.toEqual(before);
+    expect(first.colors.length).toBeLessThanOrEqual(2);
+  });
 
   it('GeoPixels coordinates are kept as typed (large values, negative ones), in the info and the file name', async () => {
     const service = await engine();

@@ -10,6 +10,8 @@ export interface GhostInfo {
   revision: number;
   width: number;
   height: number;
+  totalPixels: number;
+  retainedPixels: number;
   paintablePixels: number;
   transparentPixels: number;
   colors: { hex: string; pixels: number }[];
@@ -21,22 +23,8 @@ export interface GhostInfo {
   updatedAt: number;
 }
 
-export const MAX_GHOST_COLORS = 256;
-
-/** The colors typed by the user: '#RRGGBB' or 'RRGGBB', separated by spaces, commas or lines. */
-export function parsePaletteText(text: string): { colors: string[]; invalid: string[] } {
-  const colors: string[] = [];
-  const invalid: string[] = [];
-  for (const token of text.split(/[\s,;]+/).filter(Boolean)) {
-    const m = /^#?([0-9a-f]{6})$/i.exec(token);
-    if (m === null) invalid.push(token);
-    else {
-      const hex = `#${m[1]!.toLowerCase()}`;
-      if (!colors.includes(hex)) colors.push(hex);
-    }
-  }
-  return { colors, invalid };
-}
+export { MAX_GHOST_COLORS, parsePaletteText } from './ghost-palettes';
+import { MAX_GHOST_COLORS } from './ghost-palettes';
 
 /** The distinct opaque colors of an image file (alpha >= threshold), or null beyond `max` colors. */
 export async function imageColors(file: File, alphaThreshold = 128, max = MAX_GHOST_COLORS): Promise<string[] | null> {

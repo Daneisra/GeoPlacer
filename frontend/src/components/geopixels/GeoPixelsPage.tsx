@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Button, Card, CardContent, CardHeader, CardTitle } from '../ui';
 import { engineHttp } from '../../lib/engine';
 import { MAX_GHOST_COLORS, exportUrl, imageColors, parsePaletteText, type GhostInfo } from '../../lib/geopixels';
+import { loadPalettePreferences, paletteTextFor, savePalettePreferences, type PaletteMode } from '../../lib/ghost-palettes';
 import { useCommand } from '../simulation/useCommand';
 
 function toBase64(file: File): Promise<string> {
@@ -33,14 +34,30 @@ export function GeoPixelsPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState('');
-  const [paletteText, setPaletteText] = useState('');
+  const [palettePreferences, setPalettePreferences] = useState(() => loadPalettePreferences({ getItem: (key) => window.localStorage.getItem(key) }));
+  const [copyMessage, setCopyMessage] = useState('');
   const [width, setWidth] = useState('');
   const [height, setHeight] = useState('');
   const [x, setX] = useState('');
   const [y, setY] = useState('');
   const [alpha, setAlpha] = useState('128');
   const [zoom, setZoom] = useState(4);
-  const [fileColors, setFileColors] = useState<string[] | null | undefined>(undefined);
+  const [analysis, setAnalysis] = useState<{ file: File; alpha: number; colors: string[] | null; error?: string } | null>(null);
+  const alphaValue = Number(alpha);
+  const alphaValid = alpha.trim() !== '' && Number.isInteger(alphaValue) && alphaValue >= 0 && alphaValue <= 256;
+  const fileColors = analysis?.file === file && analysis?.alpha === alphaValue ? analysis.colors : undefined;
+  useEffect(() => {
+    savePalettePreferences({ setItem: (key, value) => window.localStorage.setItem(key, value) }, palettePreferences);
+  }, [palettePreferences]);
+  useEffect(() => {
+    if (file === null || !alphaValid) return;
+    let cancelled = false;
+    void imageColors(file, alphaValue).then(
+      (colors) => { if (!cancelled) setAnalysis({ file, alpha: alphaValue, colors }); },
+      () => { if (!cancelled) setAnalysis({ file, alpha: alphaValue, colors: null, error: 'Impossible de lire les couleurs de cette image.' }); }
+    );
+    return () => { cancelled = true; };
+  }, [file, alphaValid, alphaValue]);
 
   const refresh = useCallback(
     (): Promise<void> =>
@@ -57,18 +74,17 @@ export function GeoPixelsPage() {
     void refresh();
   }, [refresh]);
 
+  const paletteText = paletteTextFor(palettePreferences, fileColors);
   const palette = parsePaletteText(paletteText);
   const current = ghosts.find((g) => g.templateId === selected) ?? null;
+  const usedColors = new Set(current?.colors.map((c) => c.hex));
+  const unusedColors = current?.palette.filter((hex) => !usedColors.has(hex)) ?? [];
 
   const chooseFile = (f: File | null) => {
     setFile(f);
-    setFileColors(undefined);
+    setAnalysis(null);
     if (f !== null) {
       if (name.trim() === '') setName(f.name.replace(/\.png$/i, ''));
-      void imageColors(f).then(
-        (colors) => setFileColors(colors),
-        () => setFileColors(null)
-      );
     }
   };
 
@@ -102,7 +118,13 @@ export function GeoPixelsPage() {
     });
   };
 
-  const canImport = file !== null && palette.colors.length > 0 && palette.colors.length <= MAX_GHOST_COLORS && palette.invalid.length === 0 && pending === null;
+  const copyPalette = async () => {
+    try {
+      await navigator.clipboard.writeText(palette.colors.join('\n'));
+      setCopyMessage('Palette copiée.');
+    } catch { setCopyMessage('Copie indisponible : sélectionnez les codes dans le champ ci-dessous.'); }
+  };
+  const canImport = file !== null && alphaValid && palette.colors.length > 0 && palette.colors.length <= MAX_GHOST_COLORS && palette.invalid.length === 0 && pending === null;
   return (
     <div className="space-y-4" id="geopixelsPage">
       <div className="rounded-md border border-sky-700 bg-sky-950/40 px-4 py-2 text-sm">
@@ -124,24 +146,51 @@ export function GeoPixelsPage() {
             <input id="ghostName" className={field} value={name} maxLength={100} onChange={(e) => setName(e.target.value)} />
           </label>
           <label className="space-y-1 md:col-span-2">
-            <span className="text-muted-foreground">
-              Vos couleurs GeoPixels (codes hexadécimaux, par exemple <code>#ff0000</code>, séparés par des espaces ou des lignes ; {MAX_GHOST_COLORS} au plus)
-            </span>
-            <textarea id="ghostPalette" className={`${field} h-24 font-mono`} value={paletteText} onChange={(e) => setPaletteText(e.target.value)} />
+            <span>Palette de couleurs</span>
+            <select id="ghostPaletteMode" className={field} value={palettePreferences.mode} onChange={(e) => {
+              setCopyMessage('');
+              setPalettePreferences((p) => ({ ...p, mode: e.target.value as PaletteMode }));
+            }}>
+              <option value="personal28">Ma palette GeoPixels (28 couleurs)</option>
+              <option value="community30">Palette communautaire GeoPixels (30 couleurs)</option>
+              <option value="custom">Palette personnalisée</option>
+              <option value="image">Couleurs originales de l’image</option>
+            </select>
           </label>
-          <div className="text-muted-foreground md:col-span-2" id="ghostPaletteState">
+          <p className="text-muted-foreground md:col-span-2" id="ghostPaletteProvenance">
+            {palettePreferences.mode === 'personal28' && 'Liste de 28 couleurs fournie par l’utilisateur, dans son ordre original.'}
+            {palettePreferences.mode === 'community30' && <>Liste communautaire de Manako sur <a className="underline" href="https://lospec.com/palette-list/geopixels-free-colors" target="_blank" rel="noopener noreferrer">Lospec</a>, consultée le 16 novembre 2026.</>}
+            {palettePreferences.mode === 'custom' && 'Votre liste reste conservée lorsque vous sélectionnez un autre préréglage.'}
+            {palettePreferences.mode === 'image' && 'Couleurs des pixels retenus selon le seuil de transparence, sans réduction préalable (256 au plus).'}
+            {' '}Ces listes ne garantissent pas les couleurs débloquées de votre compte et ne sont pas présentées comme officielles.
+          </p>
+          <label className="space-y-1 md:col-span-2">
+            <span className="text-muted-foreground">
+              Codes hexadécimaux à six chiffres, par exemple <code>#ff0000</code>, séparés par des espaces, virgules ou lignes ; {MAX_GHOST_COLORS} couleurs au plus
+            </span>
+            <textarea id="ghostPalette" className={`${field} h-24 font-mono`} value={paletteText} readOnly={palettePreferences.mode !== 'custom'} onChange={(e) => setPalettePreferences((p) => ({ ...p, mode: 'custom', customText: e.target.value }))} />
+          </label>
+          <div className="text-muted-foreground md:col-span-2" id="ghostPaletteState" role="status">
             {palette.colors.length} couleur(s) valide(s)
-            {palette.invalid.length > 0 ? ` ; non reconnues : ${palette.invalid.slice(0, 5).join(', ')}` : ''}
+            {palette.invalid.length > 0 ? ` ; codes invalides : ${palette.invalid.slice(0, 5).join(', ')} — attendu : #RRGGBB (six chiffres hexadécimaux)` : ''}
+            {palette.duplicates.length > 0 ? ` ; doublons ignorés : ${palette.duplicates.join(', ')}` : ''}
             {palette.colors.length > MAX_GHOST_COLORS ? ` ; trop de couleurs (${MAX_GHOST_COLORS} au plus)` : ''}
+            {palette.colors.length === 0 && ' ; une palette non vide est nécessaire pour préparer l’image.'}
             {fileColors !== undefined && fileColors !== null && (
-              <Button size="sm" variant="secondary" className="ml-3" id="ghostUseImageColors" onClick={() => setPaletteText(fileColors.join('\n'))}>
+              <Button size="sm" variant="secondary" className="ml-3" id="ghostUseImageColors" onClick={() => setPalettePreferences((p) => ({ ...p, mode: 'image' }))}>
                 Reprendre les {fileColors.length} couleurs de l’image
               </Button>
             )}
-            {fileColors === null && ' ; l’image a plus de 256 couleurs : saisissez vos couleurs.'}
+            {fileColors === null && (analysis?.error ?? ' ; l’image a plus de 256 couleurs : choisissez un préréglage ou une palette personnalisée.')}
+            {palettePreferences.mode === 'image' && fileColors === undefined && ' ; choisissez une image et un seuil valide, puis attendez son analyse.'}
+            {!alphaValid && ' ; seuil invalide : indiquez un entier entre 0 et 256.'}
+          </div>
+          <div className="flex flex-wrap items-center gap-2 md:col-span-2">
+            <Button id="ghostCopyPalette" size="sm" variant="secondary" disabled={palette.colors.length === 0 || palette.invalid.length > 0} onClick={() => void copyPalette()}>Copier la palette</Button>
+            <span role="status">{copyMessage}</span>
           </div>
           <div className="flex flex-wrap gap-3 md:col-span-2">
-            {palette.colors.slice(0, 64).map((c) => (
+            {palette.colors.slice(0, MAX_GHOST_COLORS).map((c) => (
               <span key={c} title={c} className="inline-block h-4 w-4 rounded-sm border" style={{ backgroundColor: c }} />
             ))}
           </div>
@@ -178,6 +227,7 @@ export function GeoPixelsPage() {
             placement se fait dans GeoPixels avec « Place on Map ».
           </p>
           <div className="md:col-span-5">
+            <p className="mb-2 text-muted-foreground">La palette choisie s’applique à la prochaine préparation. Un modèle déjà enregistré conserve ses couleurs ; son export reste identique.</p>
             <Button id="ghostImport" onClick={() => void importGhost()} disabled={!canImport}>
               Préparer l’image
             </Button>
@@ -228,8 +278,9 @@ export function GeoPixelsPage() {
                 <div>
                   Dimensions : <b>{current.width} × {current.height}</b> pixels
                 </div>
+                <div>Surface totale : <b>{current.totalPixels.toLocaleString('fr-FR')}</b> pixels (transparence incluse)</div>
                 <div>
-                  Pixels à placer : <b>{current.paintablePixels.toLocaleString('fr-FR')}</b> ; transparents : {current.transparentPixels.toLocaleString('fr-FR')}
+                  Pixels opaques retenus : <b>{current.retainedPixels.toLocaleString('fr-FR')}</b> ; transparents : {current.transparentPixels.toLocaleString('fr-FR')}
                 </div>
                 <div>
                   Coin haut-gauche saisi : <b>({current.topLeft.x}, {current.topLeft.y})</b> (non converti)
@@ -237,6 +288,11 @@ export function GeoPixelsPage() {
                 <div>
                   Fichier : <code>{current.filename}</code>
                 </div>
+              </div>
+              <p className="text-muted-foreground">Le nombre retenu applique le filtre de transparence, sans comparaison avec la carte réelle. Le compteur de GeoPixels peut inclure toute la surface.</p>
+              <div id="ghostUnusedColors" className="space-y-1">
+                <div className="text-muted-foreground">Palette enregistrée : {current.palette.length} couleurs ; inutilisées après conversion : {unusedColors.length}</div>
+                <div className="flex flex-wrap gap-2">{unusedColors.map((hex) => <span key={hex} className="inline-flex items-center gap-1 rounded border px-1 font-mono text-xs"><span className="inline-block h-3 w-3 rounded-sm border" style={{ backgroundColor: hex }} />{hex}</span>)}</div>
               </div>
               <div>
                 <div className="text-muted-foreground">Couleurs utilisées ({current.colors.length}) :</div>
@@ -281,8 +337,8 @@ export function GeoPixelsPage() {
             <li>Placez les pixels vous-même. Toute automatisation est interdite par les conditions de GeoPixels.</li>
           </ol>
           <p className="text-muted-foreground">
-            Non vérifié par GeoPlacer (GeoPixels ne le documente pas) : formats et taille maximale acceptés, orientation, rendu exact des couleurs et de la
-            transparence dans l’outil. Vérifiez sur une petite image d’abord (voir le guide <code>docs/fr/geopixels.md</code>). Conditions d’utilisation de
+            Validation utilisateur le 16 novembre 2026 : PNG de 595 × 894 accepté dans l’outil natif, positionnement réussi, sans inversion évidente. Cela ne
+            certifie pas toutes les dimensions, palettes ou transparences. Vérifiez votre aperçu avant l’import manuel. Conditions d’utilisation de
             GeoPixels (version du 2 septembre 2026) :{' '}
             <a href="https://www.geopixels.net/TOS.html" target="_blank" rel="noopener noreferrer" className="underline">
               TOS
