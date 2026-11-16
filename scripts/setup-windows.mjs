@@ -164,8 +164,10 @@ function checkCanvasArchive() {
   const name = `canvas-v${version}-napi-v7-${process.platform}-${process.arch}.tar.gz`;
   const expected = CANVAS_ARCHIVES[name];
   if (expected === undefined) return { ok: true, text: `archive ${name} : aucune empreinte connue sur cette plateforme (non vérifiée)` };
-  // The directory prebuild-install downloads into (its own rule, node_modules/prebuild-install/util.js);
-  // `npm config get cache` is refused by npm 10 (« protected »).
+  // The directory prebuild-install downloads into, by its own rule (node_modules/prebuild-install/util.js):
+  // npm_config_cache when set (under npm run), otherwise %APPDATA%\npm-cache (start.bat, setup.bat),
+  // which is NOT npm's own cache (%LOCALAPPDATA%\npm-cache) that `npm config get cache` reports; and
+  // npm refuses `npm config get cache` when npm_config_cache comes from the environment.
   const npmCache = process.env.npm_config_cache || (process.env.APPDATA ? path.join(process.env.APPDATA, 'npm-cache') : path.join(homedir(), '.npm'));
   const dir = path.join(npmCache, '_prebuilds');
   const files = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(name)) : [];

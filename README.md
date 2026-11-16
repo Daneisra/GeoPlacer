@@ -26,7 +26,7 @@ licence **AGPL-3.0-only**. Les modifications sont listées dans
 
 ### Installer (Windows)
 
-Prérequis : Windows 10 ou 11 (64 bits), [Node.js 22 LTS](https://nodejs.org)
+Prérequis : Windows 10 64 bits (vérifié ; Windows 11 non vérifié), [Node.js 22 LTS](https://nodejs.org)
 (22.12 au minimum ; fournit npm 10) et Git (ou le téléchargement ZIP du
 dépôt), une connexion Internet pour l'installation. Aucun compilateur,
 aucun droit administrateur.
@@ -38,7 +38,9 @@ npm run setup:windows      # ou double-clic sur setup.bat
 ```
 
 Tant que la version candidate n'est pas fusionnée dans `main`, se placer
-d'abord sur sa branche : `git checkout feat/phase1c0-release-candidate`.
+d'abord sur sa branche : `git checkout feat/phase1c0-release-candidate`
+(une fois cette branche publiée ; avant, utiliser
+`feat/phase1b10-demo-hardening`).
 
 Une seule commande : dépendances exactes, binaire `canvas` précompilé (sans
 compilateur), compilation, configuration sans secret, démarrage de

@@ -31,8 +31,9 @@ describe('EngineService: a real process killed during a simulation, then a resta
   // Then, with a world checkpoint every 6 changes, at the steps of an automatic checkpoint.
   // Phase 1C.0: whether a write is started while an automatic checkpoint is written depends on the
   // timing of two independent I/O sequences (the checkpoint, the next attempt's journal): it is not
-  // guaranteed, with or without yields (shown by failures in both modes; the Phase 1B.9 version of
-  // this test required it and passed by chance). At a checkpoint step an interrupted write is
+  // guaranteed, with or without yields (failures shown on the Phase 1C.0 code in both modes; the
+  // Phase 1B.9 version of this test required it, and was not re-measured on the older code). At a
+  // checkpoint step an interrupted write is
   // therefore possible, not required. A kill during a durable append is always inside a write
   // (`appended`), and the checkpoint steps alone are covered by world-store.test.ts.
   // The checkpoint steps run with and without yields. In every case the restart must finish the

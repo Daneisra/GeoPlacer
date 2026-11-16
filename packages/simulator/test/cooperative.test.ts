@@ -179,6 +179,34 @@ describe('cooperative scheduler (Phase 1C.0)', () => {
     }
   });
 
+  it('a journal compaction at any yield: it is never blocked by the computation, and the run is unchanged', async () => {
+    // The journal is never awaited inside a sliced computation: a compaction asked at a yield runs
+    // meanwhile (one at a time with the leases), and the run finishes with nothing applied twice.
+    const total = await totalYields();
+    for (const k of spread(total, 24)) {
+      let compaction = null as Promise<unknown> | null;
+      const e: Engine = engineFor(
+        hook((n) => {
+          if (n !== k) return;
+          compaction = e.attempts.compact(e.clock.now());
+        })
+      );
+      await e.scheduler.start();
+      const final = await e.scheduler.done();
+      await until(() => compaction !== null || final.state === 'completed');
+      if (compaction !== null) await compaction;
+      expect(final.state, `k ${k}`).toBe('completed');
+      expect(final.recentErrors, `k ${k}`).toEqual([]);
+      expect(e.wrong(), `k ${k}`).toBe(0);
+      expect(e.appliedTwice(), `k ${k}`).toBe(0);
+      // The compacted journal still describes the run: a new process recovers nothing to redo.
+      const next = e.startProcess();
+      await next.start();
+      expect((await next.done()).state, `k ${k}`).toBe('completed');
+      expect(e.appliedTwice(), `k ${k}`).toBe(0);
+    }
+  });
+
   it('refuses a slice size that is not a positive integer', () => {
     for (const slicePixels of [0, -1, 1.5, Number.NaN]) {
       expect(() => engineFor({ slicePixels, yieldTo: async () => undefined })).toThrow(/slicePixels/);

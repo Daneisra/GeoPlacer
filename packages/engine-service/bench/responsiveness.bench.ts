@@ -20,6 +20,10 @@
  * edits (`edits`: 25 pixels erased every 2 s while the engine runs), machine load during the run
  * (all processors, from os.cpus) and this process's CPU share, so that runs on a busy machine are
  * recognisable.
+ * Environment: BENCH_COOPERATIVE=0 runs the service without yields (the new code, not the old one);
+ * BENCH_SLICE=<pixels> sets the slice size (default DEFAULT_SLICE_PIXELS). To compare with the code
+ * before Phase 1C.0: `git worktree add --detach <dir> 6bee19c`, `npm ci --ignore-scripts` and
+ * `npm run build:packages` there, copy this file into it, run both alternately on a calm machine.
  * usage: node --expose-gc --import tsx bench/responsiveness.bench.ts [side] [seconds] [full|incremental] [edits]
  */
 

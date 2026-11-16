@@ -65,8 +65,9 @@ et d'arrêt échouent (bail pris après la demande) ; le test des validateurs
 
 **Défauts trouvés pendant la phase** :
 - par l'audit d'installation : Node.js dans un chemin avec espaces (étape
-  `canvas`), constante utilisée avant son initialisation, empreinte jamais
-  vérifiée (npm 10) ; voir [installation-windows.md](installation-windows.md) ;
+  `canvas`), constante utilisée avant son initialisation, archive cherchée
+  dans le mauvais cache (empreinte jamais vérifiée) ; voir
+  [installation-windows.md](installation-windows.md) ;
 - par la revue des avertissements de lint : `validateQuery` répondait 500
   sous Express 5 ;
 - par la recette Firefox de la 1B.10 : heures au format anglais (corrigé
@@ -80,7 +81,8 @@ et d'arrêt échouent (bail pris après la demande) ; le test des validateurs
   le processus est tué. C'est une course entre deux suites d'E/S
   indépendantes (le point de contrôle, le journal de la tentative suivante) ;
   le produit ne la garantit pas. Échecs constatés avec et sans cession,
-  journaux conservés ; la version de la 1B.9 passait par chance. Exigence
+  journaux conservés. Non re-mesuré sur le code d'avant la 1C.0 (la version
+  de la 1B.9 de ce test passait ; son timing a pu être différent). Exigence
   retirée à ces étapes, garanties de reprise toujours vérifiées ; trois
   passages consécutifs réussis.
 - **Cause démontrée** : un délai de test trop court pour une démonstration

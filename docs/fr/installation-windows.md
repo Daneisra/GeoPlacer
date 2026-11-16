@@ -78,7 +78,7 @@ npm vide, `core.autocrlf=false` : les `.bat` restent en CRLF grâce à
 | `.\start.bat` (lancement) | serveur compilé démarré, API 200, interface servie |
 | `start.bat --demo` | démonstration, Ctrl+C, reprise, sauvegarde, restauration (voir [recette-navigateur.md](recette-navigateur.md)) |
 | `setup.bat` | six étapes réussies, puis « Appuyez sur une touche » |
-| `update.bat` | `git pull` puis installation complète ; « All done » (branche winget, sans Git, non testée) |
+| `update.bat` | `git pull` puis installation complète ; « All done ». Sans Git : en 1B.10, la branche héritée lançait winget (non testée) ; depuis la 1C.0, explication et arrêt, testé |
 | `npm start` | dans Edge : bandeau, temps réel connecté, API 200, route héritée refusée (410), aucune erreur console, aucune requête externe |
 | `npm run dev` | idem à travers Vite (`http://localhost:<port>`), ports libérés à l'arrêt |
 
@@ -103,8 +103,14 @@ Défauts trouvés et corrigés pendant la Phase 1C.0 :
   (« … n'est pas reconnu en tant que commande interne », reproduit) ;
 - une première version de la vérification d'empreinte plantait à chaque
   installation (constante utilisée avant son initialisation), puis ne
-  vérifiait rien (npm 10 refuse `npm config get cache`) : trouvés par cet
-  audit, corrigés, puis audit refait en entier.
+  trouvait pas l'archive : elle demandait le dossier à `npm config get
+  cache`, qui renvoie le cache de npm (`%LOCALAPPDATA%\npm-cache`) et que
+  npm refuse quand `npm_config_cache` est défini, alors que
+  `prebuild-install`, lancé par `start.bat` ou `setup.bat`, télécharge dans
+  `%APPDATA%\npm-cache`. Le dossier est maintenant calculé par la règle de
+  `prebuild-install` ; vérifié dans les deux cas (sous `npm run`, et lancé
+  directement avec un `APPDATA` de test). Trouvés par cet audit, corrigés,
+  puis audit refait en entier.
 
 Rejouer l'audit (télécharge les dépendances, n'écrit que dans le dossier
 indiqué) :
@@ -186,10 +192,14 @@ Un `npm ci` **avec** scripts n'a pas été testé.
 ba953cc8c38303ab94cc83461c7561506a5a3af37d6c678de4a47914d2d0bb48
 ```
 
-L'archive est conservée dans le cache npm (`_prebuilds`). Pour comparer :
+L'installation vérifie elle-même cette empreinte (Phase 1C.0). L'archive
+est conservée dans le dossier `_prebuilds` du cache utilisé par
+`prebuild-install` : `%APPDATA%\npm-cache` après `start.bat` ou
+`setup.bat`, `%LOCALAPPDATA%\npm-cache` après `npm run setup:windows`.
+Pour comparer à la main :
 
 ```powershell
-Get-FileHash "$(npm config get cache)\_prebuilds\*canvas-v3.2.3-napi-v7-win32-x64.tar.gz" -Algorithm SHA256
+Get-FileHash "$env:APPDATA\npm-cache\_prebuilds\*canvas-v3.2.3-napi-v7-win32-x64.tar.gz", "$env:LOCALAPPDATA\npm-cache\_prebuilds\*canvas-v3.2.3-napi-v7-win32-x64.tar.gz" -Algorithm SHA256 -ErrorAction SilentlyContinue
 ```
 
 ## 4. Compiler et vérifier

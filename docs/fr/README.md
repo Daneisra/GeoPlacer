@@ -11,7 +11,7 @@ local** (voir l'ADR 0001).
 Réalisé en Phase 1C.0 (voir [version-candidate.md](version-candidate.md)) :
 - **serveur réactif sur les grands modèles** : ordonnanceur coopératif et
   calculs découpés ; à 4096², blocage maximal de la boucle 1 339 → 75 ms,
-  latence HTTP médiane 234 → 3 ms, débit inchangé (voir
+  latence HTTP médiane 234 → 3 ms, sans différence de débit mesurable (voir
   [progression.md](progression.md), § 7) ;
 - **installation fiabilisée** et auditée sur clone neuf (chemins avec
   espaces et accents, Node.js dans `C:\Program Files`, installation

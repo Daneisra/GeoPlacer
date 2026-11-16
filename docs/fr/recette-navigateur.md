@@ -25,7 +25,9 @@ Ne pas le considérer comme fait tant qu'il ne l'a pas été.
    - `Engine stopped and data directory released`
    - `Graceful shutdown completed`
 
-   puis l'invite PowerShell revient. **Code de sortie attendu : 0** :
+   puis l'invite PowerShell revient. **Code de sortie attendu : 0**
+   (attendu d'après le code : `process.exit(0)` après un arrêt propre ;
+   jamais vérifié depuis PowerShell après une vraie frappe) :
    ```powershell
    $LASTEXITCODE        # 0
    ```

@@ -56,8 +56,13 @@ export type BackupErrorCode =
   | 'NOTHING_TO_RESUME'
   | 'NOT_FOUND';
 
-/** The demonstration directory is named `demo` (npm run demo); every other one is a project. */
-export const dataDirKind = (name: string): 'demonstration' | 'project' => (name === 'demo' ? 'demonstration' : 'project');
+/**
+ * The demonstration directory is named `demo` (npm run demo); the copies a restore keeps aside or
+ * stages next to it (`demo.avant-restauration-<date>`, `demo.restauration-<date>.partial`) are the
+ * demonstration too. Every other directory is a project.
+ */
+export const dataDirKind = (name: string): 'demonstration' | 'project' =>
+  name === 'demo' || /^demo\.(avant-restauration|restauration)-/.test(name) ? 'demonstration' : 'project';
 
 export class BackupError extends Error {
   readonly code: BackupErrorCode;

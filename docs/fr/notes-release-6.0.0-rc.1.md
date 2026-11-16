@@ -16,7 +16,7 @@
   progression** au démarrage suivant.
 - **Sauvegarder** et **restaurer** vos données.
 
-## Installer (Windows 10 ou 11, 64 bits)
+## Installer (Windows 10, 64 bits ; Windows 11 non vérifié)
 
 1. Installez [Node.js 22 LTS](https://nodejs.org).
 2. Téléchargez le code de cette version (archive ZIP ci-dessous, ou
@@ -37,8 +37,8 @@ Guide complet : `docs/fr/installation-windows.md` et
 
 - **Serveur réactif** sur les grands modèles : le calcul est découpé et
   laisse passer les requêtes ; sur un modèle de 4096 × 4096, la latence
-  d'une requête passe d'environ 230 ms (médiane) à 3 ms, sans perte de
-  débit (mesures au calme, voir `docs/fr/progression.md`).
+  d'une requête passe d'environ 230 ms (médiane) à 3 ms, sans différence
+  de débit mesurable (mesures au calme, voir `docs/fr/progression.md`).
 - **Installation fiabilisée** : fonctionne avec Node.js installé dans
   `C:\Program Files`, reprend une installation interrompue, recompile après
   une mise à jour du code, vérifie l'empreinte du binaire `canvas`.

@@ -367,7 +367,9 @@ d'événements de 1,3 s. Le banc `bench/blocking.bench.ts` horodate chaque
 blocage de la boucle (battement de 2 ms) et l'attribue aux fonctions en
 cours d'exécution grâce au profileur CPU de V8, lancé dans le même processus.
 Il enregistre aussi les passages du ramasse-miettes et la mémoire. Constats
-à 4096² :
+à 4096² (diagnostic fait sur une machine chargée à 85-97 % par un autre
+logiciel : les durées sont environ deux fois celles du calme, les parts
+relatives restent valables) :
 
 - **un cycle entier était un seul bloc synchrone** : 97,7 % du temps d'un
   cycle bloquait la boucle. Les `await` du cycle se résolvent presque tous
@@ -393,10 +395,10 @@ intervalles fixes, comme un navigateur : la latence réelle de l'ancien code
 | Option | Blocage max à 4096² | Débit | Mémoire | Garanties | Complexité | Décision |
 |---|---|---|---|---|---|---|
 | 1. Reconstruction progressive en blocs | inclus dans 3 et 4 | — | — | — | — | intégrée (la reconstruction est découpée comme le reste) |
-| 2. Worker thread | ~22 ms par envoi d'instantané (copie de 64 Mio), ~0,5 ms en mémoire partagée (`bench/worker-transfer.bench.ts`) | inchangé (le cycle reste séquentiel) | +64 Mio par copie | à reconstruire (instantané, état incrémental et planificateur dans le worker, plantage du worker) | élevée : contrats du cœur asynchrones, chargement sous `dist` et `tsx`, mémoire partagée avec le simulateur | **écartée** pour cette version : aucun gain sur le découpage, coût structurel élevé |
+| 2. Worker thread (seul le coût de transfert a été mesuré, aucun prototype) | ~22 ms par envoi d'instantané (copie de 64 Mio), ~0,5 ms en mémoire partagée (`bench/worker-transfer.bench.ts`) | inchangé (le cycle reste séquentiel) | +64 Mio par copie | à reconstruire (instantané, état incrémental et planificateur dans le worker, plantage du worker) | élevée : contrats du cœur asynchrones, chargement sous `dist` et `tsx`, mémoire partagée avec le simulateur | **écartée** pour cette version : aucun gain sur le découpage, coût structurel élevé |
 | 3. Cache incrémental, vérifications partielles | le cache seul (sans découpage) : 969 ms (1 339 ms avant) | inchangé | +15 Mio | inchangées | faible | **retenu en partie** : correspondance pixel → couleur conservée, deux tampons alternés ; vérification toujours complète, mais découpée |
 | 4. Vérifications complètes réparties sur plusieurs cycles | la reconstruction resterait un bloc | inchangé | — | détection plus tardive d'un écart | moyenne | **écartée** : le découpage obtient le même effet sans retarder la vérification |
-| 5. Découpage coopératif de tout le cycle | **31 à 75 ms** | inchangé au calme (−1 à −3 % ; −7 à −10 % sur une machine chargée à 87 %) | +15 Mio | inchangées, testées | moyenne, sans changement d'architecture | **retenu** |
+| 5. Découpage coopératif de tout le cycle | **31 à 75 ms** | pas de différence de débit mesurable (un passage par configuration au calme ; deux passages de l'ancien code diffèrent déjà d'environ 10 %) ; −7 à −10 % sur une machine chargée à 87 % | +15 Mio | inchangées, testées | moyenne, sans changement d'architecture | **retenu** |
 
 ### Mise en œuvre
 
@@ -464,7 +466,20 @@ chargée (87 à 89 %, mesures de la même phase), le gain est du même ordre
 baisse de 7 à 10 % : sous forte charge, chaque cession attend plus
 longtemps son tour.
 
+**Refaire la comparaison** : voir l'en-tête de
+`bench/responsiveness.bench.ts` (copie de travail de l'ancien code à
+`6bee19c`, `BENCH_COOPERATIVE=0` pour le nouveau code sans cession,
+`BENCH_SLICE` pour la taille des tranches), en alternant les exécutions sur
+une machine calme.
+
 ### Limite restante
+
+Diagnostic du **code final** (`bench/blocking.bench.ts`, 4096², 60 s,
+machine calme à 18-21 %, profileur actif) : 104 cycles, **un seul blocage de
+plus de 50 ms** (moins de 100 ms) ; répartition du CPU : planificateur 69 %,
+calcul complet de la progression (vérifications, reconstructions) 9 %,
+lecture de la toile 5 %, mise à jour incrémentale 3 %, Node.js et
+cessions 12 %, ramasse-miettes moins de 1 % ; mémoire maximale 554 Mio.
 
 Le planificateur reclasse tout le modèle à chaque cycle : il ne bloque plus
 la boucle, mais son coût CPU limite le débit sur les très grands modèles

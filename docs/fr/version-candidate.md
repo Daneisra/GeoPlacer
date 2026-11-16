@@ -151,9 +151,17 @@ Archive des sources, produite par `git archive` (aucun fichier local ajouté) :
 | Contenu vérifié | 503 fichiers ; aucun `node_modules`, `dist`, `data`, `sauvegardes`, `test-logs` ni `.env` ; `LICENSE` et `MODIFICATIONS.md` présents ; `start.bat`, `setup.bat` et `update.bat` en CRLF (grâce à `.gitattributes`) |
 | Installation vérifiée | extraite dans un dossier sans Git, `start.bat` : installation complète, empreinte de `canvas` conforme, `--check` à 0 ; `npm start` dans Edge : temps réel connecté, API 200, route héritée refusée (410), aucune erreur console, aucune requête externe |
 
-Une archive pour la publication serait refaite au commit final (après le
-changement de version), de la même façon ; GitHub en produit aussi une à
-partir du tag.
+Commande utilisée (depuis le dépôt) :
+
+```powershell
+git archive --format=zip --prefix=GeoPlacer-c3fdd7f/ -o geoplacer-6.0.0-rc.1-candidat-c3fdd7f.zip c3fdd7f
+Get-FileHash geoplacer-6.0.0-rc.1-candidat-c3fdd7f.zip -Algorithm SHA256
+```
+
+Le fichier est dans un dossier temporaire local : le refaire avec cette
+commande au besoin. Une archive pour la publication serait refaite au
+commit final (après le changement de version), de la même façon ; GitHub en
+produit aussi une à partir du tag.
 
 ## 9. Notes de release GitHub proposées
 

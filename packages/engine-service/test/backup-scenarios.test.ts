@@ -164,6 +164,16 @@ describe('backup and restore: realistic scenarios (Phase 1C.0)', () => {
     expect(forced.previous).not.toBeNull();
     expect(await treeHash(forced.previous!)).toBe(before);
 
+    // The demonstration kept aside by a restore (demo.avant-restauration-<date>) is still the
+    // demonstration: its backup is refused into a project too.
+    const demoAgain = await restoreBackup(demoBackup.dir, demo);
+    expect(path.basename(demoAgain.previous!)).toMatch(/^demo\.avant-restauration-/);
+    const asideBackup = await createBackup(demoAgain.previous!, path.join(root, 'sauvegardes'));
+    expect(path.basename(asideBackup.dir)).toMatch(/^geoplacer-sauvegarde-demo-/);
+    const aside = await restoreBackup(asideBackup.dir, project).catch((e: unknown) => e);
+    expect((aside as BackupError).code).toBe('BACKUP_KIND_MISMATCH');
+    expect((await restoreBackup(asideBackup.dir, demo)).restoredFiles).toBeGreaterThan(0);
+
     // A backup made before Phase 1C.0 (no dataDirName in its manifest) is restored as before.
     const manifestPath = path.join(projectBackup.dir, 'MANIFEST.json');
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
