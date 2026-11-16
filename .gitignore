@@ -37,3 +37,6 @@ sauvegardes/
 data.avant-restauration-*/
 *.restauration-*.partial/
 *.restauration.json
+
+# Release archives built by scripts/build-release-archive.mjs (Phase 1C.0)
+/release/
