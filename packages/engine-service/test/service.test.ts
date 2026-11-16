@@ -89,7 +89,7 @@ describe('EngineService: a complete simulated run (Phase 1B.9)', () => {
 });
 
 describe('EngineService: no network (Phase 1B.10)', () => {
-  it('a whole simulation, a backup and a demonstration open no outgoing connection', async () => {
+  it('a whole simulation, a backup and the diagnostics open no outgoing connection', async () => {
     const net = await import('node:net');
     const original = net.Socket.prototype.connect;
     const attempts: unknown[] = [];

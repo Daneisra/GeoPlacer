@@ -129,6 +129,15 @@ try {
   const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
   page.on('console', (m) => m.type() === 'error' && consoleErrors.push(m.text()));
   page.on('pageerror', (e) => consoleErrors.push(String(e)));
+  // Every request of the page (documents, scripts, fonts, images, API, WebSocket) must stay on this machine.
+  const foreign = new Set();
+  const onRequest = (url) => {
+    const u = new URL(url);
+    if (['data:', 'blob:', 'about:'].includes(u.protocol)) return;
+    if (!['127.0.0.1', 'localhost', '[::1]'].includes(u.hostname)) foreign.add(`${u.protocol}//${u.host}`);
+  };
+  page.on('request', (r) => onRequest(r.url()));
+  page.on('websocket', (ws) => onRequest(ws.url()));
   page.on('dialog', async (d) => {
     if (d.type() === 'prompt') await d.accept('RESET');
     else await d.accept();
@@ -280,6 +289,7 @@ try {
   const unexpected = consoleErrors.filter((e) => !expected(e));
   check('console : aucune erreur inattendue', unexpected.length === 0, unexpected.join(' | '));
   step('console (attendues : refus volontaires, redémarrage)', consoleErrors.length - unexpected.length);
+  check('aucune requête de la page vers un autre site (tout le parcours)', foreign.size === 0, [...foreign].join(' | '));
 } catch (error) {
   failures++;
   step('FAILED', String(error));
