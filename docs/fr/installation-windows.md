@@ -113,6 +113,12 @@ indiqué) :
 node scripts/audit-installation-windows.mjs <dépôt> <branche> <dossier neuf>
 ```
 
+**Archive ZIP** (sans Git) : vérifiée sur une archive produite par
+`git archive` (comme celle de GitHub), extraite dans un dossier neuf :
+`start.bat` installe tout, `--check` fonctionne sans Git (le commit n'est
+alors pas comparé : après avoir remplacé les fichiers par une nouvelle
+archive, lancer `npm run setup:windows`), `npm start` fonctionne.
+
 Les **droits d'administration** ne sont jamais demandés. Un dossier en
 lecture seule (ACL Windows) n'a pas été testé tel quel : son effet est le
 même échec expliqué que le cas « dossier impossible à créer ».

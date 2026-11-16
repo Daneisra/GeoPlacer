@@ -139,6 +139,22 @@ exécutées.
 10. Tag annoté `v6.0.0-rc.1` sur le commit fusionné, puis release GitHub
     marquée « pré-version » (validation).
 
+## 8 bis. Artefact local préparé (non publié)
+
+Archive des sources, produite par `git archive` (aucun fichier local ajouté) :
+
+| Élément | Valeur |
+|---|---|
+| Fichier | `geoplacer-6.0.0-rc.1-candidat-c3fdd7f.zip` (dossier de travail local, non versionné) |
+| Provenance | commit `c3fdd7f` de `feat/phase1c0-release-candidate` |
+| SHA-256 | `17bf12ce50ecc7160aece5827b4ef0e0f67b084f4cd2ed80cebcef75f69ec9a7` |
+| Contenu vérifié | 503 fichiers ; aucun `node_modules`, `dist`, `data`, `sauvegardes`, `test-logs` ni `.env` ; `LICENSE` et `MODIFICATIONS.md` présents ; `start.bat`, `setup.bat` et `update.bat` en CRLF (grâce à `.gitattributes`) |
+| Installation vérifiée | extraite dans un dossier sans Git, `start.bat` : installation complète, empreinte de `canvas` conforme, `--check` à 0 ; `npm start` dans Edge : temps réel connecté, API 200, route héritée refusée (410), aucune erreur console, aucune requête externe |
+
+Une archive pour la publication serait refaite au commit final (après le
+changement de version), de la même façon ; GitHub en produit aussi une à
+partir du tag.
+
 ## 9. Notes de release GitHub proposées
 
 Voir [notes-release-6.0.0-rc.1.md](notes-release-6.0.0-rc.1.md).
