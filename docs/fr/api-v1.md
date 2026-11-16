@@ -68,7 +68,7 @@ mais peut évoluer.
 | `INVALID_SETTINGS`, `INVALID_TEMPLATE` | 400 | Réglage hors limites, PNG invalide |
 | `INVALID_REQUEST` | 400 | Aussi : région de lecture ou échelle hors limites (voir § 3, Simulateur) |
 | `DEMO_NEEDS_EMPTY_PROJECT` | 409 | Démonstration demandée sur un projet qui contient déjà des modèles, des tentatives ou une toile peinte (1B.10) |
-| `BACKUP_FAILED` | 500 | La sauvegarde n'a pas pu être écrite (disque plein, droits) ; aucune sauvegarde partielle n'est laissée (1B.10) |
+| `BACKUP_FAILED` | 500 | La sauvegarde n'a pas pu être écrite (disque plein, droits) : aucune sauvegarde n'est créée ; un dossier `<nom>.partial` peut rester, il n'est jamais pris pour une sauvegarde et se supprime à la main (1B.10) |
 | `ENGINE_CLOSED` | 503 | Le serveur s'arrête |
 
 L'interface traduit ces codes en français (`frontend/src/lib/i18n.ts`) ;

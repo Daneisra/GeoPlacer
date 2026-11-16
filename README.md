@@ -25,6 +25,9 @@ cd GeoPlacer
 npm run setup:windows      # ou double-clic sur setup.bat
 ```
 
+Tant que la Phase 1B.10 n'est pas fusionnée dans `main`, se placer d'abord
+sur sa branche : `git checkout feat/phase1b10-demo-hardening`.
+
 Une seule commande : dépendances exactes, binaire `canvas` précompilé (sans
 compilateur), compilation, configuration sans secret, démarrage de
 contrôle. Rien n'est modifié globalement sur Windows.

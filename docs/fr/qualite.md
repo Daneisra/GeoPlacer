@@ -82,12 +82,12 @@ celles de [progression.md](progression.md) § 6, mesurées machine calme ;
 la comparaison des deux modes, faite dans les mêmes conditions, reste
 valable.
 
-| Modèle | Mode | Import | Premier lot | Cycle médian / p95 | Débit | HTTP médian / max | Mémoire |
-|---|---|---|---|---|---|---|---|
-| 256² | incrémental | 0,2 s | 0,4 s | 28 / 45 ms | 29 084 px/s | 2,6 / 22 ms | 184 Mio |
-| 2000² | complet | 2,4 s | 1,2 s | 403 / 485 ms | 2 394 px/s | 4,0 / 33 ms | 223 Mio |
-| 2000² | incrémental | 2,2 s | 1,0 s | 238 / 459 ms | 3 759 px/s | 3,1 / 28 ms | 231 Mio |
-| 4096² | incrémental | 8,8 s | 3,6 s | 876 / 1 770 ms | 1 002 px/s | 3,5 / 26 ms | 566 Mio |
+| Modèle | Mode | Import | Premier lot | Cycle médian / p95 | Débit | HTTP médian / max | Événements `status` : écart médian / max | Mémoire |
+|---|---|---|---|---|---|---|---|---|
+| 256² | incrémental | 0,2 s | 0,4 s | 28 / 45 ms | 29 084 px/s | 2,6 / 22 ms | 256 / 371 ms | 184 Mio |
+| 2000² | complet | 2,4 s | 1,2 s | 403 / 485 ms | 2 394 px/s | 4,0 / 33 ms | 403 / 1 139 ms | 223 Mio |
+| 2000² | incrémental | 2,2 s | 1,0 s | 238 / 459 ms | 3 759 px/s | 3,1 / 28 ms | 454 / 924 ms | 231 Mio |
+| 4096² | incrémental | 8,8 s | 3,6 s | 876 / 1 770 ms | 1 002 px/s | 3,5 / 26 ms | 875 / 3 547 ms | 566 Mio |
 
 Lecture d'une région de 2000² ou 4096² pour l'affichage : 83 à 86 ms,
 environ 21 Mio de JSON ; l'interface ne lit que la zone visible, à

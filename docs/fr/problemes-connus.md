@@ -51,6 +51,10 @@
 
 ## Installation
 
+- `update.bat` (hérité) : son étape d'installation passe désormais par
+  l'installation de GeoPlacer, mais le script n'a pas été vérifié de bout
+  en bout ; s'il ne trouve pas Git, il propose de l'installer avec winget,
+  ce qui modifie Windows. Préférer `git pull` puis `npm run setup:windows`.
 - `npm` peut afficher « New major version of npm available ». Ne pas mettre
   npm à jour pour GeoPlacer : l'installation n'exige rien de global.
 - L'installation télécharge les dépendances et le binaire officiel de

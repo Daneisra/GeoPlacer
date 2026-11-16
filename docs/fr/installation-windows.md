@@ -291,7 +291,9 @@ l'arrêt de ces essais a été forcé (`taskkill /T /F`).
 `.env` est **local** : il n'est pas suivi par Git et ne doit jamais être
 commité. Il ne doit contenir aucun secret.
 
-- **Génération** : `start.bat` crée `.env` à partir de `.env.example`
+- **Génération** : `npm run setup:windows` (lancé aussi par `setup.bat`
+  et par `start.bat` au premier lancement) crée `.env` à partir de
+  `.env.example`
   s'il est absent, sans jamais écraser un fichier existant. Manuellement :
   `Copy-Item .env.example .env`.
 - **Fichier facultatif** : sans `.env`, le serveur démarre avec les

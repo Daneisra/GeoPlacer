@@ -317,28 +317,38 @@ hypothèse sur la cause, donc les modifications extérieures restent vues.
 service du serveur utilise `'incremental'`.
 
 **Mesures** (`npm run bench:responsiveness -- <côté> <secondes>
-full|incremental`, même machine, même build) :
+full|incremental`, même machine, même build, machine calme) :
 
-| Modèle | Mode | Cycle médian | Cycle p95 | Débit | Mémoire | HTTP médian |
-|---|---|---|---|---|---|---|
-| 256² | complet | 17 ms | — | ~52 000 px/s | — | ~2 ms |
-| 256² | incrémental | 16 ms | — | ~52 000 px/s | — | ~2 ms |
-| 2000² | complet | 199 ms | 212 ms | 4 948 px/s | — | ~2 ms |
-| 2000² | incrémental | 121 ms | 216 ms | 7 392 px/s | — | ~2 ms |
-| 4096² | complet | 743 ms | — | 1 303 px/s | 551 Mio | ~2 ms |
-| 4096² | incrémental | 434 ms | — | 2 036 px/s | 560 Mio | ~2 ms |
+| Modèle | Mode | Premier lot | Cycle médian / p95 | Débit | HTTP médian / max | Événements `status` : écart médian / max | Boucle d'événements : attente max | Mémoire |
+|---|---|---|---|---|---|---|---|---|
+| 256² | complet | 0,31 s | 17 / 21 ms | 52 244 px/s | 1,5 / 13 ms | 253 / 302 ms | 37 ms | 151 Mio |
+| 256² | incrémental | 0,32 s | 16 / 20 ms | 52 831 px/s | 1,6 / 14 ms | 252 / 310 ms | 48 ms | 170 Mio |
+| 2000² | complet | 0,68 s | 199 / 212 ms | 4 948 px/s | 1,6 / 15 ms | 398 / 664 ms | 223 ms | 236 Mio |
+| 2000² | incrémental | 0,68 s | 121 / 216 ms | 7 392 px/s | 1,6 / 15 ms | 353 / 666 ms | 369 ms | 255 Mio |
+| 4096² | complet | 1,54 s | 743 / 890 ms | 1 303 px/s | 2,3 / 15 ms | 742 / 1 526 ms | 968 ms | 551 Mio |
+| 4096² | incrémental | 1,78 s | 434 / 812 ms | 2 036 px/s | 1,9 / 18 ms | 434 / 1 762 ms | 1 310 ms | 560 Mio |
 
-Pour 4096² : import en 4,4 s environ, premier lot après 1,5 à 1,8 s, dans
-les deux modes. Latence HTTP maximale d'environ 15 à 18 ms dans tous les
-cas.
+Import et sélection d'un modèle de 4096² : 4,4 s dans les deux modes.
+Lecture d'une région de 4096² pour l'affichage (un pixel sur 2) : 46 ms,
+21 Mio de JSON. Les événements `status` sont ceux que le service envoie
+au WebSocket (regroupés toutes les 250 ms) ; l'écart est mesuré à
+l'abonnement au service, sans le transport réseau.
 
 **Décision : adoptée par le service.** Le bénéfice est démontré sur les
 grands modèles (cycle médian −39 % à 2000², −42 % à 4096², débit +49 % et
-+56 %), sans effet sur les petits. Contreparties mesurées : les cycles de
-vérification et de reconstruction restent aussi longs qu'un cycle complet
-(p95 inchangé), et l'attente maximale observée de la boucle d'événements à
-2000² est passée de 223 à 369 ms ; la latence HTTP n'en est pas affectée
-dans ces mesures. Mémoire : +9 Mio à 4096².
++56 %, écart médian entre statuts réduit), sans effet sur les petits.
+Contreparties mesurées :
+- les cycles de vérification et de reconstruction restent aussi longs
+  qu'un cycle complet (p95 proche) ;
+- l'attente **maximale** de la boucle d'événements augmente (223 → 369 ms
+  à 2000², 968 → 1 310 ms à 4096²), ainsi que l'écart maximal entre deux
+  statuts à 4096² (1,5 → 1,8 s) : ce sont les cycles de reconstruction ;
+- la latence HTTP mesurée n'en est pas affectée (médiane 1,6 à 2,3 ms,
+  maximum 18 ms) ;
+- mémoire : +19 Mio à 2000², +9 Mio à 4096².
+
+Un passage sur une machine chargée (voir [qualite.md](qualite.md), Phase
+1B.10) confirme l'avantage relatif dans les mêmes conditions.
 
 **Tests** : égalité exacte avec le calcul complet à chaque pas
 d'historiques aléatoires (écritures, modifications extérieures, inconnus,

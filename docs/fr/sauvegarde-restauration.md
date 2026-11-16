@@ -40,7 +40,8 @@ Chaque sauvegarde est un dossier daté
 
 La sauvegarde est d'abord écrite dans `<nom>.partial`, relue et vérifiée,
 puis renommée : **elle est complète, ou absente**. Un dossier `.partial`
-qui reste après une coupure n'est jamais pris pour une sauvegarde.
+qui reste après un échec ou une coupure n'est jamais pris pour une
+sauvegarde ; il peut être supprimé à la main.
 
 Le dossier des sauvegardes vaut `sauvegardes\`, à la racine du projet (ignoré
 par Git). On peut le changer avec `GEOPLACER_BACKUP_DIR` dans `.env` ; le
