@@ -14,9 +14,22 @@
 //     answered, then a controlled stop.
 // Nothing global is changed (no global npm package, no Windows setting). The full output is kept in
 // test-logs/<date>-setup.log.
+//
+// Phase 1C.0:
+// - a complete installation leaves a marker, node_modules/.geoplacer-install.json (lockfile hashes,
+//   compiled commit). It is removed when an installation starts, and `npm ci` empties node_modules:
+//   an interrupted installation never looks complete.
+// - `node scripts/setup-windows.mjs --check` (used by start.bat), without writing anything:
+//   0 installed and up to date; 1 installation needed (absent, interrupted, lockfiles changed);
+//   2 only a new build is needed (the sources changed: another commit, e.g. after git pull).
+// - the canvas archive is checked against its published SHA-256 when it was downloaded;
+// - commands are started WITHOUT a shell, except npm.cmd (a shell would split a Node.js path
+//   with spaces, such as C:\Program Files\nodejs\node.exe);
+// - folders that cannot be created (permissions) give an explanation, not a stack trace.
 
 import { spawn, spawnSync } from 'node:child_process';
-import { copyFileSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
@@ -25,15 +38,63 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = new Set(process.argv.slice(2));
-mkdirSync(path.join(root, 'test-logs'), { recursive: true });
+const isWindows = process.platform === 'win32';
+const npm = isWindows ? 'npm.cmd' : 'npm';
+const marker = path.join(root, 'node_modules', '.geoplacer-install.json');
+const sha256 = (file) => createHash('sha256').update(readFileSync(file)).digest('hex');
+const lockHashes = () => ({
+  root: existsSync(path.join(root, 'package-lock.json')) ? sha256(path.join(root, 'package-lock.json')) : null,
+  frontend: existsSync(path.join(root, 'frontend', 'package-lock.json')) ? sha256(path.join(root, 'frontend', 'package-lock.json')) : null,
+});
+/** The commit of the sources (null without Git or outside a repository: not compared). */
+function sourceCommit() {
+  const r = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' });
+  return r.status === 0 ? r.stdout.trim() : null;
+}
+
+// --check: is the installation complete and up to date? Writes nothing (no log file).
+if (args.has('--check')) {
+  const why = (code, text) => {
+    console.log(`[check] ${text}`);
+    process.exit(code);
+  };
+  if (!existsSync(marker)) why(1, 'installation absente ou interrompue');
+  let m;
+  try {
+    m = JSON.parse(readFileSync(marker, 'utf8'));
+  } catch {
+    why(1, 'marqueur d’installation illisible');
+  }
+  const locks = lockHashes();
+  if (m.locks?.root !== locks.root || m.locks?.frontend !== locks.frontend) why(1, 'dépendances modifiées (lockfiles)');
+  for (const f of [path.join('frontend', 'node_modules'), path.join('dist', 'server.js'), path.join('frontend', 'dist', 'index.html')]) {
+    if (!existsSync(path.join(root, f))) why(1, `élément manquant : ${f}`);
+  }
+  const head = sourceCommit();
+  if (head !== null && m.commit !== null && m.commit !== head) why(2, 'sources modifiées depuis la dernière compilation');
+  why(0, 'installation complète et à jour');
+}
+
+function makeDir(dir) {
+  try {
+    mkdirSync(dir, { recursive: true });
+    return null;
+  } catch (error) {
+    return `${dir} : ${error.code ?? String(error)}`;
+  }
+}
+const logDirProblem = makeDir(path.join(root, 'test-logs'));
+if (logDirProblem !== null) {
+  console.log(`ÉCHEC : impossible de créer le dossier des journaux (${logDirProblem}).`);
+  console.log('Que faire : placez GeoPlacer dans un dossier où vous avez le droit d’écrire (par exemple Documents), puis relancez.');
+  process.exit(1);
+}
 const logFile = path.join(root, 'test-logs', `${new Date().toISOString().replace(/[:.]/g, '-')}-setup.log`);
 const log = createWriteStream(logFile);
 const say = (line = '') => {
   console.log(line);
   log.write(`${line}\n`);
 };
-const isWindows = process.platform === 'win32';
-const npm = isWindows ? 'npm.cmd' : 'npm';
 
 function fail(step, message, hint) {
   say('');
@@ -47,7 +108,8 @@ function fail(step, message, hint) {
 function run(command, commandArgs, cwd = root, env = process.env) {
   return new Promise((resolve) => {
     log.write(`\n$ ${command} ${commandArgs.join(' ')}   (in ${path.relative(root, cwd) || '.'})\n`);
-    const child = spawn(command, commandArgs, { cwd, env, shell: isWindows, stdio: ['ignore', 'pipe', 'pipe'] });
+    // A shell only for npm.cmd (Windows needs one for .cmd files); its arguments have no spaces.
+    const child = spawn(command, commandArgs, { cwd, env, shell: isWindows && command === npm, stdio: ['ignore', 'pipe', 'pipe'] });
     for (const stream of [child.stdout, child.stderr]) {
       stream.on('data', (chunk) => {
         log.write(chunk);
@@ -84,7 +146,36 @@ if (!atLeast(nodeVersion, [22, 12, 0])) {
   }
 }
 
+/** Published SHA-256 of the canvas prebuilt archives that this installation can check. */
+const CANVAS_ARCHIVES = {
+  // https://github.com/Automattic/node-canvas/releases/tag/v3.2.3 (asset digest shown by GitHub)
+  'canvas-v3.2.3-napi-v7-win32-x64.tar.gz': 'ba953cc8c38303ab94cc83461c7561506a5a3af37d6c678de4a47914d2d0bb48',
+};
+
+/** Checks the canvas archive kept by prebuild-install in the npm cache; a message, or null if fine. */
+function checkCanvasArchive() {
+  let version;
+  try {
+    version = JSON.parse(readFileSync(path.join(root, 'node_modules', 'canvas', 'package.json'), 'utf8')).version;
+  } catch {
+    return { ok: false, text: 'version de canvas illisible' };
+  }
+  const name = `canvas-v${version}-napi-v7-${process.platform}-${process.arch}.tar.gz`;
+  const expected = CANVAS_ARCHIVES[name];
+  if (expected === undefined) return { ok: true, text: `archive ${name} : aucune empreinte connue sur cette plateforme (non vérifiée)` };
+  const cache = spawnSync(npm, ['config', 'get', 'cache'], { encoding: 'utf8', shell: isWindows });
+  const dir = path.join(cache.stdout.trim(), '_prebuilds');
+  const files = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(name)) : [];
+  if (files.length === 0) return { ok: true, text: 'archive absente du cache npm (binaire déjà présent) : non vérifiée' };
+  for (const f of files) {
+    if (sha256(path.join(dir, f)) !== expected) return { ok: false, text: `empreinte SHA-256 inattendue pour ${f}` };
+  }
+  return { ok: true, text: `archive ${name} : empreinte SHA-256 conforme` };
+}
+
 async function main() {
+  // A new installation is incomplete until its last step: the marker is removed first.
+  rmSync(marker, { force: true });
   // 2. Dependencies (exact versions of the lockfiles, install scripts disabled).
   if (!args.has('--skip-install')) {
     say('[2/6] Dépendances (racine et paquets du moteur, puis interface) : installation…');
@@ -112,12 +203,18 @@ async function main() {
       );
     }
   }
+  const archive = checkCanvasArchive();
+  log.write(`canvas archive: ${archive.text}\n`);
+  if (!archive.ok) {
+    rmSync(binary, { force: true });
+    return fail('canvas', archive.text, 'l’archive téléchargée ne correspond pas à la version officielle : supprimez le dossier _prebuilds du cache npm (npm config get cache) puis relancez.');
+  }
   const load = spawnSync(process.execPath, ['-e', "require('canvas'); console.log('ok')"], { cwd: root, encoding: 'utf8' });
   log.write(`canvas load: ${load.stdout}${load.stderr}\n`);
   if (load.status !== 0 || !load.stdout.includes('ok')) {
     return fail('canvas', 'le module canvas ne se charge pas', 'une bibliothèque système manque peut-être (Visual C++ Redistributable) ; le détail est dans le journal.');
   }
-  say('      OK (binaire chargé)');
+  say(`      OK (binaire chargé ; ${archive.text})`);
 
   // 4. Build.
   say('[4/6] Compilation (moteur, serveur, interface)…');
@@ -126,10 +223,16 @@ async function main() {
 
   // 5. Folders and configuration.
   say('[5/6] Dossiers et configuration…');
-  mkdirSync(path.join(root, 'data'), { recursive: true });
-  mkdirSync(path.join(root, 'sauvegardes'), { recursive: true });
+  for (const dir of ['data', 'sauvegardes']) {
+    const problem = makeDir(path.join(root, dir));
+    if (problem !== null) return fail('dossiers', `impossible de créer ${problem}`, 'placez GeoPlacer dans un dossier où vous avez le droit d’écrire (par exemple Documents), puis relancez.');
+  }
   if (!existsSync(path.join(root, '.env')) && existsSync(path.join(root, '.env.example'))) {
-    copyFileSync(path.join(root, '.env.example'), path.join(root, '.env'));
+    try {
+      copyFileSync(path.join(root, '.env.example'), path.join(root, '.env'));
+    } catch (error) {
+      return fail('configuration', `impossible de créer .env (${error.code ?? String(error)})`, 'vérifiez les droits d’écriture sur le dossier de GeoPlacer, puis relancez.');
+    }
     say('      .env créé depuis .env.example (aucun secret)');
   } else say('      .env : déjà présent, conservé');
   say('      data\\ et sauvegardes\\ : OK');
@@ -139,6 +242,8 @@ async function main() {
   const result = await startTest();
   if (result !== 'ok') return fail('démarrage', result, 'le détail est dans le journal ; vérifiez qu’aucun autre programme ne bloque le serveur.');
   say('      OK : le serveur a démarré, l’API a répondu, l’arrêt contrôlé a réussi');
+  // Complete: the marker records what was installed and compiled (see --check).
+  writeFileSync(marker, `${JSON.stringify({ format: 1, locks: lockHashes(), commit: sourceCommit(), node: process.version, at: new Date().toISOString() }, null, 2)}\n`);
   say('');
   say('GeoPlacer est installé.');
   say('  Lancer :          npm start        puis ouvrir http://127.0.0.1:3000');

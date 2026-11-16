@@ -9,48 +9,16 @@ if %errorlevel% equ 0 (
     goto :git_pull
 )
 
-echo Git not found!
+echo Git est introuvable : la mise a jour a besoin de Git.
 echo.
-
-echo Checking if winget is available...
-winget --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo Winget not found!
-    echo.
-    echo Winget is required to install Git automatically.
-    echo Please install Git manually at: https://git-scm.com/
-    echo Or upgrade to Windows 10 version 1809+ or Windows 11.
-    echo.
-    pause
-    exit /b 1
-)
-
-echo Winget found!
-echo.
-
-echo Installing Git with winget...
-echo This can take a few minutes.
-echo.
-winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements
-
-if %errorlevel% neq 0 (
-    echo.
-    echo Installation failed!
-    echo Try to install manually at: https://git-scm.com/
-    echo.
-    pause
-    exit /b 1
-)
-
-echo.
-echo Git successfully installed!
-echo.
-echo Git has been installed and PATH updated by winget.
-echo To use Git, you must restart your command prompt (terminal) for PATH changes to take effect.
-echo After restarting, please run this script again.
+rem GeoPlacer 1C.0: no automatic system installation (the inherited script ran winget here).
+echo GeoPlacer n'installe rien sur Windows de lui-meme. Pour installer Git :
+echo   - telechargez l'installateur officiel sur https://git-scm.com/download/win
+echo   - ou, si vous le souhaitez, dans un terminal : winget install --id Git.Git -e --source winget
+echo Rouvrez ensuite le terminal et relancez update.bat.
 echo.
 pause
-exit /b 0
+exit /b 1
 
 :git_pull
 

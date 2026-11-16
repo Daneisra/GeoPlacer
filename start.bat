@@ -23,13 +23,15 @@ if exist "templates.json" if not exist "data\templates.json" (
   move /Y "templates.json" "data\templates.json" >nul
 )
 
-rem First run (or an incomplete installation): the one installation path, scripts\setup-windows.mjs.
-set NEED_SETUP=0
-if not exist "node_modules\" set NEED_SETUP=1
-if not exist "frontend\node_modules\" set NEED_SETUP=1
-if not exist "dist\server.js" set NEED_SETUP=1
-if not exist "frontend\dist\index.html" set NEED_SETUP=1
-if "%NEED_SETUP%"=="1" (
+rem The one installation path, scripts\setup-windows.mjs. --check (Phase 1C.0): 0 up to date,
+rem 1 installation needed (first run, interrupted, dependencies changed), 2 new build needed
+rem (the sources changed, e.g. after git pull).
+call node scripts\setup-windows.mjs --check
+if errorlevel 2 (
+  echo [setup] Sources modifiees : nouvelle compilation...
+  call node scripts\setup-windows.mjs --skip-install
+  if errorlevel 1 goto :setup_failed
+) else if errorlevel 1 (
   echo [setup] Installation de GeoPlacer...
   call node scripts\setup-windows.mjs
   if errorlevel 1 goto :setup_failed
