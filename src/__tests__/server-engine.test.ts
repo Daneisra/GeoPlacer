@@ -176,7 +176,7 @@ describe('server with the engine (real processes)', () => {
     const a = await startServer(dir, { LEGACY_KEEPALIVE: '1' });
     servers.push(a);
     assertRunning(a);
-    expect(a.output()).toContain('local simulation only');
+    expect(a.output()).toContain('real placement and purchases disabled.');
     // Release candidate: the version shown and logged is package.json's.
     const { version } = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as { version: string };
     expect(a.output()).toContain(`GeoPlacer ${version} (local simulation)`);

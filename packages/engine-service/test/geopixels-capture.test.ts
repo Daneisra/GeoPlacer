@@ -68,7 +68,7 @@ describe('Browser contract fixture: current GeoPixelsFront cache, no service cal
         (p) => readFile(new URL(p, import.meta.url), 'utf8')
       )
     );
-    expect(bundle!.endsWith(capture! + '\n' + client!)).toBe(true);
+    expect(bundle!.replace(/\r\n/g, '\n').endsWith(capture!.replace(/\r\n/g, '\n') + '\n' + client!.replace(/\r\n/g, '\n'))).toBe(true);
     expect(capture! + client!).not.toMatch(/tokenUser|document\.cookie|PlacePixels|MakePurchase|window\.fetch|localStorage/);
     new vm.Script(bundle!);
   });

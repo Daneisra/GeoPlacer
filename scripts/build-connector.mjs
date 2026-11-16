@@ -1,6 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
-const capture = await readFile(new URL('../browser/geopixels-capture.js', import.meta.url), 'utf8');
-const client = await readFile(new URL('../browser/geopixels-client.js', import.meta.url), 'utf8');
+const capture = (await readFile(new URL('../browser/geopixels-capture.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+const client = (await readFile(new URL('../browser/geopixels-client.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 const header = `// ==UserScript==
 // @name         GeoPlacer experimental observer
 // @namespace    geoplacer.local

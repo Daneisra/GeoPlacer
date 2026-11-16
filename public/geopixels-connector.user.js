@@ -52,7 +52,7 @@ globalThis.GeoPlacerCapture = (() => {
     return pixels;
   }
   function resources(src, colors) {
-    if (!src) return null;
+    if (!src || Object.keys(src).length === 0) return null;
     const safe = (n) => (Number.isSafeInteger(n) && n >= 0 && n <= 1_000_000_000 ? n : null);
     const parsed = Array.isArray(colors)
       ? [...new Set(colors.filter((c) => /^#[0-9a-f]{6}$/i.test(c)).map((c) => parseInt(c.slice(1), 16)))]

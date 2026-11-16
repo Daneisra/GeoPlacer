@@ -96,7 +96,7 @@ export function ConnectorDashboard() {
         </p>
         <p>
           Connexion : <strong id="connectorConnection">{view?.connected ? 'Connecté' : 'Déconnecté'}</strong> · Session :{' '}
-          {view?.session === 'present' ? 'Présente (identité non transmise)' : 'Indisponible'}
+          {view?.session === 'present' ? 'Contexte reçu (session non authentifiée par GeoPlacer)' : 'Indisponible'}
         </p>
       </div>
       {error && (
