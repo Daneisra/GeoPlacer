@@ -19,8 +19,13 @@
 ## Installer (Windows 10, 64 bits ; Windows 11 non vérifié)
 
 1. Installez [Node.js 22 LTS](https://nodejs.org).
-2. Téléchargez le code de cette version (archive ZIP ci-dessous, ou
-   `git clone`), puis, dans son dossier :
+2. Téléchargez l'archive `geoplacer-6.0.0-rc.1-windows-<commit>.zip`
+   ci-dessous et vérifiez son empreinte avec celle du fichier `.sha256`
+   publié à côté :
+   ```powershell
+   Get-FileHash .\geoplacer-6.0.0-rc.1-windows-<commit>.zip -Algorithm SHA256
+   ```
+   Extrayez-la (ou utilisez `git clone`), puis, dans son dossier :
    ```powershell
    npm run setup:windows
    ```

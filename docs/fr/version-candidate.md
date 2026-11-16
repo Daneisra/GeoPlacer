@@ -4,6 +4,18 @@ Ce document prépare la **première version de démonstration** de GeoPlacer.
 Rien n'est publié : ni tag Git, ni fusion dans `main`, ni release GitHub
 sans validation explicite.
 
+**État (branche locale `release/6.0.0-rc.1`, créée depuis `c57e478`)** :
+- version **validée** : `6.0.0-rc.1` ;
+- `package.json` et `package-lock.json` passés à `6.0.0-rc.1` (commit
+  `0bd64f6`, `npm version --no-git-tag-version`) ; la bannière, le journal et
+  la documentation Swagger du serveur lisent la version dans `package.json` ;
+  `docs/CHANGELOG.md` a son entrée (« non publiée ») ;
+- inchangés volontairement : l'extension héritée `LOAD_UNPACKED` (désactivée)
+  et la documentation anglaise d'origine (`docs/api.md`, `architecture.md`,
+  `development.md`, `CONTRIBUTING.md`), qui décrivent wplacer 5.6.2 ; les
+  paquets internes privés restent à `0.0.0` ;
+- artefact de distribution reproductible : § 8 bis.
+
 ## 1. Proposition de version : `6.0.0-rc.1`
 
 Versions déclarées dans le dépôt (examinées) :
@@ -27,7 +39,7 @@ Raisonnement :
 - c'est une **version candidate** destinée à des testeurs : suffixe de
   pré-version `-rc.1`.
 
-Proposition : **`6.0.0-rc.1`** (tag `v6.0.0-rc.1`), intitulée « GeoPlacer V1
+Proposition **validée** : **`6.0.0-rc.1`** (tag `v6.0.0-rc.1`), intitulée « GeoPlacer V1
 — démonstration (simulation locale) ». « V1 » désigne le périmètre fonctionnel
 de GeoPlacer ; le numéro de version continue celui du paquet. Les paquets
 internes `@geoplacer/*` restent à `0.0.0` (privés, jamais publiés).
@@ -37,8 +49,7 @@ mais incohérente avec la version `5.6.2` déjà déclarée par le même paquet.
 Elle supposerait de renommer le paquet (`wplacer` → `geoplacer`), un
 changement à décider à part.
 
-À la publication seulement (après validation) : `package.json` passe à
-`6.0.0-rc.1` et `docs/CHANGELOG.md` reçoit l'entrée correspondante (§ 9).
+Fait sur la branche `release/6.0.0-rc.1` (non publiée) : voir l'état en tête.
 
 ## 2. Fonctionnalités réellement opérationnelles
 
@@ -125,43 +136,57 @@ exécutées.
 
 ## 8. Checklist de publication
 
-1. État Git propre ; commit final identifié.
-2. `git fetch` ; `origin` pointe vers le fork ; `upstream` sans push.
-3. Recherche de secrets et de données personnelles dans les commits publiés.
-4. Licence, attributions, `MODIFICATIONS.md` à jour.
-5. `npm run check:logged` et `npm run build` verts.
-6. Installation sur clone neuf (cache npm vide) ; `start.bat`, `npm start`,
-   `npm run demo`.
-7. Recettes Edge et Firefox (Playwright) ; recette d'arrêt Windows ; Ctrl+C
-   au clavier par l'utilisateur.
-8. Version `6.0.0-rc.1` dans `package.json` et entrée du `CHANGELOG`.
-9. Push de la branche, revue, fusion dans `main` (validation).
-10. Tag annoté `v6.0.0-rc.1` sur le commit fusionné, puis release GitHub
-    marquée « pré-version » (validation).
+Fait (branche `release/6.0.0-rc.1`, locale) :
+- [x] Version `6.0.0-rc.1` dans `package.json`, `package-lock.json`,
+      `CHANGELOG` ; le serveur affiche cette version.
+- [x] Archive de distribution reproductible, empreinte, manifeste, installation
+      vérifiée depuis l'archive (§ 8 bis).
+- [x] Notes de release en français (§ 9).
+- [x] Contrôles complets et clone neuf (voir le rapport de la phase).
 
-## 8 bis. Artefact local préparé (non publié)
+Reste à faire, **avec validation** :
+1. Ctrl+C au clavier par l'utilisateur ([recette-navigateur.md](recette-navigateur.md)) :
+   condition de validation avant la publication officielle.
+2. Décider la branche de publication (§ 11) ; recommandé : avancer `main`.
+3. Pousser `release/6.0.0-rc.1` (push à blanc, puis réel ; SHA vérifié).
+4. Refaire l'archive **au commit publié** avec le script (§ 8 bis) et
+   comparer son empreinte à celle annoncée.
+5. Fusion (avance rapide) dans `main`, tag annoté `v6.0.0-rc.1` sur ce même
+   commit, release GitHub marquée **pré-version**, avec l'archive, son
+   `.sha256` et les notes.
+6. Après publication : télécharger l'archive depuis GitHub, vérifier son
+   empreinte et l'installer sur une machine propre.
 
-Archive des sources, produite par `git archive` (aucun fichier local ajouté) :
-
-| Élément | Valeur |
-|---|---|
-| Fichier | `geoplacer-6.0.0-rc.1-candidat-c3fdd7f.zip` (dossier de travail local, non versionné) |
-| Provenance | commit `c3fdd7f` de `feat/phase1c0-release-candidate` |
-| SHA-256 | `17bf12ce50ecc7160aece5827b4ef0e0f67b084f4cd2ed80cebcef75f69ec9a7` |
-| Contenu vérifié | 503 fichiers ; aucun `node_modules`, `dist`, `data`, `sauvegardes`, `test-logs` ni `.env` ; `LICENSE` et `MODIFICATIONS.md` présents ; `start.bat`, `setup.bat` et `update.bat` en CRLF (grâce à `.gitattributes`) |
-| Installation vérifiée | extraite dans un dossier sans Git, `start.bat` : installation complète, empreinte de `canvas` conforme, `--check` à 0 ; `npm start` dans Edge : temps réel connecté, API 200, route héritée refusée (410), aucune erreur console, aucune requête externe |
-
-Commande utilisée (depuis le dépôt) :
+## 8 bis. Artefacts : génération reproductible
 
 ```powershell
-git archive --format=zip --prefix=GeoPlacer-c3fdd7f/ -o geoplacer-6.0.0-rc.1-candidat-c3fdd7f.zip c3fdd7f
-Get-FileHash geoplacer-6.0.0-rc.1-candidat-c3fdd7f.zip -Algorithm SHA256
+node scripts/build-release-archive.mjs <commit> --verify-install
 ```
 
-Le fichier est dans un dossier temporaire local : le refaire avec cette
-commande au besoin. Une archive pour la publication serait refaite au
-commit final (après le changement de version), de la même façon ; GitHub en
-produit aussi une à partir du tag.
+- `git archive` du commit indiqué : seulement les fichiers suivis, fins de
+  ligne de `.gitattributes` (`.bat` en CRLF), dates du commit ; construite
+  deux fois pour vérifier que le même commit redonne les mêmes octets ;
+- contrôle du contenu : fichiers requis (`LICENSE`, `README.md`,
+  `MODIFICATIONS.md`, lockfiles, `setup.bat`, `start.bat`, script
+  d'installation), chemins interdits absents (`node_modules`, `dist`,
+  `data`, `sauvegardes`, `test-logs`, `.env`), `.bat` en CRLF ;
+- écrit dans `release\` (ignoré par Git) :
+  `geoplacer-<version>-windows-<commit>.zip`, son `.sha256` et un manifeste
+  de provenance (commit complet, date, versions de Git et de Node.js,
+  taille, nombre de fichiers, contrôles, résultat de l'installation) ;
+- `--verify-install` : extraction dans un dossier temporaire neuf (sans Git),
+  `start.bat` (installation complète, démarrage de contrôle compris), puis
+  `--check` attendu à 0.
+
+C'est une **archive des sources** : l'installation télécharge les dépendances
+exactes des lockfiles et le binaire officiel de `canvas`, dont l'empreinte est
+vérifiée. Une archive avec `node_modules` serait propre à une plateforme,
+plus lourde (plusieurs centaines de Mio) et contiendrait des binaires tiers
+non vérifiables par l'utilisateur.
+
+L'archive de la Phase 1C.0 (dossier temporaire, commit `c3fdd7f`) n'est
+**pas** une archive officielle ; l'archive de publication sera produite par
+ce script au commit publié.
 
 ## 9. Notes de release GitHub proposées
 
@@ -170,30 +195,64 @@ Voir [notes-release-6.0.0-rc.1.md](notes-release-6.0.0-rc.1.md).
 ## 10. Commandes de publication (après validation seulement)
 
 ```powershell
-# 1. Version
-npm version 6.0.0-rc.1 --no-git-tag-version
-#    (puis ajouter l'entrée 6.0.0-rc.1 en tête de docs/CHANGELOG.md)
-git add package.json package-lock.json docs/CHANGELOG.md
-git commit -m "chore(version): 6.0.0-rc.1"
-
-# 2. Contrôles
+# 0. Sur la branche de la version candidate, état propre
+git switch release/6.0.0-rc.1
+git status
 npm run check:logged
 npm run build
 
-# 3. Branche (push à blanc, puis réel)
-git push --dry-run -u origin feat/phase1c0-release-candidate
-git push -u origin feat/phase1c0-release-candidate
+# 1. Publier la branche (à blanc, puis réel) et vérifier le SHA distant
+git push --dry-run -u origin release/6.0.0-rc.1
+git push -u origin release/6.0.0-rc.1
+git ls-remote --heads origin release/6.0.0-rc.1
 
-# 4. Fusion dans main par une pull request (revue), puis, sur main à jour :
+# 2. main de GeoPlacer : avance rapide (aucune réécriture ; main = 46877e1 est un ancêtre)
 git switch main
-git pull --ff-only origin main
+git merge --ff-only release/6.0.0-rc.1
+git push --dry-run origin main
+git push origin main
+#    (main suit aujourd'hui upstream/main en local : git branch -u origin/main main)
+
+# 3. Archive au commit publié, et son empreinte
+node scripts/build-release-archive.mjs main --verify-install
+
+# 4. Tag annoté sur ce commit, puis release pré-version avec l'archive
 git tag -a v6.0.0-rc.1 -m "GeoPlacer 6.0.0-rc.1 : V1 de démonstration (simulation locale)"
 git push origin v6.0.0-rc.1
-
-# 5. Release GitHub (pré-version), avec les notes préparées
-gh release create v6.0.0-rc.1 --prerelease --title "GeoPlacer 6.0.0-rc.1 — V1 de démonstration" --notes-file docs/fr/notes-release-6.0.0-rc.1.md
+gh release create v6.0.0-rc.1 --prerelease --title "GeoPlacer 6.0.0-rc.1 — V1 de démonstration" --notes-file docs/fr/notes-release-6.0.0-rc.1.md release/geoplacer-6.0.0-rc.1-windows-<commit>.zip release/geoplacer-6.0.0-rc.1-windows-<commit>.zip.sha256
 ```
 
-Remarque : la branche `main` du fork suit aujourd'hui `upstream/main`
-(configuration locale). Avant la fusion, décider si `main` devient la
-branche de GeoPlacer.
+## 11. Publier depuis une branche autre que `main` : conséquences
+
+Situation : sur GitHub, la branche par défaut du fork est `main`, qui pointe
+sur `46877e1` (le code de wplacer, avant GeoPlacer) ; toute l'histoire de
+GeoPlacer (148 commits) est sur des branches `feat/*`.
+
+Si la release `v6.0.0-rc.1` est créée sur un commit qui n'est pas dans
+`main` :
+- **la page du dépôt** (branche par défaut) continue d'afficher le README et
+  le code de wplacer : un visiteur ou un testeur qui clone sans préciser de
+  branche obtient l'ancien wplacer, avec ses instructions de comptes,
+  d'extension et de proxys ;
+- **la release elle-même fonctionne** : un tag désigne un commit, l'archive
+  et le code source joints sont ceux de ce commit ; le tag le garde
+  accessible même si la branche est supprimée plus tard ;
+- **les liens relatifs** de la page de release et les comparaisons
+  (« N commits to main since this release ») se lisent par rapport à `main`
+  et sont trompeurs ;
+- **les outils GitHub** (alertes de sécurité des dépendances, recherche de
+  code, graphe) portent sur la branche par défaut, donc sur l'ancien code ;
+- **les instructions du README** (`git clone`, puis `git checkout` d'une
+  branche) restent nécessaires et fragiles.
+
+Options, de la plus recommandée à la moins :
+1. **Avancer `main` jusqu'à la version candidate** (`git merge --ff-only`) :
+   possible sans réécriture d'historique, puisque `46877e1` est un ancêtre ;
+   `main` devient la branche de GeoPlacer ; la release et le README sont
+   cohérents. À noter : la branche locale `main` suit `upstream/main`, à
+   rediriger vers `origin/main`.
+2. **Changer la branche par défaut** sur GitHub vers une branche de
+   GeoPlacer (réglage du dépôt, sans toucher à `main`) : moins durable.
+3. **Publier depuis la branche** sans rien changer : possible, avec tous les
+   inconvénients ci-dessus.
+
