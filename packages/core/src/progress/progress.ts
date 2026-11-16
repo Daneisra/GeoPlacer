@@ -187,7 +187,7 @@ export function assembleProgress(
   const completion: CompletionState = total === 0 ? 'no-eligible-pixels' : incorrect > 0 ? 'incomplete' : unknown > 0 ? 'undetermined' : 'complete';
   const basis: ProgressBasis = {
     source: snapshot.source,
-    kind: snapshot.source === 'simulated' ? 'simulation' : 'imported-observation',
+    kind: snapshot.source === 'simulated' || snapshot.source === 'geopixels-fixture' ? 'simulation' : snapshot.source === 'geopixels-observed' ? 'browser-observation' : 'imported-observation',
     observedAt: snapshot.observedAt,
     freshness: snapshotFreshness(snapshot, now, options),
   };

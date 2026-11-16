@@ -19,3 +19,5 @@ export * from './resources/index.js';
 export * from './upgrades/index.js';
 export * from './work/index.js';
 export * from './scheduler/index.js';
+
+export { evaluateUpgradePolicy, type UpgradePolicy, type PolicyProposal } from './upgrades/policy.js';

@@ -17,7 +17,7 @@ import type { ResourceObservation } from './resources.js';
  * Where canvas data comes from. Progress computed from 'imported-snapshot'
  * is a measurement at observedAt; from 'simulated' it is a simulation.
  */
-export type CanvasSource = 'simulated' | 'imported-snapshot';
+export type CanvasSource = 'simulated' | 'imported-snapshot' | 'geopixels-observed' | 'geopixels-fixture';
 
 export interface CanvasSnapshot {
   readonly rect: CanvasRect;

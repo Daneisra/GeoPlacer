@@ -107,6 +107,8 @@ export function decodePointer(bytes: Uint8Array): number | null {
 // ───────────────────────── Journal ─────────────────────────
 
 export interface FileAttemptJournalOptions {
+  /** Separate durable attempt domain; never chosen from an HTTP path. */
+  readonly namespace?: 'geopixels';
   readonly fs?: JournalFs;
   readonly hasher?: Hasher;
   /** Generations kept, the current one included (default 2: current + previous). */
@@ -151,7 +153,7 @@ export class FileAttemptJournal implements AttemptJournal {
     this.retain = options.retainGenerations ?? 2;
     if (!Number.isSafeInteger(this.retain) || this.retain < 1) throw new Error('retainGenerations must be at least 1');
     this.chunkBytes = options.readChunkBytes ?? 4 * 1024 * 1024;
-    this.dir = path.join(lock.root, JOURNAL_DIR);
+    this.dir = options.namespace === 'geopixels' ? path.join(lock.root, 'providers', 'geopixels', JOURNAL_DIR) : path.join(lock.root, JOURNAL_DIR);
   }
 
   /** Active log file (generation in use). */
@@ -448,6 +450,7 @@ export class FileAttemptJournal implements AttemptJournal {
 // ───────────────────────── History ─────────────────────────
 
 export interface FileHistoryStoreOptions {
+  readonly namespace?: 'geopixels';
   readonly fs?: JournalFs;
   /** A new segment is started beyond this size (default 8 MiB). */
   readonly maxSegmentBytes?: number;
@@ -485,7 +488,7 @@ export class FileHistoryStore implements HistoryStore {
     this.maxBytes = options.maxSegmentBytes ?? 8 * 1024 * 1024;
     this.maxSegments = options.maxSegments ?? 8;
     if (!(this.maxBytes > 0) || !Number.isSafeInteger(this.maxSegments) || this.maxSegments < 1) throw new Error('invalid history rotation settings');
-    this.dir = path.join(lock.root, JOURNAL_DIR);
+    this.dir = options.namespace === 'geopixels' ? path.join(lock.root, 'providers', 'geopixels', JOURNAL_DIR) : path.join(lock.root, JOURNAL_DIR);
   }
 
   /** Active segment file. */

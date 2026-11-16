@@ -1,7 +1,7 @@
 /**
  * @geoplacer/engine-service (Phase 1B.9): the orchestration service between
- * the engine packages and the server. Local simulation only: the only
- * canvas provider is the simulated one, with a durable world.
+ * the engine packages and the server. Phase 2A adds an opt-in observation provider; the durable simulated
+ * world and existing scheduler remain available. Real service writes are disabled.
  */
 
 export {
@@ -64,3 +64,8 @@ export {
 } from './backup.js';
 export { DEMO_HEIGHT, DEMO_POSITION, DEMO_SETTINGS, DEMO_STRATEGY, DEMO_TEMPLATE_NAME, DEMO_WIDTH, demoPixels, demoRgba } from './demo.js';
 export { GHOST_PROJECT, MAX_GHOST_COLORS, ghostFilename, hexOf, parsePalette, type GhostImportInput, type GhostInfo } from './ghost.js';
+
+export { GeoPixelsProvider, nativePoint, nativeTile } from './geopixels/provider.js';
+export { ConnectorPairing, localOrigin } from './geopixels/pairing.js';
+export { ConnectorError, parseObservation } from './geopixels/protocol.js';
+export type { ConnectorMode, BrowserProject, BrowserObservation } from './geopixels/protocol.js';

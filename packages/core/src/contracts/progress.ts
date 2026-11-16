@@ -20,7 +20,7 @@ import type { Template } from './template.js';
  * image taken at `observedAt`. V1 has no real-time canvas reader: nothing is
  * ever presented as a live reading.
  */
-export type ObservationKind = 'simulation' | 'imported-observation';
+export type ObservationKind = 'simulation' | 'imported-observation' | 'browser-observation';
 
 /** Maximum acceptable age of a snapshot, configured per source (no global default). */
 export interface FreshnessPolicy {

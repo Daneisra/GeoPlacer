@@ -55,7 +55,7 @@ describe('canvas capabilities are separated', () => {
 
 describe('snapshots carry their origin and age', () => {
   it('a snapshot must declare source and observedAt', () => {
-    expectTypeOf<CanvasSnapshot['source']>().toEqualTypeOf<'simulated' | 'imported-snapshot'>();
+    expectTypeOf<CanvasSnapshot['source']>().toEqualTypeOf<'simulated' | 'imported-snapshot' | 'geopixels-observed' | 'geopixels-fixture'>();
     expectTypeOf<CanvasSnapshot['observedAt']>().toEqualTypeOf<number>();
     // @ts-expect-error source and observedAt are mandatory
     const incomplete: CanvasSnapshot = { rect: { minX: 0, minY: 0, width: 1, height: 1 }, get: () => -1 };
@@ -63,7 +63,7 @@ describe('snapshots carry their origin and age', () => {
   });
 
   it('progress keeps the basis it was measured on', () => {
-    expectTypeOf<ProgressSnapshot['basis']['source']>().toEqualTypeOf<'simulated' | 'imported-snapshot'>();
+    expectTypeOf<ProgressSnapshot['basis']['source']>().toEqualTypeOf<'simulated' | 'imported-snapshot' | 'geopixels-observed' | 'geopixels-fixture'>();
   });
 });
 

@@ -35,7 +35,7 @@ export function createArraySnapshot(input: ArraySnapshotInput): CanvasSnapshot {
   const { rect, coordinateSystem, source, observedAt, pixels } = input;
   assertRect(rect);
   assertCoordinateSystem(coordinateSystem);
-  if (source !== 'simulated' && source !== 'imported-snapshot') throw new SnapshotError(`unknown snapshot source ${String(source)}`);
+  if (source !== 'simulated' && source !== 'imported-snapshot' && source !== 'geopixels-observed' && source !== 'geopixels-fixture') throw new SnapshotError(`unknown snapshot source ${String(source)}`);
   if (!Number.isSafeInteger(observedAt) || observedAt < 0) throw new SnapshotError('observedAt must be a non-negative integer timestamp');
   if (!(pixels instanceof Int32Array) || pixels.length !== rect.width * rect.height) {
     throw new SnapshotError('pixels must be an Int32Array of rect.width * rect.height entries');
