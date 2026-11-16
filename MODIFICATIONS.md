@@ -27,6 +27,27 @@ licence. L'historique Git complet du projet d'origine est conservé.
 - `start.bat` : installation des deux projets par le chemin vérifié.
 - Documentation française (`docs/fr/`, `docs/decisions/`).
 
+## 2026-11-16 — Phase 1C.0 : préparation d'une version candidate
+
+- Réactivité du serveur : ordonnanceur coopératif (`packages/core/src/scheduler`),
+  calculs découpés en tranches (`packages/core/src/progress/slices.ts` ; progression,
+  planificateur), progression incrémentale atomique ; service coopératif par défaut.
+- Bancs de mesure : `bench/blocking.bench.ts` (attribution des blocages par profil CPU),
+  `bench/worker-transfer.bench.ts`, `responsiveness.bench.ts` enrichi (client HTTP dans un
+  thread séparé, blocages, charge de la machine).
+- Installation : `scripts/setup-windows.mjs` (Node.js dans un chemin avec espaces, marqueur
+  d'installation complète et `--check`, empreinte de `canvas`, droits des dossiers) ;
+  `start.bat` s'en sert ; `update.bat` n'installe plus Git par winget de lui-même.
+- Sauvegarde : démonstration et projet jamais mélangés par accident (`dataDirName`,
+  `BACKUP_KIND_MISMATCH`, `--allow-kind-change`) ; scénarios réalistes testés.
+- Service : acteur extérieur simulé en un passage (`simulateExternalEdit`).
+- Serveur : bannière de démarrage « GeoPlacer » (le texte d'origine nommait wplacer).
+- Tests : sécurité de la version candidate (`release-safety.test.ts`), ordonnanceur
+  coopératif, tranches, sauvegardes ; test de crash rendu indépendant d'une course entre E/S.
+- Documentation : `version-candidate.md`, `notes-release-6.0.0-rc.1.md` (nouveaux) ;
+  README, installation, sauvegarde, recette (Ctrl+C au clavier à faire), progression,
+  qualité, problèmes connus, commandes.
+
 ## 2026-11-16 — Phase 1B.10 : stabilisation, sécurisation, démonstration
 
 - Isolation du code hérité de Wplacer (conservé pour la traçabilité,

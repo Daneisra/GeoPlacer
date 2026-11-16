@@ -1,5 +1,54 @@
 # Recette navigateur (Windows)
 
+## Ctrl+C au clavier : validation utilisateur requise (Phase 1C.0)
+
+L'arrêt a été vérifié en envoyant l'événement Ctrl+C de Windows à la
+console (voir plus bas). Une **frappe physique** de Ctrl+C n'a jamais été
+faite par l'automate : ce test court (5 minutes) reste à faire par vous.
+Ne pas le considérer comme fait tant qu'il ne l'a pas été.
+
+1. **Lancer**, dans PowerShell, depuis le dossier de GeoPlacer installé :
+   ```powershell
+   node --env-file-if-exists=.env dist/server.js --demo
+   ```
+   (`node` directement : le code de sortie est alors celui du serveur ; avec
+   `start.bat`, Windows ajoute sa propre question, voir l'étape 5.)
+   Attendre la ligne `Server listening on http://127.0.0.1:3000` (le port
+   peut différer : utiliser celui affiché).
+2. **Ouvrir** cette adresse, cliquer « Préparer la démonstration »
+   (si la carte le propose), puis « Démarrer ». Attendre que la progression
+   dépasse 10 %. Noter la valeur.
+3. **Appuyer une fois sur Ctrl+C** dans la fenêtre PowerShell, pendant que
+   la progression avance.
+4. **Messages attendus**, dans cet ordre :
+   - `Received SIGINT. Starting graceful shutdown...`
+   - `Engine stopped and data directory released`
+   - `Graceful shutdown completed`
+
+   puis l'invite PowerShell revient. **Code de sortie attendu : 0** :
+   ```powershell
+   $LASTEXITCODE        # 0
+   ```
+5. Variante `start.bat --demo` (fenêtre lancée par double-clic ou depuis
+   PowerShell) : après les mêmes messages, Windows demande
+   `Terminer le programme de commandes (O/N) ?`. Le serveur est déjà
+   arrêté : **répondre O**.
+6. **Port libéré** (remplacer 3000 par le port affiché) :
+   ```powershell
+   Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue
+   ```
+   ne doit rien afficher.
+7. **Reprise** : relancer la commande de l'étape 1. La console affiche
+   `[engine] simulated world restored (generation …, N change(s) replayed)`
+   avec N supérieur à 0. Dans la page : même modèle, progression au moins
+   égale à la valeur notée (et non 0). « Démarrer » : la démonstration va
+   jusqu'à 100 %.
+8. **Compte rendu** : copier les lignes de la console des étapes 4 et 7,
+   le code de sortie de l'étape 4 et le résultat de l'étape 6.
+
+Un **second** Ctrl+C pendant l'arrêt force la sortie (code 1) ; la reprise
+de l'étape 7 doit fonctionner aussi dans ce cas (facultatif).
+
 ## Recette de la Phase 1B.10
 
 ### Parcours dans le navigateur

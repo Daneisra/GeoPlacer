@@ -1,4 +1,4 @@
-# Sauvegarde et restauration (Phase 1B.10)
+# Sauvegarde et restauration (Phase 1B.10, complétée en 1C.0)
 
 Ce document concerne les données du **moteur** : `data\engine` (ou
 `GEOPLACER_ENGINE_DIR`), et `data\demo` pour la démonstration. On y trouve
@@ -30,7 +30,8 @@ Si GeoPlacer tourne sur ce dossier, la commande refuse avec une
 explication (`ENGINE_RUNNING`) : le dossier est verrouillé.
 
 Chaque sauvegarde est un dossier daté
-`sauvegardes\geoplacer-sauvegarde-<date>\` :
+`sauvegardes\geoplacer-sauvegarde-<date>\` (pour la démonstration :
+`geoplacer-sauvegarde-demo-<date>`) :
 
 | Élément | Contenu |
 |---|---|
@@ -49,6 +50,45 @@ serveur et la ligne de commande utilisent alors le même dossier.
 
 Une sauvegarde ne contient **aucun secret** : la V1 ne manipule ni
 compte, ni session, ni jeton.
+
+### Inventaire
+
+| Fichier ou dossier (dans le dossier du moteur) | Contenu | Sauvegardé |
+|---|---|---|
+| `engine.json` | Réglages de la simulation, modèle sélectionné | oui |
+| `projects\simulation\templates\<id>\manifest.json` | Modèle : nom, révisions, position, stratégie | oui |
+| `projects\simulation\templates\<id>\reservations\` | Numéros de révision réservés (jamais réutilisés) | oui |
+| `projects\simulation\blobs\<empreinte>.png` | Images des modèles | oui |
+| `journal\attempts.log`, checkpoints et générations | Journal des tentatives | oui |
+| `journal\history-*.log` | Historique des tentatives closes | oui |
+| `world\CURRENT`, `world-<n>.ckpt`, `world-<n>.log` | Toile simulée durable et agent simulé | oui |
+| `.geoplacer.lock`, `.geoplacer.lock.owner` | Verrou d'instance | **non** |
+| `*.tmp`, `*.stale-*` | Écritures interrompues, restes de verrous | **non** |
+| `world-reset-<date>\` | Anciens mondes mis de côté après une réinitialisation | **non** |
+
+Hors du dossier du moteur, et donc **jamais** dans ces sauvegardes : les
+fichiers hérités de `data\` (`users.json`, `templates.json`,
+`settings.json`, journaux), l'autre dossier (démonstration ou projet) et
+`.env`.
+
+### Démonstration et projet : jamais mélangés par accident (Phase 1C.0)
+
+La démonstration (`data\demo`) et le projet (`data\engine`) sauvegardent
+dans le même dossier `sauvegardes\`, et `npm run restore` restaure par
+défaut dans `data\engine`. Pour qu'une sauvegarde de la démonstration ne
+remplace jamais le projet par erreur :
+- le manifeste enregistre le nom du dossier sauvegardé
+  (`summary.dataDirName`) ;
+- une sauvegarde de la démonstration s'appelle
+  `geoplacer-sauvegarde-demo-<date>` ;
+- restaurer une sauvegarde de démonstration dans un dossier de projet, ou
+  l'inverse, est **refusé** (`BACKUP_KIND_MISMATCH`), rien n'est modifié.
+  Pour la démonstration : `--data data\demo`. Pour le faire quand même :
+  `--allow-kind-change` (les données précédentes restent conservées à
+  côté, comme toujours).
+
+Les sauvegardes faites avant la Phase 1C.0 (sans ce champ) se restaurent
+comme avant.
 
 ## 2. Vérifier une sauvegarde
 
@@ -95,6 +135,7 @@ possibles :
 | `BACKUP_INCOMPATIBLE` | Sauvegarde d'une version plus récente ou inconnue |
 | `BACKUP_INCONSISTENT` | Empreintes justes mais contenu incohérent (toile simulée endommagée par exemple) |
 | `ENGINE_RUNNING` | GeoPlacer tourne sur le dossier cible |
+| `BACKUP_KIND_MISMATCH` | Sauvegarde de la démonstration vers un projet, ou l'inverse (voir § 1) |
 | `RESTORE_IN_PROGRESS` | Une restauration précédente a été interrompue (voir § 4) |
 | `NOT_FOUND` | Dossier de sauvegarde introuvable |
 
@@ -125,7 +166,24 @@ manque jamais de données, le moteur refuse d'ouvrir le dossier tant que la
 reprise n'a pas eu lieu, et la reprise termine ou annule proprement
 (`packages/engine-service/test/backup.test.ts`).
 
-## 5. Revenir en arrière après une restauration
+## 5. Scénarios vérifiés
+
+Tests automatisés (`packages/engine-service/test/backup.test.ts` et
+`backup-scenarios.test.ts`) :
+
+| Scénario | Résultat attendu et vérifié |
+|---|---|
+| Démonstration interrompue en pleine course, sauvegardée, restaurée dans un **nouveau** dossier | La simulation reprend et se termine ; les pixels déjà justes ne sont pas repeints |
+| Restauration dans un autre dossier, redémarrage | Même simulation, reprise sans peindre deux fois |
+| Plusieurs modèles et révisions, sélection | Modèles, révisions, positions, images et sélection identiques |
+| Sauvegarde corrompue, incomplète, modifiée, incompatible ou incohérente | Refusée, données actuelles intactes (empreinte de l'arborescence identique) |
+| Restauration interrompue (processus tué à chaque étape) | Jamais sans données ; le moteur refuse de démarrer ; `--resume` termine ou annule |
+| Même sauvegarde restaurée deux fois de suite | Même résultat ; chaque état précédent conservé à côté |
+| Sauvegarde d'une version plus récente (schéma incompatible) | Refusée (`BACKUP_INCOMPATIBLE`) |
+| Démonstration vers projet, ou l'inverse | Refusé, rien modifié ; possible avec `--allow-kind-change` ; anciennes sauvegardes acceptées |
+| Pendant la simulation | Sauvegarde et restauration refusées |
+
+## 6. Revenir en arrière après une restauration
 
 Les données d'avant la restauration sont dans
 `<dossier>.avant-restauration-<date>`. Pour les retrouver, GeoPlacer
@@ -136,7 +194,7 @@ arrêté : renommer le dossier actuel, puis renommer ce dossier en
 Ces dossiers ne sont jamais supprimés automatiquement : les effacer à la
 main quand ils ne servent plus.
 
-## 6. Limites
+## 7. Limites
 
 - Pas de sauvegarde automatique ni planifiée.
 - Pas de restauration depuis l'interface : la restauration se fait

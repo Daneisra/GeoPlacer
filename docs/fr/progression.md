@@ -357,3 +357,118 @@ reconstructions, désaccord provoqué détecté et corrigé
 (`packages/core/test/progress-incremental.test.ts`) ; ordonnanceur avec
 modifications extérieures : mêmes compteurs finaux dans les deux modes
 (`packages/simulator/test/scheduler.test.ts`).
+
+## 7. Réactivité : ordonnanceur coopératif (Phase 1C.0)
+
+### Diagnostic
+
+Mesures de la Phase 1B.10 au calme : à 4096², attente maximale de la boucle
+d'événements de 1,3 s. Le banc `bench/blocking.bench.ts` horodate chaque
+blocage de la boucle (battement de 2 ms) et l'attribue aux fonctions en
+cours d'exécution grâce au profileur CPU de V8, lancé dans le même processus.
+Il enregistre aussi les passages du ramasse-miettes et la mémoire. Constats
+à 4096² :
+
+- **un cycle entier était un seul bloc synchrone** : 97,7 % du temps d'un
+  cycle bloquait la boucle. Les `await` du cycle se résolvent presque tous
+  sans vraie attente d'E/S, et ne rendent donc pas la main ;
+- **le planificateur** prenait 64 % du CPU : il reclasse tout le modèle à
+  chaque cycle (`scanEligibleRows`) pour garder les meilleures clés ;
+- **la progression** en prenait environ 29 % : mise à jour incrémentale
+  (une copie de 64 Mio par cycle), vérification complète tous les
+  10 cycles, reconstruction au démarrage (2,6 s, dont 1,1 s pour une
+  `Map` consultée à chaque pixel) ;
+- lecture de la toile (copie) : environ 40 ms par cycle ; ETA,
+  événements, journal et toile durable : moins de 2 % ;
+- ramasse-miettes : moins de 1 %, pauses inférieures à 5 ms.
+
+Le banc de réactivité mesurait aussi mal la latence HTTP : son client
+tournait dans la même boucle que le serveur et n'envoyait ses requêtes
+qu'entre deux blocages. Il tourne désormais dans un thread séparé, à
+intervalles fixes, comme un navigateur : la latence réelle de l'ancien code
+était d'environ 230 ms en médiane à 4096², contre 3 ms annoncées.
+
+### Options comparées
+
+| Option | Blocage max à 4096² | Débit | Mémoire | Garanties | Complexité | Décision |
+|---|---|---|---|---|---|---|
+| 1. Reconstruction progressive en blocs | inclus dans 3 et 4 | — | — | — | — | intégrée (la reconstruction est découpée comme le reste) |
+| 2. Worker thread | ~22 ms par envoi d'instantané (copie de 64 Mio), ~0,5 ms en mémoire partagée (`bench/worker-transfer.bench.ts`) | inchangé (le cycle reste séquentiel) | +64 Mio par copie | à reconstruire (instantané, état incrémental et planificateur dans le worker, plantage du worker) | élevée : contrats du cœur asynchrones, chargement sous `dist` et `tsx`, mémoire partagée avec le simulateur | **écartée** pour cette version : aucun gain sur le découpage, coût structurel élevé |
+| 3. Cache incrémental, vérifications partielles | le cache seul (sans découpage) : 969 ms (1 339 ms avant) | inchangé | +15 Mio | inchangées | faible | **retenu en partie** : correspondance pixel → couleur conservée, deux tampons alternés ; vérification toujours complète, mais découpée |
+| 4. Vérifications complètes réparties sur plusieurs cycles | la reconstruction resterait un bloc | inchangé | — | détection plus tardive d'un écart | moyenne | **écartée** : le découpage obtient le même effet sans retarder la vérification |
+| 5. Découpage coopératif de tout le cycle | **31 à 75 ms** | inchangé au calme (−1 à −3 % ; −7 à −10 % sur une machine chargée à 87 %) | +15 Mio | inchangées, testées | moyenne, sans changement d'architecture | **retenu** |
+
+### Mise en œuvre
+
+- `SchedulerDependencies.cooperative` (facultatif) : l'ordonnanceur cède la
+  boucle (`yieldTo`) entre les phases d'un cycle, et les longs calculs
+  (calcul complet, planificateur, progression incrémentale, reconstruction,
+  vérification) cèdent tous les `slicePixels` pixels (262 144 par défaut
+  dans le service, soit 5 à 15 ms de travail). Ces calculs sont écrits une
+  seule fois, comme générateurs (`progress/slices.ts`) : exécutés d'un trait
+  par les API synchrones, en tranches par l'ordonnanceur. Le résultat est
+  identique, testé pour toutes les tailles de tranche.
+- **Cohérence de l'instantané** : toutes les tranches d'un cycle travaillent
+  sur la même copie de la toile, prise au début du cycle (la lecture du
+  simulateur copie la région). Une modification arrivée entre deux tranches
+  (acteur extérieur, écriture) est vue au cycle suivant, comme pour toute
+  lecture. Une modification arrivée après la dernière lecture d'une course
+  est vue à la lecture suivante (test « outside actor » : jamais perdue).
+- **Avant tout bail, et avant de déclarer la fin** : pause, arrêt et
+  nouvelle révision du modèle sont revérifiés après la dernière cession.
+  Un plan calculé pour une ancienne position, ou avant une pause, n'est
+  jamais loué. Contre-épreuves faites : retirer l'une ou l'autre
+  vérification fait échouer les tests.
+- **Progression atomique** : l'état (valeurs, compteurs, nombre d'appels)
+  n'est remplacé qu'à la fin d'un appel ; un appel abandonné entre deux
+  tranches (pause, arrêt, erreur) ne laisse jamais de compteurs à moitié
+  appliqués ; `invalidate()` pendant un appel (restauration) n'est jamais
+  écrasé.
+- **Aucun doublon** : une tentative n'est louée qu'après la dernière
+  cession ; le journal n'est jamais attendu pendant un calcul.
+- Une vérification complète reste faite tous les 10 cycles et à chaque
+  reconstruction (tous les 100 cycles, et à chaque changement de modèle,
+  de révision ou de toile).
+
+### Mesures avant / après (`npm run bench:responsiveness`)
+
+Machine calme (charge 17 à 38 %), même machine, exécutions alternées entre
+l'ancien code (`6bee19c`) et le nouveau. Blocage : plus longue attente de
+la boucle d'événements mesurée par un battement de 2 ms (démarrage = premier
+cycle ; établi = ensuite, reconstruction périodique comprise). HTTP : client
+dans un thread séparé, une requête toutes les 100 ms.
+
+| Modèle | Version | Premier lot | Cycle médian / p95 / p99 | Débit | Blocage max démarrage / établi | Boucle : attente max | HTTP médian / p95 / max | Mémoire |
+|---|---|---|---|---|---|---|---|---|
+| 256² | avant | 0,32 s | 17 / 24 / 162 ms | 45 889 px/s | 46 / 22 ms | 29 ms | 1,5 / 14 / 14 ms | 183 Mio |
+| 256² | après | 0,33 s | 17 / 26 / 38 ms | 49 055 px/s | 22 / 0 ms | 22 ms | 2,2 / 16 / 16 ms | 151 Mio |
+| 2000² | avant | 0,72 s | 134 / 244 / 376 ms | 6 512 px/s | 385 / 413 ms | 415 ms | 61 / 192 / 354 ms | 272 Mio |
+| 2000² | après | 0,69 s | 141 / 250 / 265 ms | 6 457 px/s | 33 / 51 ms | 54 ms | 3,2 / 7 / 19 ms | 280 Mio |
+| 4096² | avant | 1,81 s | 441 / 841 / 896 ms | 2 009 px/s | 1 356 / 1 339 ms | 1 360 ms | 234 / 692 / 1 311 ms | 605 Mio |
+| 4096² | après | 1,50 s | 442 / 835 / 849 ms | 2 010 px/s | 52 / 75 ms | 82 ms | 2,9 / 7,7 / 32 ms | 620 Mio |
+
+Avec un acteur extérieur (25 pixels effacés toutes les 2 s, détectés puis
+repeints) :
+
+| Modèle | Version | Débit | Blocage max établi | HTTP médian / p95 / max | Mémoire |
+|---|---|---|---|---|---|
+| 2000² | avant | 7 141 px/s | 338 ms | 60 / 175 / 446 ms | 414 Mio |
+| 2000² | après | 6 941 px/s | 34 ms | 2,9 / 6,8 / 16 ms | 249 Mio |
+| 4096² | avant | 1 892 px/s | 1 310 ms | 260 / 767 / 1 244 ms | 624 Mio |
+| 4096² | après | 1 877 px/s | 31 ms | 3,1 / 9,1 / 29 ms | 620 Mio |
+
+Le premier cycle (calcul complet et reconstruction) dure 1,2 à 1,25 s à
+4096² (1,4 s avant), sans bloquer la boucle plus de 52 ms. Sur une machine
+chargée (87 à 89 %, mesures de la même phase), le gain est du même ordre
+(4096² : blocage établi 1 736 → 94 ms, HTTP médian 610 → 6 ms) mais le débit
+baisse de 7 à 10 % : sous forte charge, chaque cession attend plus
+longtemps son tour.
+
+### Limite restante
+
+Le planificateur reclasse tout le modèle à chaque cycle : il ne bloque plus
+la boucle, mais son coût CPU limite le débit sur les très grands modèles
+(environ 2 000 pixels par seconde à 4096²). Un planificateur **à état**
+(qui ne réexamine que les pixels changés, comme la progression
+incrémentale) est la piste suivante. C'est un nouveau composant, proposé
+pour une phase ultérieure et non pour une version candidate.

@@ -9,15 +9,27 @@
 
 ## GeoPlacer
 
-**GeoPlacer** est un fork de wplacer (`Arknight38/wplacer-dev`), sous
-licence AGPL-3.0-only. **GeoPlacer V1 est un environnement de simulation
-local** : un moteur de placement de pixels, piloté par un tableau de bord,
-sur une toile **simulée** sur votre machine. Aucune connexion à GeoPixels,
-à Wplace ou à un autre service ; aucun compte, aucune session, aucun jeton.
+**GeoPlacer** place les pixels d'une image sur une toile, pixel par pixel,
+en respectant des ressources limitées (énergie qui se régénère, couleurs
+débloquées), avec une stratégie de dessin, et reprend là où il s'était
+arrêté. **GeoPlacer V1 est un environnement de simulation local** : la
+toile, l'agent et ses ressources sont **simulés** sur votre machine, et un
+tableau de bord dans le navigateur pilote le moteur. Aucune connexion à
+GeoPixels, à Wplace ou à un autre service ; aucun compte, aucune session,
+aucun jeton.
+
+**Origine** : GeoPlacer est un fork de wplacer (`Arknight38/wplacer-dev`,
+issu de `luluwaffless/wplacer`), œuvre de JinxTheCatto, luluwaffless,
+Arknight38 et de leurs contributeurs (voir « Credits » plus bas), sous
+licence **AGPL-3.0-only**. Les modifications sont listées dans
+[MODIFICATIONS.md](MODIFICATIONS.md).
 
 ### Installer (Windows)
 
-Prérequis : [Node.js 22 LTS](https://nodejs.org) (fournit npm) et Git.
+Prérequis : Windows 10 ou 11 (64 bits), [Node.js 22 LTS](https://nodejs.org)
+(22.12 au minimum ; fournit npm 10) et Git (ou le téléchargement ZIP du
+dépôt), une connexion Internet pour l'installation. Aucun compilateur,
+aucun droit administrateur.
 
 ```powershell
 git clone https://github.com/Daneisra/GeoPlacer.git
@@ -25,8 +37,8 @@ cd GeoPlacer
 npm run setup:windows      # ou double-clic sur setup.bat
 ```
 
-Tant que la Phase 1B.10 n'est pas fusionnée dans `main`, se placer d'abord
-sur sa branche : `git checkout feat/phase1b10-demo-hardening`.
+Tant que la version candidate n'est pas fusionnée dans `main`, se placer
+d'abord sur sa branche : `git checkout feat/phase1c0-release-candidate`.
 
 Une seule commande : dépendances exactes, binaire `canvas` précompilé (sans
 compilateur), compilation, configuration sans secret, démarrage de
@@ -40,11 +52,49 @@ npm start                  # ou start.bat ; puis ouvrir http://127.0.0.1:3000
 npm run demo               # ou start.bat --demo : démonstration, dossier séparé data\demo
 ```
 
-- **Arrêter** : Ctrl+C, une fois, dans la fenêtre du serveur. La
-  progression est retrouvée au démarrage suivant.
+`start.bat` vérifie d'abord l'installation et la complète si besoin
+(première fois, installation interrompue, mise à jour du code).
+
+- **Démonstration** : sur un projet vide, la carte « Découvrir GeoPlacer »
+  prépare un modèle d'exemple et un agent simulé rapide ; « Démarrer »,
+  puis environ deux minutes ([guide](docs/fr/demonstration.md)).
+- **Votre image** : panneau « Modèle » > « Importer un PNG » (8 Mio au
+  plus, jusqu'à 4096 × 4096 pixels) ; choisir un nom, la position (x, y)
+  sur la toile simulée et une stratégie. Les couleurs sont ramenées à la
+  palette de la simulation. Un modèle qui dépasse la toile est refusé :
+  agrandir la toile (panneau « Simulateur ») ou changer la position.
+- **Stratégies de dessin** : haut vers bas, bas vers haut, gauche vers
+  droite, droite vers gauche, couleur par couleur, contours d'abord, du
+  centre vers l'extérieur, aléatoire.
+- **Ressources simulées** : énergie (un pixel coûte une unité), capacité,
+  régénération, monnaie, couleurs débloquées ; les améliorations proposées
+  s'appliquent seulement après confirmation, jamais automatiquement
+  (panneau « Ressources de l’agent simulé »).
+- **Pause et reprise** : « Pause » s'arrête après l'écriture en cours,
+  « Reprendre » repart là où le moteur s'était arrêté ; « Arrêter » aussi.
+- **Arrêter le serveur** : Ctrl+C, une fois, dans sa fenêtre ; Windows
+  demande ensuite « Terminer le programme de commandes (O/N) ? » : le
+  serveur est déjà arrêté, répondre O. La progression est retrouvée au
+  démarrage suivant.
 - **Sauvegarder** : bouton « Sauvegarder » (simulation arrêtée) ou
-  `npm run backup` ; **restaurer** : `npm run restore -- <dossier>`
-  (GeoPlacer arrêté).
+  `npm run backup` ; **restaurer** : `npm run restore -- <dossier>`,
+  GeoPlacer arrêté ([guide](docs/fr/sauvegarde-restauration.md)).
+- **Mettre à jour** : `git pull`, puis `start.bat` (ou
+  `npm run setup:windows`).
+
+### Dépannage courant
+
+| Symptôme | Que faire |
+|---|---|
+| « ÉCHEC à l'étape … » pendant l'installation | Lire la ligne « Que faire », puis le journal `test-logs\<date>-setup.log` ; relancer ne casse rien |
+| « Node.js est introuvable » | Installer Node.js 22 LTS depuis https://nodejs.org, puis rouvrir le terminal |
+| La page ne s'ouvre pas | Utiliser l'adresse affichée « Server listening on … » (le port peut ne pas être 3000) |
+| « already used by another GeoPlacer instance » | Un GeoPlacer tourne déjà sur ce dossier : utiliser celui-là, ou l'arrêter |
+| « GeoPlacer cannot start on this data directory » | Une restauration a été interrompue : `npm run restore -- --resume` |
+| « Démarrer » reste grisé | Aucun modèle sélectionné, ou la simulation tourne déjà |
+| 403 dans le navigateur | Ouvrir `http://127.0.0.1:<port>` ou `http://localhost:<port>`, pas un autre nom |
+
+Plus de détails : [problèmes connus](docs/fr/problemes-connus.md).
 
 ### Documentation (en français)
 
@@ -63,8 +113,15 @@ npm run demo               # ou start.bat --demo : démonstration, dossier sépa
 
 ### Limites de la V1
 
-- Simulation locale uniquement ; un seul agent simulé.
-- Vérifié sous Windows 10 ; Linux et macOS non vérifiés.
+- Simulation locale uniquement : aucune connexion automatisée à GeoPixels
+  ou à Wplace.
+- Un seul agent simulé actif.
+- Vérifié sous Windows 10 (64 bits) ; Linux et macOS non vérifiés.
+- Navigateurs : Edge vérifié de bout en bout ; Firefox vérifié avec la
+  version fournie par Playwright (132), pas avec une version officielle
+  installée.
+- Reprise vérifiée après l'arrêt brutal du **processus** ; la tenue après
+  une coupure de courant n'est pas garantie (non testée).
 - Le code hérité de wplacer (comptes réels, ancien moteur, jetons, proxys)
   reste dans le dépôt pour la traçabilité, mais il est **désactivé** :
   routes refusées par le serveur, client réseau fermé.
