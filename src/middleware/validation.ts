@@ -144,7 +144,7 @@ export function validateBody<T>(schema: z.ZodSchema<T>) {
 export function validateParams<T>(schema: z.ZodSchema<T>) {
   return (req: Request, res: Response, next: NextFunction): void => {
     try {
-      req.params = schema.parse(req.params) as any;
+      req.params = schema.parse(req.params) as Request['params'];
       next();
     } catch (err) {
       if (err instanceof z.ZodError) {
@@ -162,7 +162,9 @@ export function validateParams<T>(schema: z.ZodSchema<T>) {
 export function validateQuery<T>(schema: z.ZodSchema<T>) {
   return (req: Request, res: Response, next: NextFunction): void => {
     try {
-      req.query = schema.parse(req.query) as any;
+      // Express 5: req.query is a getter without setter (an assignment throws in strict mode):
+      // the parsed query becomes an own property of this request (Phase 1C.0).
+      Object.defineProperty(req, 'query', { value: schema.parse(req.query) as Request['query'], writable: true, configurable: true, enumerable: true });
       next();
     } catch (err) {
       if (err instanceof z.ZodError) {

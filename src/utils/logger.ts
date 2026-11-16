@@ -4,13 +4,14 @@
 
 import winston from 'winston';
 import Transport from 'winston-transport';
+import type { WebSocket } from 'ws';
 import { DATA_DIR } from '../config/constants.js';
 import { existsSync, mkdirSync } from 'node:fs';
 import { redactSecretsFormat } from './log-redaction.js';
 
 // WebSocket client sets for log streaming (exported for server.ts)
-export const wsLogClients = new Set<any>();
-export const wsErrorClients = new Set<any>();
+export const wsLogClients = new Set<WebSocket>();
+export const wsErrorClients = new Set<WebSocket>();
 
 // Ensure data directory exists
 if (!existsSync(DATA_DIR)) {

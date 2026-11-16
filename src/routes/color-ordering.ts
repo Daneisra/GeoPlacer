@@ -44,8 +44,8 @@ function saveColorOrdering(): void {
   try {
     writeJsonAtomic(orderingPath, colorOrdering);
     logger.info('Color ordering saved successfully');
-  } catch (e: any) {
-    logger.error('Error saving color ordering:', e.message);
+  } catch (e: unknown) {
+    logger.error('Error saving color ordering:', e instanceof Error ? e.message : String(e));
     throw e;
   }
 }

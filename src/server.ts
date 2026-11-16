@@ -6,7 +6,8 @@
 import express, { Router } from 'express';
 import swaggerJsdoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
-import { WebSocketServer } from 'ws';
+import { WebSocketServer, type WebSocket } from 'ws';
+import type http from 'node:http';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import gradient from 'gradient-string';
@@ -247,10 +248,11 @@ app.use((req, res, next) => {
 app.use(notFoundHandler);
 app.use(errorHandler);
 
-// WebSocket connections tracking
-const wsConnections = new Set<any>();
+// WebSocket connections tracking (isAlive: answered the last ping)
+type TrackedSocket = WebSocket & { isAlive?: boolean };
+const wsConnections = new Set<TrackedSocket>();
 
-function cleanupWebSocket(ws: any): void {
+function cleanupWebSocket(ws: TrackedSocket): void {
   wsLogClients.delete(ws);
   wsErrorClients.delete(ws);
   wsConnections.delete(ws);
@@ -295,7 +297,7 @@ async function runKeepAlive(): Promise<void> {
 // Server state for graceful shutdown
 const serverState = {
   wss: null as WebSocketServer | null,
-  httpServer: null as any,
+  httpServer: null as http.Server | null,
   shutdownInProgress: false,
   intervals: [] as NodeJS.Timeout[],
 };
@@ -338,7 +340,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
   // Close WebSocket connections gracefully
   if (serverState.wss) {
     const closePromises: Promise<void>[] = [];
-    serverState.wss.clients.forEach((ws: any) => {
+    serverState.wss.clients.forEach((ws: WebSocket) => {
       const closePromise = new Promise<void>((resolve) => {
         const timeout = setTimeout(() => {
           ws.terminate();
@@ -453,12 +455,12 @@ async function startServer(): Promise<void> {
 
     // Attempt to bind to available ports
     const ports = [APP_PRIMARY_PORT, ...APP_FALLBACK_PORTS];
-    let server: any = null;
+    let server: http.Server | null = null;
     let boundPort: number | null = null;
 
     for (const port of ports) {
       try {
-        server = await new Promise((resolve, reject) => {
+        server = await new Promise<http.Server>((resolve, reject) => {
           const s = app.listen(port, APP_HOST, () => {
             logger.info(`Server listening on http://${APP_HOST}:${port}`);
             console.log(gradient('green', 'cyan')(`Server listening on http://${APP_HOST}:${port}`));
@@ -469,8 +471,8 @@ async function startServer(): Promise<void> {
         serverState.httpServer = server;
         boundPort = port;
         break;
-      } catch (error: any) {
-        if (error.code === 'EADDRINUSE') {
+      } catch (error: unknown) {
+        if ((error as NodeJS.ErrnoException | null)?.code === 'EADDRINUSE') {
           logger.info(`Port ${port} is in use, trying next port...`);
         } else {
           logger.error(`Failed to bind to port ${port}:`, error);
@@ -494,9 +496,9 @@ async function startServer(): Promise<void> {
     serverState.wss = wss;
 
     // Set up broadcast function for extension messages
-    setBroadcastFunction((type: string, data?: any) => {
+    setBroadcastFunction((type: string, data?: Record<string, unknown>) => {
       const message = JSON.stringify({ type, ...data });
-      wsConnections.forEach((ws: any) => {
+      wsConnections.forEach((ws) => {
         if (ws.readyState === 1) {
           try {
             ws.send(message);
@@ -507,7 +509,7 @@ async function startServer(): Promise<void> {
       });
     });
 
-    wss.on('connection', (ws: any, req) => {
+    wss.on('connection', (ws: TrackedSocket, req) => {
       // Check connection limit
       if (wsConnections.size >= MAX_WS_CONNECTIONS) {
         ws.close(1013, 'Server overloaded');
@@ -571,7 +573,7 @@ async function startServer(): Promise<void> {
       if (serverState.shutdownInProgress) {
         return;
       }
-      wss.clients.forEach((ws: any) => {
+      wss.clients.forEach((ws: TrackedSocket) => {
         if (!ws.isAlive) {
           ws.terminate();
           cleanupWebSocket(ws);
