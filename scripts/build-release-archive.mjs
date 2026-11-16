@@ -54,6 +54,12 @@ const commit = git('rev-parse', '--verify', `${commitArg}^{commit}`);
 const short = commit.slice(0, 7);
 if (commitArg === 'HEAD' && git('status', '--porcelain') !== '') console.log('Remarque : des modifications non commitées existent ; elles ne sont PAS dans l’archive (seul le commit compte).');
 const version = JSON.parse(git('show', `${commit}:package.json`)).version;
+const pkg = JSON.parse(git('show', `${commit}:package.json`));
+if (pkg.license !== 'AGPL-3.0-only' || !/JinxTheCatto.*luluwaffless/.test(pkg.author) || !git('show', `${commit}:LICENSE`).includes('GNU AFFERO GENERAL PUBLIC LICENSE')) fail('licence ou attribution absente');
+// Report file names only: never print a potential secret value into a release log.
+const secretPattern = '(gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}|AKIA[A-Z0-9]{16}|sk-[A-Za-z0-9_-]{32,}|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----)';
+const scan = spawnSync('git', ['-C', repo, 'grep', '-I', '-l', '-E', secretPattern, commit, '--', '.'], { encoding: 'utf8' });
+if (scan.status !== 1) fail(scan.status === 0 ? `secret potentiel dans : ${scan.stdout.trim()}` : 'contrôle de secrets impossible');
 const name = `geoplacer-${version}-windows-${short}`;
 const prefix = `GeoPlacer-${version}/`;
 mkdirSync(outDir, { recursive: true });
@@ -68,7 +74,9 @@ const again = path.join(mkdtempSync(path.join(tmpdir(), 'geoplacer-archive-')), 
 build(again);
 const hash = sha256(zip);
 const reproducible = sha256(again) === hash;
-rmSync(path.dirname(again), { recursive: true, force: true });
+const temporaryArchiveDir = path.resolve(path.dirname(again));
+if (path.dirname(temporaryArchiveDir) !== path.resolve(tmpdir()) || !path.basename(temporaryArchiveDir).startsWith('geoplacer-archive-')) fail('dossier temporaire inattendu');
+rmSync(temporaryArchiveDir, { recursive: true, force: true });
 if (!reproducible) fail('deux constructions du même commit diffèrent (archive non reproductible)');
 
 // 2. Content checks (bsdtar, present in Windows 10, reads zip archives).
@@ -102,7 +110,7 @@ const manifest = {
   bytes: statSync(zip).size,
   files: files.length,
   builtWith: { git: git('--version'), node: process.version, command: `git archive --format=zip --prefix=${prefix} ${commit}` },
-  checks: { reproducible, required: 'present', forbidden: 'absent', batLineEndings: 'CRLF' },
+  checks: { reproducible, required: 'present', forbidden: 'absent', batLineEndings: 'CRLF', license: 'AGPL-3.0-only; original attribution retained', secretScan: 'no high-confidence match in tracked text' },
 };
 writeFileSync(`${zip}.manifest.json`, `${JSON.stringify(manifest, null, 2)}\n`);
 console.log(`Archive : ${zip}`);
@@ -118,8 +126,10 @@ if (verifyInstall) {
   if (existsSync(path.join(root, '.git'))) fail('l’archive contient un dépôt Git');
   const start = spawnSync('cmd.exe', ['/d', '/c', '.\\start.bat'], { cwd: root, env: { ...process.env, GEOPLACER_SETUP_ONLY: '1' }, encoding: 'utf8' });
   const check = spawnSync(process.execPath, [path.join('scripts', 'setup-windows.mjs'), '--check'], { cwd: root, encoding: 'utf8' });
+  const installLog = `${zip}.install.log`;
+  writeFileSync(installLog, `${start.stdout ?? ''}\n${start.stderr ?? ''}\n--check (${check.status})\n${check.stdout ?? ''}\n${check.stderr ?? ''}`);
   const ok = start.status === 0 && /GeoPlacer est install/.test(start.stdout) && check.status === 0;
-  const verification = { folder: root, startBat: start.status, check: check.status, checkText: check.stdout.trim(), canvas: (start.stdout.match(/OK \(binaire chargé[^\n]*/) ?? [''])[0] };
+  const verification = { folder: root, log: installLog, startBat: start.status, check: check.status, checkText: check.stdout.trim(), canvas: (start.stdout.match(/OK \(binaire chargé[^\n]*/) ?? [''])[0] };
   writeFileSync(`${zip}.manifest.json`, `${JSON.stringify({ ...manifest, installation: { ...verification, ok } }, null, 2)}\n`);
   console.log(`Installation depuis l’archive : ${ok ? 'réussie' : 'ÉCHEC'} (${verification.checkText}) ${verification.canvas}`);
   if (!ok) {
