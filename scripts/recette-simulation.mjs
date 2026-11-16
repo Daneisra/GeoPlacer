@@ -187,6 +187,9 @@ try {
   }
   await shot(page, '03-demonstration-fin');
   const demoProgress = await progress(page);
+  // Times in the French format whatever the browser language (the Firefox of Playwright is in English).
+  const english = /\d{1,2}:\d{2}(:\d{2})?\s?(AM|PM)\b/.exec(await page.locator('body').innerText());
+  check('heures au format français, quelle que soit la langue du navigateur', english === null, english?.[0] ?? '');
 
   // 3. A refused setting: the explanation in French.
   const width = page.locator('#simulatorPanel label', { hasText: 'Largeur de la toile' }).locator('input');

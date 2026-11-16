@@ -164,7 +164,8 @@ export function formatDuration(ms: number | null | undefined): string {
 
 export function formatTime(at: number | null | undefined): string {
   if (at === null || at === undefined) return '—';
-  return new Date(at).toLocaleTimeString();
+  // French format whatever the browser language (Phase 1B.10: seen as « 12:56:19 AM » in an English Firefox).
+  return new Date(at).toLocaleTimeString('fr-FR');
 }
 
 export const STATE_LABELS: Record<SchedulerState, string> = {
