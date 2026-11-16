@@ -1,9 +1,24 @@
+import { useEffect, useState } from 'react';
+import { ConnectorDashboard } from './geopixels/ConnectorDashboard';
+import { engineHttp } from '../lib/engine';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardDescription } from './ui';
 import { SimulationDashboard } from './simulation/SimulationDashboard';
 
 export default function MainView() {
   const navigate = useNavigate();
+  const [source, setSource] = useState<'simulation' | 'geopixels' | null>(null);
+  const [sourceError, setSourceError] = useState('');
+  useEffect(() => {
+    const abort = new AbortController();
+    void engineHttp.get<{ mode: 'simulation' | 'geopixels' }>('/engine/status', { signal: abort.signal }).then((r) => setSource(r.data.mode)).catch(() => { if (!abort.signal.aborted) setSourceError('Source indisponible'); });
+    return () => abort.abort();
+  }, []);
+  async function changeSource(next: 'simulation' | 'geopixels') {
+    setSourceError('');
+    try { await engineHttp.post('/connector/source', { source: next }); setSource(next); }
+    catch { setSourceError('Arrêter le moteur et réconcilier les tentatives ouvertes avant de changer de source.'); }
+  }
 
   const quickActions = [
     {
@@ -25,8 +40,13 @@ export default function MainView() {
   return (
     <>
       <h1 className="text-3xl font-bold">Tableau de bord</h1>
-      <p className="text-muted-foreground mb-4">GeoPlacer V1 : moteur sur une toile simulée locale.</p>
-      <SimulationDashboard />
+      <p className="text-muted-foreground mb-4">Préparation locale, simulation et connecteur GeoPixels expérimental.</p>
+      <label className="block mb-4">Source de toile <select className="canvas-source-select" aria-label="Source de toile" value={source ?? ''} onChange={(e) => void changeSource(e.target.value as 'simulation' | 'geopixels')}>
+        <option value="" disabled>Chargement…</option><option value="simulation">Simulation locale</option><option value="geopixels">GeoPixels — connecteur expérimental</option>
+      </select></label>
+      {sourceError && <p role="alert">{sourceError}</p>}
+      {source === 'simulation' && <SimulationDashboard />}
+      {source === 'geopixels' && <ConnectorDashboard />}
       <h2 className="mt-8 mb-3 text-xl font-semibold">Autres pages</h2>
       <div className="grid grid-cols-2 gap-4">
         {quickActions.map((action) => (

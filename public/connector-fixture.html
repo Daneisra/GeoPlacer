@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <title>GeoPlacer — navigateur factice</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+      body {
+        font: 16px system-ui;
+        background: #111827;
+        color: #e5e7eb;
+        max-width: 860px;
+        margin: 2rem auto;
+        padding: 1rem;
+      }
+      button,
+      input {
+        font: inherit;
+        padding: 0.5rem;
+        margin: 0.3rem;
+      }
+      label {
+        display: block;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      canvas {
+        image-rendering: pixelated;
+        max-width: 100%;
+        border: 1px solid #aaa;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Navigateur factice local</h1>
+    <p>
+      Toile et ressources synthétiques. Aucun contact avec GeoPixels. L’état de la toile et les identifiants des opérations sont conservés
+      dans ce navigateur.
+    </p>
+    <button id="load">Charger le modèle local sélectionné</button>
+    <label>Code temporaire <input id="capability" type="password" autocomplete="off" size="24" /></label>
+    <button id="connect">Coupler le fournisseur factice</button><button id="disconnect">Déconnecter</button>
+    <button id="observe">Observer</button><button id="partial">Observer seulement la moitié</button
+    ><button id="damage">Modifier un pixel externe</button>
+    <label><input id="lose" type="checkbox" />Perdre la prochaine réponse après exécution</label>
+    <label><input id="cut" type="checkbox" />Déconnecter après la prochaine exécution</label>
+    <p id="state" role="status">Déconnecté</p>
+    <canvas id="preview"></canvas>
+    <pre id="details"></pre>
+    <script src="/geopixels-capture.js"></script>
+    <script src="/connector-fixture.js"></script>
+  </body>
+</html>

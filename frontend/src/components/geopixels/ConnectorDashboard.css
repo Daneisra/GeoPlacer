@@ -1,0 +1,28 @@
+.connector-dashboard button {
+  padding: 0.45rem 0.7rem;
+  border: 1px solid #475569;
+  border-radius: 0.35rem;
+  background: #1e293b;
+  color: #f8fafc;
+  cursor: pointer;
+}
+.connector-dashboard button:hover:not(:disabled) { background: #334155; }
+.connector-dashboard button:disabled { color: #94a3b8; cursor: default; opacity: 0.7; }
+.connector-dashboard button:focus-visible,
+.connector-dashboard input:focus-visible,
+.connector-dashboard select:focus-visible,
+.canvas-source-select:focus-visible { outline: 2px solid #38bdf8; outline-offset: 3px; }
+.connector-dashboard input:not([type='checkbox']),
+.connector-dashboard select,
+.canvas-source-select {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #64748b;
+  border-radius: 0.35rem;
+  background: #0f172a;
+  color: #f8fafc;
+  max-width: 100%;
+}
+.connector-dashboard input[type='number'] { width: 8rem; margin: 0.35rem; }
+.connector-dashboard a { color: #7dd3fc; text-decoration: underline; padding: 0.4rem; }
+.connector-dashboard dt { color: #cbd5e1; }
+.connector-dashboard dd { font-size: 1.2rem; margin-bottom: 0.35rem; }

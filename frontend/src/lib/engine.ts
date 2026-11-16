@@ -53,7 +53,7 @@ export interface EngineSettings {
 }
 
 export interface EngineStatus {
-  mode: 'simulation';
+  mode: 'simulation' | 'geopixels';
   state: SchedulerState;
   reason: string | null;
   stream: string;
