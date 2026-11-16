@@ -4,10 +4,13 @@ const client = (await readFile(new URL('../browser/geopixels-client.js', import.
 const header = `// ==UserScript==
 // @name         GeoPlacer experimental observer
 // @namespace    geoplacer.local
-// @version      0.1.0
+// @version      0.1.2
 // @description  Passive GeoPixels cache reader; no painting or purchases
+// @match        https://geopixels.net/*
 // @match        https://www.geopixels.net/*
 // @grant        none
+// @sandbox      raw
+// @noframes
 // @run-at       document-idle
 // @license      AGPL-3.0-only
 // ==/UserScript==

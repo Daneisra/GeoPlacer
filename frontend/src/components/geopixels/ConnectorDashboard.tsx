@@ -33,6 +33,7 @@ const kindLabels: Record<string, string> = {
 const number = (n: number | null | undefined) => (n == null ? 'Indisponible' : n.toLocaleString('fr-FR'));
 
 export function ConnectorDashboard() {
+  const [readerOrigin, setReaderOrigin] = useState('https://geopixels.net');
   const [view, setView] = useState<View | null>(null);
   const [templates, setTemplates] = useState<TemplateInfo[]>([]);
   const [error, setError] = useState('');
@@ -81,7 +82,7 @@ export function ConnectorDashboard() {
   const active = !!view?.scheduler && !['stopped', 'completed', 'error'].includes(view.scheduler.state);
   async function pair(mode: 'local-fake' | 'read-only') {
     setCapability('');
-    const origin = mode === 'local-fake' ? location.origin : 'https://www.geopixels.net';
+    const origin = mode === 'local-fake' ? location.origin : readerOrigin;
     const result = await engineHttp.post<{ token: string }>('/connector/pair', { mode, origin });
     setCapability(result.data.token);
     // The one-use capability stays in component memory, never in an URL or browser storage.
@@ -105,6 +106,21 @@ export function ConnectorDashboard() {
           {error}
         </p>
       )}
+      <label>
+        Origine de la page GeoPixels
+        <select
+          aria-label="Origine GeoPixels"
+          value={readerOrigin}
+          disabled={busy || active}
+          onChange={(event) => setReaderOrigin(event.target.value)}
+        >
+          <option value="https://geopixels.net">https://geopixels.net</option>
+          <option value="https://www.geopixels.net">https://www.geopixels.net</option>
+        </select>
+      </label>
+      <p>
+        Choisir l’origine exacte affichée dans l’adresse du site ; aucun sous-domaine supplémentaire n’est autorisé.
+      </p>
       <div className="flex flex-wrap gap-2">
         <button disabled={busy || active} onClick={() => void action(() => pair('local-fake'))}>
           Coupler un navigateur factice

@@ -237,6 +237,22 @@ describe('Writer result fencing and uncertainty', () => {
 });
 
 describe('Local pairing security', () => {
+  it.each(['https://geopixels.net', 'https://www.geopixels.net'])(
+    'allows read-only pairing at %s, never a fake writer',
+    (origin) => {
+      const pairing = new ConnectorPairing();
+      const issued = pairing.issue('read-only', origin);
+      expect(pairing.acceptsOrigin(origin)).toBe(true);
+      expect(
+        pairing.acceptsOrigin(
+          origin === 'https://geopixels.net' ? 'https://www.geopixels.net' : 'https://geopixels.net'
+        )
+      ).toBe(false);
+      expect(() => pairing.issue('local-fake', origin)).toThrow();
+      expect(issued.mode).toBe('read-only');
+    }
+  );
+
   it.each(['https://evil.example', 'null', 'http://127.0.0.1.evil:3000', 'http://user@localhost:3000', 'http://localhost:3000/path'])(
     'rejects hostile origin %s',
     (origin) => {
