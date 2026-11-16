@@ -49,7 +49,16 @@ dépôt.
 - `npm run build` : réussi (26 s).
 
 Le contrôle complet a été refait sur le commit final (voir le rapport de
-phase).
+phase). **Second clone neuf** (cache vide, `core.autocrlf=false`) :
+installation par `start.bat` seul, puis `start.bat`, `setup.bat`,
+`update.bat`, `npm start` et `npm run dev` vérifiés (voir
+[installation-windows.md](installation-windows.md) § 2).
+
+**Erreurs de données** : dans le navigateur, la recette couvre un réglage
+refusé. Les sauvegardes corrompues, incomplètes, modifiées ou
+incompatibles, la toile simulée endommagée et le modèle hors de la toile
+sont couverts par des tests automatisés seulement (`backup.test.ts`,
+`world-store.test.ts`, `large-display.test.ts`).
 
 **Tests ajoutés** :
 

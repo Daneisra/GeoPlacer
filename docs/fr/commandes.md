@@ -11,7 +11,7 @@ locale : aucune de ces commandes ne contacte un service de dessin réel.
 | `npm run setup:windows` (ou double-clic sur `setup.bat`) | Installation complète en une commande : vérifications, dépendances, binaire `canvas` précompilé, compilation, dossiers, `.env`, démarrage de contrôle. Journal dans `test-logs\` |
 | `start.bat` | Installe si nécessaire, puis lance GeoPlacer dans la même fenêtre |
 | `start.bat --demo` | Idem, sur le dossier de démonstration `data\demo` |
-| `update.bat` | Hérité du projet d'origine : `git pull`, puis l'installation de GeoPlacer (`scripts\setup-windows.mjs`). Si Git est absent, il propose de l'installer avec winget (modification de Windows : à refuser si non souhaitée). Non vérifié de bout en bout |
+| `update.bat` | Hérité du projet d'origine : `git pull`, puis l'installation de GeoPlacer (`scripts\setup-windows.mjs`). Si Git est absent, il propose de l'installer avec winget (modification de Windows : à refuser si non souhaitée ; cette branche n'est pas testée) |
 | `npm start` | Lance GeoPlacer compilé : `http://127.0.0.1:3000` |
 | `npm run demo` | Lance la démonstration, dans le dossier séparé `data\demo` (voir [demonstration.md](demonstration.md)) |
 | **Ctrl+C** (une fois) | Arrêt propre : la simulation s'arrête après l'écriture en cours |

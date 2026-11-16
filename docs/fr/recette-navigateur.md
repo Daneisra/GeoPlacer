@@ -26,7 +26,9 @@ désactivé ; sauvegarde depuis l'interface ; modèle de 2000 × 2000 affiché
 entier avec l'échelle, zoom et déplacement annoncés, « Ajuster » ; arrêt
 contrôlé ; restauration par `npm run restore` ; après redémarrage, le
 modèle et la progression sauvegardés sont retrouvés sans rien repeindre ;
-console sans erreur inattendue.
+console sans erreur inattendue ; **aucune requête de la page (documents,
+scripts, polices, API, WebSocket) vers un autre hôte que 127.0.0.1 ou
+localhost**, sur tout le parcours.
 
 **Résultats du 16/11/2026, sur le clone neuf** (installé par
 `npm run setup:windows`) :
@@ -37,6 +39,7 @@ console sans erreur inattendue.
 | Firefox 132 de Playwright (isolé, navigateur en anglais) | complet | **0 échec** ; 142 s après la reprise. Défaut vu dans le journal : heures affichées « 12:56:19 AM » |
 | Firefox (correctif des heures) | rapide | contre-épreuve sur l'ancienne interface : **1 échec attendu** (« 1:03:35 AM ») ; après correctif : **0 échec** |
 | Edge (après correctif) | rapide | **0 échec** |
+| Edge (contrôle des hôtes ajouté, second clone neuf) | rapide | **0 échec** ; contre-épreuve avec une requête injectée vers `example.invalid` : **2 échecs attendus** (hôte étranger, erreur console) |
 
 La recette de la Phase 1B.7 (`scripts/recette-navigateur.mjs`), adaptée
 aux pages désactivées (accès direct à `/users`, `/templates`,

@@ -90,7 +90,8 @@ elles.
 | Serveur réel : `LEGACY_KEEPALIVE=1` ignoré, `POST /user` refusé (410), écoute sur `127.0.0.1` par défaut, aucun fichier servi hors des dossiers prévus (`package.json`, `data\engine`, `sauvegardes\`, y compris par `..%2f` ou `%5c`) | `src/__tests__/server-engine.test.ts` |
 | Une simulation complète, une sauvegarde et les diagnostics n'ouvrent **aucune connexion réseau** | `packages/engine-service/test/service.test.ts` |
 | Origine étrangère ou d'extension refusée (HTTP et WebSocket), Host forgé refusé | `engine-api.test.ts`, `server-engine.test.ts`, `local-access.test.ts` |
-| Dans le navigateur : pages héritées désactivées, démarrage hérité refusé (410), aucune requête vers un autre site | recettes Edge et Firefox (voir [recette-navigateur.md](recette-navigateur.md)) |
+| Dans le navigateur : pages héritées désactivées, démarrage hérité refusé (410), aucune requête de la page vers un autre hôte (contre-épreuve faite) | recettes Edge et Firefox (voir [recette-navigateur.md](recette-navigateur.md)) ; `npm start` et `npm run dev` sur un clone neuf |
+| Tous les appels réseau sortants du code hérité passent par le client fermé (`tile-manager.ts`, `wplacer-client.ts` → `http-client.ts`) | revue du code (`src/`) |
 
 ### Fichiers
 

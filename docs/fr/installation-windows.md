@@ -68,6 +68,20 @@ vide, **cache npm vide** (aucune dépendance déjà présente), puis
 paquets à la racine, 262 pour l'interface), binaire `canvas` téléchargé
 avec l'empreinte SHA-256 attendue (§ 3).
 
+**Points d'entrée vérifiés sur un second clone neuf** (16/11/2026, cache
+npm vide, `core.autocrlf=false` : les `.bat` restent en CRLF grâce à
+`.gitattributes`) :
+
+| Point d'entrée | Résultat |
+|---|---|
+| `.\start.bat` depuis zéro (`GEOPLACER_SETUP_ONLY=1`) | installation complète déclenchée par `start.bat`, six étapes réussies |
+| `.\start.bat` (lancement) | serveur compilé démarré, API 200, interface servie |
+| `start.bat --demo` | démonstration, Ctrl+C, reprise, sauvegarde, restauration (voir [recette-navigateur.md](recette-navigateur.md)) |
+| `setup.bat` | six étapes réussies, puis « Appuyez sur une touche » |
+| `update.bat` | `git pull` puis installation complète ; « All done » (branche winget, sans Git, non testée) |
+| `npm start` | dans Edge : bandeau, temps réel connecté, API 200, route héritée refusée (410), aucune erreur console, aucune requête externe |
+| `npm run dev` | idem à travers Vite (`http://localhost:<port>`), ports libérés à l'arrêt |
+
 ### `start.bat`
 
 `start.bat` (double-clic) est le lanceur :
