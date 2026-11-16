@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [6.0.0-rc.1] - non publiée (version candidate de GeoPlacer)
+
+Première version candidate de **GeoPlacer**, fork de wplacer : un environnement de
+**simulation locale** (aucune connexion à GeoPixels ni à Wplace). Version majeure :
+les fonctions de wplacer (comptes, extension, ancien moteur, proxys) sont désactivées.
+Entrée rédigée en français, comme la documentation de GeoPlacer.
+
+### Ajouté
+
+- Nouveau moteur mono-agent sur toile simulée durable : modèles et révisions, huit stratégies,
+  progression et ETA, ressources et améliorations simulées, journal des tentatives, reprise.
+- Serveur `/api/v1`, WebSocket et tableau de bord en français ; démonstration intégrée.
+- Installation Windows en une commande (`npm run setup:windows`, `setup.bat`, `start.bat`).
+- Sauvegarde et restauration vérifiées.
+- Grands modèles (jusqu'à 4096²) ; serveur réactif pendant le calcul (ordonnanceur coopératif).
+
+### Modifié
+
+- Sécurité du serveur local : écoute locale, contrôles Host et Origin, limiteur, validation.
+
+### Retiré (désactivé)
+
+- Routes de comptes réels, ancien moteur de dessin, jetons anti-bot, pont de l'extension,
+  proxys et keep-alive : refusés par le serveur (410 `LEGACY_DISABLED`).
+
+Détail : `MODIFICATIONS.md` et `docs/fr/`.
+
+---
+
 ## [5.6.2] - 2026-04-19
 
 ### Added

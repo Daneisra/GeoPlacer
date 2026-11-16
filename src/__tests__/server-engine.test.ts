@@ -7,6 +7,7 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import http from 'node:http';
 import net from 'node:net';
@@ -176,6 +177,9 @@ describe('server with the engine (real processes)', () => {
     servers.push(a);
     assertRunning(a);
     expect(a.output()).toContain('local simulation only');
+    // Release candidate: the version shown and logged is package.json's.
+    const { version } = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as { version: string };
+    expect(a.output()).toContain(`GeoPlacer ${version} (local simulation)`);
     expect(a.output()).toContain('LEGACY_KEEPALIVE is ignored');
     expect(a.output()).toContain('Inherited keep-alive disabled');
     // Phase 1B.10 security: listening on the loopback only by default; no file outside the served folders.

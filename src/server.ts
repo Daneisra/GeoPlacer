@@ -16,6 +16,15 @@ import { fileURLToPath } from 'node:url';
 // ES module equivalent of __dirname
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/** Version of GeoPlacer: package.json is the only source (6.0.0-rc.1: the first release candidate). */
+const APP_VERSION: string = (() => {
+  try {
+    return (JSON.parse(readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')) as { version?: string }).version ?? 'inconnue';
+  } catch {
+    return 'inconnue';
+  }
+})();
+
 // Import routes
 import logsRouter from './routes/logs.js';
 import tokensRouter from './routes/tokens.js';
@@ -206,7 +215,7 @@ const swaggerOptions = {
     openapi: '3.0.0',
     info: {
       title: 'WPlace API',
-      version: '5.6.2',
+      version: APP_VERSION,
       description: 'API for WPlace auto-drawing bot',
       contact: {
         name: 'JinxTheCatto and luluwaffless',
@@ -390,15 +399,22 @@ async function gracefulShutdown(signal: string): Promise<void> {
 
 // Server startup
 async function startServer(): Promise<void> {
+  const boxLine = (text: string): string => `    ║${text.padStart(Math.floor((58 + text.length) / 2)).padEnd(58)}║`;
   console.log(
-    gradient('cyan', 'magenta')(`
-    ╔════════════════════════════════════════════════════════════╗
-    ║                                                          ║
-    ║  GeoPlacer : simulation locale (fork de wplacer 5.6.2)   ║
-    ║                                                          ║
-    ╚════════════════════════════════════════════════════════════╝
-    `)
+    gradient('cyan', 'magenta')(
+      [
+        '',
+        '    ╔════════════════════════════════════════════════════════════╗',
+        boxLine(''),
+        boxLine(`GeoPlacer ${APP_VERSION} : simulation locale`),
+        boxLine('fork de wplacer 5.6.2 (AGPL-3.0-only)'),
+        boxLine(''),
+        '    ╚════════════════════════════════════════════════════════════╝',
+        '',
+      ].join('\n')
+    )
   );
+  logger.info(`GeoPlacer ${APP_VERSION} (local simulation)`);
 
   try {
     // Load proxies
