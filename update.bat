@@ -116,8 +116,8 @@ git pull
 if %errorlevel% equ 0 (
     echo.
     echo Repository updated successfully!
-    echo Installing dependencies...
-    npm i
+    echo Installing dependencies and building ^(scripts\setup-windows.mjs^)...
+    call node scripts\setup-windows.mjs
     echo.
 ) else (
     echo.
