@@ -40,7 +40,14 @@ machine à 35 %) :
   règle désactivée) ; paquets et interface : 0 ;
 - `npm run build` : réussi.
 
-**Clone neuf** (même commit, cache npm vide, `npm run setup:windows`) :
+**Contrôle final** (commit `a498816`, après la relecture : protection des
+dossiers de démonstration mis de côté, test du compactage pendant une
+cession, test de sauvegarde corrigé) : code de sortie 0, Jest 151, Vitest
+**547** + 1 optionnel (simulator 51), lint 0 erreur, build réussi. Le
+contrôle précédent (`ff55fe9`) avait échoué sur un test, cause démontrée
+ci-dessous.
+
+**Clone neuf** (commit `2a52df2`, cache npm vide, `npm run setup:windows`) :
 mêmes résultats (151 + 546 tests, 0 échec) ; build réussi ; recettes Edge et
 Firefox complètes à 0 échec, recette 1B.7 à 29/0, recette d'arrêt réussie
 (voir [recette-navigateur.md](recette-navigateur.md)). Audit d'installation :
