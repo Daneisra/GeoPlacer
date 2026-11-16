@@ -392,7 +392,7 @@ async function startServer(): Promise<void> {
     gradient('cyan', 'magenta')(`
     ╔════════════════════════════════════════════════════════════╗
     ║                                                          ║
-    ║              WPlace Auto-Drawing Bot v5.6.2              ║
+    ║  GeoPlacer : simulation locale (fork de wplacer 5.6.2)   ║
     ║                                                          ║
     ╚════════════════════════════════════════════════════════════╝
     `)
