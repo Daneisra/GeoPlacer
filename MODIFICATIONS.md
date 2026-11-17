@@ -1,5 +1,14 @@
 # Modifications (GNU AGPL v3, section 5a)
 
+## 17 novembre 2026 — Phase 2C, lecteur HTTP local expérimental
+
+- Transport d'observations GM_xmlhttpRequest limité à 127.0.0.1, avec approbation volontaire, capacités éphémères, révocation et lots dédupliqués.
+- Adaptateurs de contrats de couche, diagnostics du cache et explication des captures expirées ; lecture réelle validée par l'utilisateur.
+- Recettes CSP locales, tests de sécurité et de débit, fixture PNG synthétique reproductible et documentation.
+- Simulation, scheduler et journal existants conservés ; aucun placement ou achat réel, aucun transfert de secret de session du service.
+- Sauvegardes privées et copies historiques externes non destructives ; elles ne sont pas intégrées au dépôt.
+
+
 GeoPlacer est une version modifiée de **wplacer** (`Arknight38/wplacer-dev`,
 commit `46877e120f9e7bc721084fdf88a9ae8f006cb117`), œuvre de JinxTheCatto,
 luluwaffless, Arknight38 et de leurs contributeurs, distribuée sous
