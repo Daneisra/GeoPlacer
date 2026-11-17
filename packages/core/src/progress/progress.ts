@@ -14,18 +14,18 @@
  */
 
 import type {
-  CanvasSnapshot,
-  ColorProgress,
-  CompletionState,
-  FreshnessPolicy,
-  ProgressBasis,
-  ProgressCalculator,
-  ProgressOptions,
-  ProgressSnapshot,
-  ProgressTemplate,
-  Rgb,
-  SnapshotFreshness,
-  Timestamp,
+    CanvasSnapshot,
+    ColorProgress,
+    CompletionState,
+    FreshnessPolicy,
+    ProgressBasis,
+    ProgressCalculator,
+    ProgressOptions,
+    ProgressSnapshot,
+    ProgressTemplate,
+    Rgb,
+    SnapshotFreshness,
+    Timestamp,
 } from '../contracts/index.js';
 import { TRANSPARENT_U32 } from '../contracts/index.js';
 import { assertRect } from '../geometry/validate.js';
@@ -83,72 +83,103 @@ export function computeProgress(template: ProgressTemplate, snapshot: CanvasSnap
   return runSliced(computeProgressSliced(template, snapshot, now, options, unsliced()));
 }
 
-/** computeProgress cut into slices of `budget` pixels (Phase 1C.0): same result. */
-export function* computeProgressSliced(template: ProgressTemplate, snapshot: CanvasSnapshot, now: Timestamp, options: ProgressOptions, budget: SliceBudget): Sliced<ProgressSnapshot> {
-  assertTimestamp(now, 'now');
-  assertTimestamp(snapshot.observedAt, 'snapshot.observedAt');
-  assertPolicies(options);
-  try {
-    assertImage(template.image);
-    assertRect(snapshot.rect, 'snapshot.rect');
-  } catch (error) {
-    throw new ProgressError('INVALID_INPUT', error instanceof Error ? error.message : String(error));
-  }
-  if (!sameSystem(template.coordinateSystem, snapshot.coordinateSystem)) {
-    throw new ProgressError('COORDINATE_SYSTEM_MISMATCH', 'the snapshot is not in the template coordinate system: convert it explicitly first');
-  }
-  const { pixels } = template.image;
-  // Color slots: dense ids in order of first appearance, counters per slot.
-  const slotOf = new Map<number, number>();
-  const colors: number[] = [];
-  let capacity = 16;
-  let counters = new Float64Array(capacity * 5); // total, correct, wrongColor, missing, unknown
-  let invalid = 0;
-  let lastColor = TRANSPARENT_U32;
-  let slot = -1;
-  // The shared classification (also used by the work planner).
-  yield* scanEligibleRowsSliced(template, snapshot, (row) => {
-    const base = row.iy * template.image.width + row.ix0;
-    for (let k = 0; k < row.count; k++) {
-      const state = row.states[k]!;
-      if (state === PixelState.TRANSPARENT) continue;
-      const expected = pixels[base + k]!;
-      if (expected !== lastColor) {
-        lastColor = expected;
-        let found = slotOf.get(expected);
-        if (found === undefined) {
-          found = colors.length;
-          slotOf.set(expected, found);
-          colors.push(expected);
-          if (found >= capacity) {
-            const grown = new Float64Array(capacity * 2 * 5);
-            grown.set(counters);
-            counters = grown;
-            capacity *= 2;
-          }
-        }
-        slot = found * 5;
-      }
-      counters[slot]! += 1;
-      if (state === PixelState.CORRECT) counters[slot + 1]! += 1;
-      else if (state === PixelState.WRONG_COLOR) counters[slot + 2]! += 1;
-      else if (state === PixelState.MISSING) counters[slot + 3]! += 1;
-      else {
-        counters[slot + 4]! += 1;
-        if (state === PixelState.INVALID) invalid++;
-      }
-    }
-  }, false, budget);
+/** Same classifier restricted by coordinate-system bounds, including transparent exclusion counts.
+ * Useful for disjoint calculation cells; does not create or register another template. */
+export function computeProgressWithinBounds(
+    template: ProgressTemplate,
+    snapshot: CanvasSnapshot,
+    now: Timestamp,
+    options: ProgressOptions = {}
+): ProgressSnapshot {
+    return runSliced(computeProgressSliced(template, snapshot, now, options, unsliced(), true));
+}
 
-  // Excluded pixels, over the whole image (by rows, a slice boundary between rows).
-  let transparent = 0;
-  const imageWidth = template.image.width;
-  for (let row = 0; row < pixels.length; row += imageWidth) {
-    const end = Math.min(pixels.length, row + imageWidth);
-    for (let i = row; i < end; i++) if (pixels[i] === TRANSPARENT_U32) transparent++;
-    if (budget.add(end - row)) yield;
-  }
-  return assembleProgress(template, snapshot, now, options, colors, counters, invalid, transparent);
+/** computeProgress cut into slices of `budget` pixels (Phase 1C.0): same result. */
+export function* computeProgressSliced(
+    template: ProgressTemplate,
+    snapshot: CanvasSnapshot,
+    now: Timestamp,
+    options: ProgressOptions,
+    budget: SliceBudget,
+    boundedTransparent = false
+): Sliced<ProgressSnapshot> {
+    assertTimestamp(now, 'now');
+    assertTimestamp(snapshot.observedAt, 'snapshot.observedAt');
+    assertPolicies(options);
+    try {
+        assertImage(template.image);
+        assertRect(snapshot.rect, 'snapshot.rect');
+    } catch (error) {
+        throw new ProgressError('INVALID_INPUT', error instanceof Error ? error.message : String(error));
+    }
+    if (!sameSystem(template.coordinateSystem, snapshot.coordinateSystem)) {
+        throw new ProgressError(
+            'COORDINATE_SYSTEM_MISMATCH',
+            'the snapshot is not in the template coordinate system: convert it explicitly first'
+        );
+    }
+    const { pixels } = template.image;
+    // Color slots: dense ids in order of first appearance, counters per slot.
+    const slotOf = new Map<number, number>();
+    const colors: number[] = [];
+    let capacity = 16;
+    let counters = new Float64Array(capacity * 5); // total, correct, wrongColor, missing, unknown
+    let invalid = 0,
+        boundedTransparentCount = 0;
+    let lastColor = TRANSPARENT_U32;
+    let slot = -1;
+    // The shared classification (also used by the work planner).
+    yield* scanEligibleRowsSliced(
+        template,
+        snapshot,
+        (row) => {
+            const base = row.iy * template.image.width + row.ix0;
+            for (let k = 0; k < row.count; k++) {
+                const state = row.states[k]!;
+                if (state === PixelState.TRANSPARENT) {
+                    boundedTransparentCount++;
+                    continue;
+                }
+                const expected = pixels[base + k]!;
+                if (expected !== lastColor) {
+                    lastColor = expected;
+                    let found = slotOf.get(expected);
+                    if (found === undefined) {
+                        found = colors.length;
+                        slotOf.set(expected, found);
+                        colors.push(expected);
+                        if (found >= capacity) {
+                            const grown = new Float64Array(capacity * 2 * 5);
+                            grown.set(counters);
+                            counters = grown;
+                            capacity *= 2;
+                        }
+                    }
+                    slot = found * 5;
+                }
+                counters[slot]! += 1;
+                if (state === PixelState.CORRECT) counters[slot + 1]! += 1;
+                else if (state === PixelState.WRONG_COLOR) counters[slot + 2]! += 1;
+                else if (state === PixelState.MISSING) counters[slot + 3]! += 1;
+                else {
+                    counters[slot + 4]! += 1;
+                    if (state === PixelState.INVALID) invalid++;
+                }
+            }
+        },
+        false,
+        budget
+    );
+
+    // Excluded pixels, over the whole image (by rows, a slice boundary between rows).
+    let transparent = boundedTransparent ? boundedTransparentCount : 0;
+    const imageWidth = template.image.width;
+    for (let row = 0; !boundedTransparent && row < pixels.length; row += imageWidth) {
+        const end = Math.min(pixels.length, row + imageWidth);
+        for (let i = row; i < end; i++) if (pixels[i] === TRANSPARENT_U32) transparent++;
+        if (budget.add(end - row)) yield;
+    }
+    return assembleProgress(template, snapshot, now, options, colors, counters, invalid, transparent);
 }
 
 /**

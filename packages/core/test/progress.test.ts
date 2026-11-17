@@ -7,6 +7,7 @@ import {
   TRANSPARENT_U32,
   UNKNOWN,
   computeProgress,
+  computeProgressWithinBounds,
   createArraySnapshot,
   createProgressCalculator,
   eligibleRegion,
@@ -49,6 +50,18 @@ function pointOnly(s: CanvasSnapshot): CanvasSnapshot {
 
 const counts = (p: ReturnType<typeof computeProgress>) => ({ total: p.total, correct: p.correct, wrongColor: p.wrongColor, missing: p.missing, unknown: p.unknown });
 const big: CanvasRect = { minX: -50, minY: -50, width: 200, height: 200 };
+
+describe('Bounded progress uses the existing classifier', () => {
+  it.each(['down', 'up'] as const)('counts transparent exclusions only within the calculation bounds (%s)', yAxis => {
+    const system: CoordinateSystem = { yAxis, bounds: { minX: 0, minY: yAxis === 'down' ? 0 : -1, width: 2, height: 2 } };
+    const t = template(art(['a..a', '.aaa']), 0, 0, system);
+    const s = snapshot(system.bounds!, system, () => C('a'));
+    const bounded = computeProgressWithinBounds(t, s, 1000);
+    expect(bounded).toMatchObject({ correct: 2, total: 2, unknown: 0, excluded: { transparent: 2 } });
+    expect(bounded.byColor).toEqual(computeProgress(t, s, 1000).byColor);
+    expect(computeProgress(t, s, 1000).excluded.transparent).toBe(3);
+  });
+});
 
 function expectCode(fn: () => unknown, code: string): void {
   let error: unknown = null;
