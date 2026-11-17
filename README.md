@@ -6,22 +6,18 @@ d’un modèle sur une toile locale avec un agent et des ressources simulés.
 Aucune connexion automatisée à GeoPixels ou Wplace, aucun compte réel,
 cookie, jeton ou proxy. Le dessin sur GeoPixels reste manuel.
 
-La version **6.0.0-rc.1** consolidée est locale, sur
-`integrate/6.0.0-rc.1-geopixels`, et attend une validation de publication.
+La branche **main** fournit la démonstration stable **6.0.0-rc.1**, issue de la RC
+`fe392266` et de corrections documentaires. Elle ne contient pas les connecteurs expérimentaux.
 
-La [branche 2C publiée](https://github.com/Daneisra/GeoPlacer/tree/feat/phase2c-connector-transport)
-ajoute un lecteur GeoPixels couplé volontairement par HTTP privilégié Tampermonkey.
-Sa lecture réelle a été validée par l'utilisateur le 17 novembre 2026.
-La branche **locale et non publiée** `feat/phase2d-live-observation` ajoute la surveillance
-du cache et son historique ; le lecteur 0.3.1 requiert ce serveur 2D. Les heures de capture,
-réception et la fraîcheur source sont distinctes ; relire un cache ne prouve pas sa mise à jour.
-Les écritures sont testées sur une page factice locale. Aucun exécuteur réel de placement
-ou d'achat n'est disponible. La simulation reste l'environnement de référence ; l'archive
-RC consolidée ne contient pas les Phases 2A–2D.
-Voir le [guide du lecteur HTTP](docs/fr/phase2c-lecteur-http.md) et le
-[rapport Phase 2D](docs/fr/RAPPORT-PHASE2D.md). La validation 2C reste dans son
-[rapport historique](docs/fr/RAPPORT-PHASE2C.md). Les fondations sont décrites dans le
-[guide Phase 2A](docs/fr/phase2a-geopixels.md).
+La [branche 2D publiée](https://github.com/Daneisra/GeoPlacer/tree/feat/phase2d-live-observation)
+ajoute la surveillance en lecture seule du cache GeoPixels par HTTP privilégié Tampermonkey.
+Son lecteur **0.3.1** a été validé réellement par l'utilisateur. La branche **locale et non publiée**
+`feat/phase2e-regional-observation` ajoute le lecteur **0.4.0**, les régions d'observation,
+la rotation de leurs priorités et leur expiration indépendante. La recette utilisateur du 17 novembre 2026 confirme les captures régionales, la pause/expiration, la reprise, l’arrêt et la révocation, sur la fixture 8 × 5. Relire un cache ne prouve pas
+sa mise à jour côté service. Les écritures restent exclusivement factices ; aucun exécuteur
+réel de placement ou d'achat n'est disponible. Le simulateur reste utilisable.
+Voir le [guide du lecteur](docs/fr/phase2c-lecteur-http.md), le [rapport 2E](docs/fr/RAPPORT-PHASE2E.md)
+et les [validations historiques 2D](docs/fr/RAPPORT-PHASE2D.md).
 
 **Origine** : GeoPlacer est un fork de wplacer (`Arknight38/wplacer-dev`,
 issu de `luluwaffless/wplacer`), œuvre de JinxTheCatto, luluwaffless,
@@ -37,16 +33,14 @@ dépôt), une connexion Internet pour l'installation. Aucun compilateur,
 aucun droit administrateur.
 
 ```powershell
-git clone --branch integrate/6.0.0-rc.1-geopixels https://github.com/Daneisra/GeoPlacer.git
+git clone --branch main https://github.com/Daneisra/GeoPlacer.git
 cd GeoPlacer
 npm run setup:windows      # ou double-clic sur setup.bat
 ```
 
-Cette branche n’est pas encore publiée : pour un test immédiat, utilisez
-l’archive candidate locale fournie et extrayez-la, puis lancez
-`npm run setup:windows` dans son dossier. La commande Git ci-dessus sera
-utilisable après publication autorisée de cette branche. `main` contient
-encore la base historique et ne doit pas être utilisée pour cette candidate.
+Cette commande installe la démonstration stable de main : simulation et préparation/export PNG.
+Pour développer 2E, utiliser la branche locale dédiée ; ne pas la confondre avec une version publiée.
+L'archive candidate `fe39226` conserve son contenu RC, sans les phases expérimentales.
 
 Une seule commande : dépendances exactes, binaire `canvas` précompilé (sans
 compilateur), compilation, configuration sans secret, démarrage de

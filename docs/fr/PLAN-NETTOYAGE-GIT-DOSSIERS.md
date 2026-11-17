@@ -1,47 +1,49 @@
-# Plan de nettoyage Git et dossiers — actualisation Phase 2D
+# Plan de nettoyage Git et dossiers — actualisation Phase 2E
 
-Relevé du **17 novembre 2026**. La seule publication autorisée et effectuée est `feat/phase2c-connector-transport`, sur origin, SHA `ea897de4aac0a174ef038733ace29f6c20dcdad0`. La branche 2D reste locale. Aucun nettoyage n'a été exécuté. Main, remotes, tags, branches historiques et dossiers originaux sont conservés.
+Relevé du **17 novembre 2026**. Publication 2D confirmée sur origin : `a52ebd2ce9b739fbd1c7e739e0c3be046bfc9af1`. Main est promue et publiée à `cb6521dd1890839ce50f3c0a6cae127451fc71da` : RC `fe392266` plus deux corrections documentaires explicitement approuvées. Elle suit désormais `origin/main`. La Phase 2E reste locale. Aucune suppression, aucun tag ni aucune release.
 
 ## 1. Inventaire et preuve de conservation
 
-Les relations ci-dessous sont contrôlées par `git merge-base --is-ancestor`, pas déduites de l'ancienneté. RC = `fe392266a0605349f227e005a5e62904903b531f`. La référence distante conservée origin/2C contient la RC, 2A, 2B et les sept commits validés de 2C. Elle fournit maintenant une conservation distante aux cinq anciennes branches de phases ; leurs noms peuvent néanmoins rester nécessaires à des liens ou des PR.
+Relations vérifiées par `git merge-base --is-ancestor` après fetch sans prune. La RC exacte reste référencée par `integrate/6.0.0-rc.1-geopixels`. Les 16 pointes locales candidates et les cinq distantes sont toutes contenues dans **origin/main** et **origin/feat/phase2d-live-observation** ; elles figurent également dans les bundles externes restaurés. L'ancienneté ne suffit pas à autoriser leur retrait.
 
-| Branche | SHA au relevé avant commit documentaire | Présence | Commit accessible depuis | Proposition |
+| Branche | SHA au relevé avant commit documentaire final | Présence | Contenue dans | Action proposée |
 |---|---|---|---|---|
-| `backup/avant-reecriture-email` | `19d64239e883b8e77a5fefd8e3061a45b0bdd7c8` | Locale | RC, origin/2C | Candidate locale, après accord et contrôles |
-| `feat/geopixels-ghost-export` | `b8fd851a4cedaa8050a98986a2225bd226738e10` | Locale | RC, origin/2C | Candidate locale, après accord et contrôles |
-| `feat/phase1a-fondation` | `19d64239e883b8e77a5fefd8e3061a45b0bdd7c8` | Locale | RC, origin/2C | Candidate locale, après accord et contrôles |
-| `feat/phase1b0-workspace` | `01bad6921522a9b30350e4048a7eb965df5de7e9` | Locale | RC, origin/2C | Candidate locale, après accord et contrôles |
-| `feat/phase1b1-geometry-colors` | `1309f38d97b9cad11bf53c57a17427c7301c8bcc` | Locale | RC, origin/2C | Candidate locale, après accord et contrôles |
-| `feat/phase1b10-demo-hardening` | `6bee19cb0463b17c1b18d7d8c5c9a11e7e560a9e` | Locale | RC, origin/2C | Candidate locale, après accord et contrôles |
-| `feat/phase1b2-template-manager` | `9a686e3ce9ba498043fe59ff7c445ec0bb22fe2a` | Locale | RC, origin/2C | Candidate locale, après accord et contrôles |
-| `feat/phase1b3-drawing-strategies` | `9b55cdea1ea04b697eba833342e8327ab7f54ea9` | Locale | RC, origin/2C | Candidate locale, après accord et contrôles |
-| `feat/phase1b4-progress-eta` | `25c4a64c95a75ea0ce15ec1ce0513c39a5c85074` | Locale | RC, origin/2C | Candidate locale, après accord et contrôles |
-| `feat/phase1b5-resources-upgrades` | `da27c8d3a8ab9bbc3a042a6d6b541fc176e07bd1` | Locale | RC, origin/2C | Candidate locale, après accord et contrôles |
-| `feat/phase1b6-work-planner` | `1988edd267358654a6f4c10569cd1ee391d8be6a` | Locale | RC, origin/2C | Candidate locale, après accord et contrôles |
-| `feat/phase1b7-journal-simulator` | `a6c8adfa488e8e58ad3182355f15caf3ae2be034` | Locale | RC, origin/2C | Candidate locale, après accord et contrôles |
-| `feat/phase1b8-single-agent-scheduler` | `61c3efa7eae16aa648627575c41493bdf2913c30` | Locale | RC, origin/2C | Candidate locale, après accord et contrôles |
-| `feat/phase1b9-server-dashboard` | `5132edee7710b1537de0f30c31f548049eff8e29` | Locale | RC, origin/2C | Candidate locale, après accord et contrôles |
-| `feat/phase1c0-release-candidate` | `c57e4788281a319376c0f4d8699f98c170601ffa` | Locale | RC, origin/2C | Candidate locale, après accord et contrôles |
-| `feat/phase2a-geopixels-provider` | `c658dd2bb58ba79a079d9316507c80c7a9ecaf2a` | Locale | origin/2C | Référence historique récente à conserver |
-| `feat/phase2b-reader-validation` | `54add74aca4f1281fcba9f2e698ab7af0dceee91` | Locale | origin/2C | Référence historique récente à conserver |
-| `feat/phase2c-connector-transport` | `ea897de4aac0a174ef038733ace29f6c20dcdad0` | Locale | origin/2C | Référence publiée conservée, ne pas supprimer |
-| `feat/phase2d-live-observation` | `2758d270a63c7465590323c56fadfa88d52a9727` | Locale | Branche active locale | Branche active locale ; conserver |
-| `integrate/6.0.0-rc.1-geopixels` | `fe392266a0605349f227e005a5e62904903b531f` | Locale | RC, origin/2C | Conserver |
-| `main` | `46877e120f9e7bc721084fdf88a9ae8f006cb117` | Locale | RC, origin/2C | Conserver |
-| `release/6.0.0-rc.1` | `4a62e5d43e69ecf5a7932c13fe11e6153cd47d44` | Locale | RC, origin/2C | Candidate locale, après accord et contrôles |
-| `origin/HEAD` | `46877e120f9e7bc721084fdf88a9ae8f006cb117` | Distante suivie | RC, origin/2C | Conserver |
-| `origin/feat/phase1b10-demo-hardening` | `6bee19cb0463b17c1b18d7d8c5c9a11e7e560a9e` | Distante suivie | RC, origin/2C | Candidate distante, après accord et contrôle des liens/PR |
-| `origin/feat/phase1b7-journal-simulator` | `a6c8adfa488e8e58ad3182355f15caf3ae2be034` | Distante suivie | RC, origin/2C | Candidate distante, après accord et contrôle des liens/PR |
-| `origin/feat/phase1b8-single-agent-scheduler` | `61c3efa7eae16aa648627575c41493bdf2913c30` | Distante suivie | RC, origin/2C | Candidate distante, après accord et contrôle des liens/PR |
-| `origin/feat/phase1b9-server-dashboard` | `5132edee7710b1537de0f30c31f548049eff8e29` | Distante suivie | RC, origin/2C | Candidate distante, après accord et contrôle des liens/PR |
-| `origin/feat/phase1c0-release-candidate` | `c57e4788281a319376c0f4d8699f98c170601ffa` | Distante suivie | RC, origin/2C | Candidate distante, après accord et contrôle des liens/PR |
-| `origin/feat/phase2c-connector-transport` | `ea897de4aac0a174ef038733ace29f6c20dcdad0` | Distante suivie | origin/2C | Référence publiée conservée, ne pas supprimer |
-| `origin/main` | `46877e120f9e7bc721084fdf88a9ae8f006cb117` | Distante suivie | RC, origin/2C | Conserver |
-| `upstream/HEAD` | `46877e120f9e7bc721084fdf88a9ae8f006cb117` | Distante suivie | RC, origin/2C | Conserver |
-| `upstream/main` | `46877e120f9e7bc721084fdf88a9ae8f006cb117` | Distante suivie | RC, origin/2C | Conserver |
+| `backup/avant-reecriture-email` | `19d64239e883b8e77a5fefd8e3061a45b0bdd7c8` | Locale | main, RC, 2D | Candidate après accord explicite, SHA à revérifier |
+| `feat/geopixels-ghost-export` | `b8fd851a4cedaa8050a98986a2225bd226738e10` | Locale | main, RC, 2D | Candidate après accord explicite, SHA à revérifier |
+| `feat/phase1a-fondation` | `19d64239e883b8e77a5fefd8e3061a45b0bdd7c8` | Locale | main, RC, 2D | Candidate après accord explicite, SHA à revérifier |
+| `feat/phase1b0-workspace` | `01bad6921522a9b30350e4048a7eb965df5de7e9` | Locale | main, RC, 2D | Candidate après accord explicite, SHA à revérifier |
+| `feat/phase1b1-geometry-colors` | `1309f38d97b9cad11bf53c57a17427c7301c8bcc` | Locale | main, RC, 2D | Candidate après accord explicite, SHA à revérifier |
+| `feat/phase1b10-demo-hardening` | `6bee19cb0463b17c1b18d7d8c5c9a11e7e560a9e` | Locale | main, RC, 2D | Candidate après accord explicite, SHA à revérifier |
+| `feat/phase1b2-template-manager` | `9a686e3ce9ba498043fe59ff7c445ec0bb22fe2a` | Locale | main, RC, 2D | Candidate après accord explicite, SHA à revérifier |
+| `feat/phase1b3-drawing-strategies` | `9b55cdea1ea04b697eba833342e8327ab7f54ea9` | Locale | main, RC, 2D | Candidate après accord explicite, SHA à revérifier |
+| `feat/phase1b4-progress-eta` | `25c4a64c95a75ea0ce15ec1ce0513c39a5c85074` | Locale | main, RC, 2D | Candidate après accord explicite, SHA à revérifier |
+| `feat/phase1b5-resources-upgrades` | `da27c8d3a8ab9bbc3a042a6d6b541fc176e07bd1` | Locale | main, RC, 2D | Candidate après accord explicite, SHA à revérifier |
+| `feat/phase1b6-work-planner` | `1988edd267358654a6f4c10569cd1ee391d8be6a` | Locale | main, RC, 2D | Candidate après accord explicite, SHA à revérifier |
+| `feat/phase1b7-journal-simulator` | `a6c8adfa488e8e58ad3182355f15caf3ae2be034` | Locale | main, RC, 2D | Candidate après accord explicite, SHA à revérifier |
+| `feat/phase1b8-single-agent-scheduler` | `61c3efa7eae16aa648627575c41493bdf2913c30` | Locale | main, RC, 2D | Candidate après accord explicite, SHA à revérifier |
+| `feat/phase1b9-server-dashboard` | `5132edee7710b1537de0f30c31f548049eff8e29` | Locale | main, RC, 2D | Candidate après accord explicite, SHA à revérifier |
+| `feat/phase1c0-release-candidate` | `c57e4788281a319376c0f4d8699f98c170601ffa` | Locale | main, RC, 2D | Candidate après accord explicite, SHA à revérifier |
+| `feat/phase2a-geopixels-provider` | `c658dd2bb58ba79a079d9316507c80c7a9ecaf2a` | Locale | 2D | Conserver |
+| `feat/phase2b-reader-validation` | `54add74aca4f1281fcba9f2e698ab7af0dceee91` | Locale | 2D | Conserver |
+| `feat/phase2c-connector-transport` | `ea897de4aac0a174ef038733ace29f6c20dcdad0` | Locale | 2D | Conserver |
+| `feat/phase2d-live-observation` | `a52ebd2ce9b739fbd1c7e739e0c3be046bfc9af1` | Locale | 2D | Conserver |
+| `feat/phase2e-regional-observation` | `03dfa0919662b39552892499ed51b67402812b86` | Locale | 2D | Active locale ; ne pas publier en 2E |
+| `integrate/6.0.0-rc.1-geopixels` | `fe392266a0605349f227e005a5e62904903b531f` | Locale | main, RC, 2D | Conserver |
+| `main` | `cb6521dd1890839ce50f3c0a6cae127451fc71da` | Locale | main | Conserver |
+| `release/6.0.0-rc.1` | `4a62e5d43e69ecf5a7932c13fe11e6153cd47d44` | Locale | main, RC, 2D | Candidate après accord explicite, SHA à revérifier |
+| `origin/HEAD` | `cb6521dd1890839ce50f3c0a6cae127451fc71da` | Distante suivie | main | Conserver |
+| `origin/feat/phase1b10-demo-hardening` | `6bee19cb0463b17c1b18d7d8c5c9a11e7e560a9e` | Distante suivie | main, RC, 2D | Candidate après accord explicite, SHA à revérifier |
+| `origin/feat/phase1b7-journal-simulator` | `a6c8adfa488e8e58ad3182355f15caf3ae2be034` | Distante suivie | main, RC, 2D | Candidate après accord explicite, SHA à revérifier |
+| `origin/feat/phase1b8-single-agent-scheduler` | `61c3efa7eae16aa648627575c41493bdf2913c30` | Distante suivie | main, RC, 2D | Candidate après accord explicite, SHA à revérifier |
+| `origin/feat/phase1b9-server-dashboard` | `5132edee7710b1537de0f30c31f548049eff8e29` | Distante suivie | main, RC, 2D | Candidate après accord explicite, SHA à revérifier |
+| `origin/feat/phase1c0-release-candidate` | `c57e4788281a319376c0f4d8699f98c170601ffa` | Distante suivie | main, RC, 2D | Candidate après accord explicite, SHA à revérifier |
+| `origin/feat/phase2c-connector-transport` | `ea897de4aac0a174ef038733ace29f6c20dcdad0` | Distante suivie | 2D | Conserver |
+| `origin/feat/phase2d-live-observation` | `a52ebd2ce9b739fbd1c7e739e0c3be046bfc9af1` | Distante suivie | 2D | Conserver |
+| `origin/main` | `cb6521dd1890839ce50f3c0a6cae127451fc71da` | Distante suivie | main | Conserver |
+| `upstream/HEAD` | `46877e120f9e7bc721084fdf88a9ae8f006cb117` | Distante suivie | main, RC, 2D | Conserver |
+| `upstream/main` | `46877e120f9e7bc721084fdf88a9ae8f006cb117` | Distante suivie | main, RC, 2D | Conserver |
 
-**Les 16 candidates locales explicites :**
+**Candidates locales nominatives (16)**
 
 - `backup/avant-reecriture-email` — `19d64239e883b8e77a5fefd8e3061a45b0bdd7c8`.
 - `feat/geopixels-ghost-export` — `b8fd851a4cedaa8050a98986a2225bd226738e10`.
@@ -60,7 +62,7 @@ Les relations ci-dessous sont contrôlées par `git merge-base --is-ancestor`, p
 - `feat/phase1c0-release-candidate` — `c57e4788281a319376c0f4d8699f98c170601ffa`.
 - `release/6.0.0-rc.1` — `4a62e5d43e69ecf5a7932c13fe11e6153cd47d44`.
 
-**Les cinq candidates distantes explicites :**
+**Candidates distantes nominatives (5)**
 
 - `origin/feat/phase1b10-demo-hardening` — `6bee19cb0463b17c1b18d7d8c5c9a11e7e560a9e`.
 - `origin/feat/phase1b7-journal-simulator` — `a6c8adfa488e8e58ad3182355f15caf3ae2be034`.
@@ -68,93 +70,74 @@ Les relations ci-dessous sont contrôlées par `git merge-base --is-ancestor`, p
 - `origin/feat/phase1b9-server-dashboard` — `5132edee7710b1537de0f30c31f548049eff8e29`.
 - `origin/feat/phase1c0-release-candidate` — `c57e4788281a319376c0f4d8699f98c170601ffa`.
 
-Conserver activement main, la RC consolidée, 2C publiée et 2D active. Conserver 2A et 2B comme jalons récents ; ne pas supprimer les références upstream/HEAD ou les références internes Codex. Un seul worktree de développement a été relevé. Les clones de vérification sont des dépôts autonomes dans Temp, sans alternates ; ils ne sont pas des worktrees à détacher.
+Conserver main, la RC exacte, 2C et 2D publiées, 2A/2B comme références récentes, la branche active 2E et les références internes de récupération. Aucun ancien commit n'est réécrit. Les quatre WIP restent dans leur pack externe : ils ne sont pas implicitement couverts par un bundle `--all`.
 
-La recherche des PR ouvertes dans Daneisra/GeoPlacer au 17 novembre ne renvoie aucune PR ; cette vérification est à refaire avant tout retrait et ne couvre pas tous les liens ou PR dans d'autres dépôts. Pas de tag d'archive créé. Un tag par ancienne branche n'est pas indispensable si les pointes sont conservées et inventoriées ; tout tag futur demande un accord explicite.
+Deux worktrees : le dossier de développement sur 2E et le worktree propre de promotion de main dans Temp (`%TEMP%/gp-phase2e-main-promotion-…/GeoPlacer-main`). Celui-ci ne contient aucune donnée applicative ; il a ensuite été détaché à cb6521dd pour libérer main, sans supprimer ses fichiers. Les clones de restauration sont autonomes, sans alternates.
 
-### Contrôles et commandes futures de branches
+Contrôle GitHub au relevé : collections de PR ouvertes **et fermées** vides pour Daneisra/GeoPlacer et Arknight38/wplacer-dev. Les liens vers les SHA restent stables ; supprimer une branche casse ses liens `/tree/<branche>`. Les références dans les documents suivis ont été inventoriées (`test-logs/phase2e/historical-links.json`) ; les favoris et liens externes ne peuvent pas être garantis exhaustivement. Refaire ces vérifications juste avant toute suppression.
 
-**Ces commandes sont un plan, pas une autorisation d'exécution.** Arrêter les serveurs avant les changements de branches ; préserver le travail non commité et sauvegarder les données ignorées. Créer un nouveau bundle comprenant le dernier état 2D et tester sa restauration avant la première suppression.
+### Commandes futures, uniquement après autorisation nominative
+
+Aucune commande de suppression ci-dessous n'a été exécutée. Arrêter les serveurs, vérifier l'arbre propre et sauvegarder aussi les données ignorées avant l'intervention.
 
 ```powershell
-git status --porcelain=v1
 git fetch --no-prune origin
-git ls-remote origin refs/heads/feat/phase2c-connector-transport refs/heads/main
-git for-each-ref --format='%(refname)|%(objectname)|%(upstream)'
+git status --porcelain=v1
 git worktree list --porcelain
 git fsck --full
 git bundle verify '<bundle-externe-verifie>'
-# Contrôler également le pack WIP et la sauvegarde des données privées.
-```
-
-Exemple précis, **uniquement après accord de suppression locale** :
-
-```powershell
 $brancheHistorique = 'feat/phase1b0-workspace'
 $shaHistorique = '01bad6921522a9b30350e4048a7eb965df5de7e9'
 if ((git rev-parse $brancheHistorique) -ne $shaHistorique) { throw 'Pointe modifiée' }
-if ((git rev-parse origin/feat/phase2c-connector-transport) -ne 'ea897de4aac0a174ef038733ace29f6c20dcdad0') { throw 'Référence de conservation à réexaminer' }
-git merge-base --is-ancestor $shaHistorique origin/feat/phase2c-connector-transport
-if ($LASTEXITCODE -ne 0) { throw 'Commit non conservé à distance' }
-git merge-base --is-ancestor $shaHistorique HEAD
-if ($LASTEXITCODE -ne 0) { throw 'Branche active insuffisante' }
+git merge-base --is-ancestor $shaHistorique origin/main
+if ($LASTEXITCODE -ne 0) { throw 'Commit absent de main publié' }
+git merge-base --is-ancestor $shaHistorique origin/feat/phase2d-live-observation
+if ($LASTEXITCODE -ne 0) { throw 'Commit absent de 2D publiée' }
+# Uniquement après accord sur cette branche précise :
 git branch -d $brancheHistorique
-# Si -d refuse, arrêter ; aucun -D et aucun forçage.
+# Si -d refuse : arrêter, aucun -D, aucun forçage.
 ```
 
-Répéter les contrôles pour chaque nom du tableau, sans boucle de suppression. Pour une ancienne branche distante, après accord distinct, revue des PR et liens, vérification de son SHA par `git ls-remote`, et conservation de ce SHA dans origin/2C :
+Pour chaque candidate distante du tableau, vérifier son SHA par `git ls-remote origin refs/heads/<branche>` et son accessibilité depuis main/2D publiées, puis réexaminer PR/liens. Exemple uniquement après autorisation spécifique :
 
 ```powershell
-git push --dry-run origin --delete feat/phase1b7-journal-simulator
-# Seulement après l'accord de suppression distante :
-git push origin --delete feat/phase1b7-journal-simulator
-git ls-remote --heads origin
+$brancheDistante = 'feat/phase1b7-journal-simulator'
+$shaAttendu = 'a6c8adfa488e8e58ad3182355f15caf3ae2be034'
+$ligne = git ls-remote origin "refs/heads/$brancheDistante"
+if (($ligne -split '\s+')[0] -ne $shaAttendu) { throw 'Pointe distante modifiée' }
+git push --dry-run origin --delete $brancheDistante
+# Après nouvelle validation du résultat :
+git push origin --delete $brancheDistante
 ```
 
-Ces deux push de suppression ne sont PAS autorisés en Phase 2D. Ne pas supprimer origin/2C ou publier 2D implicitement en appliquant ce plan.
+Pas de `--force`, `gc`, `prune`, `clean -fd`, `reset --hard`, ni suppression de références internes. Appliquer le contrôle SHA séparément à chaque ligne nominative, pas à une liste reconstruite de branches « anciennes ».
 
-## 2. Promotion proposée de main
+## 2. Main : promotion effectuée
 
-Main local et origin/main restent `46877e120f9e7bc721084fdf88a9ae8f006cb117`. Main local suit **upstream/main**, pas origin/main. L'avance rapide vers la RC `fe392266` est vérifiée possible ; ne pas promouvoir le portage expérimental à la place de cette RC validée.
+Main est passée de `46877e120f9e7bc721084fdf88a9ae8f006cb117` à la RC `fe392266a0605349f227e005a5e62904903b531f` puis au commit documentaire `cb6521dd1890839ce50f3c0a6cae127451fc71da`, par une seule avance rapide contrôlée. L'écart au SHA RC initial a été demandé explicitement parce que README/installation décrivaient encore main comme Wplacer ; l'utilisateur a approuvé le nouveau SHA avant publication. Aucun code 2A–2E n'est présent sur main.
 
-La promotion conserve le lien de fork et les anciens commits. Les liens à SHA restent stables ; le contenu des liens à main changera. Les forks divergents ne sont pas mis à jour automatiquement. Prévenir que l'ancien Wplacer devient l'application locale GeoPlacer, avec nouvelle installation et routes historiques désactivées. Conserver LICENSE AGPL-3.0-only, MODIFICATIONS et les attributions JinxTheCatto, luluwaffless, Arknight38 et contributeurs.
+La RC a réussi ses **735 tests**, un facultatif ignoré, son build et son installation autonome. Le commit suivant change uniquement README.md et docs/fr/installation-windows.md. Serveurs arrêtés, worktree main propre, bundle documentaire restauré, push à blanc puis push normal ; SHA distant égal. Le suivi main → origin/main est corrigé. Aucun `pull` sur main, aucun push upstream.
 
-Avant promotion : sauvegarde Git et données à froid, serveur arrêté, arbre propre, protection de branche recontrôlée sur GitHub, compatibilité des instructions d'installation. Si une règle impose une PR, respecter cette règle et réexaminer le SHA obtenu ; ne pas contourner la protection pour imposer une avance rapide. Un workflow CI obligatoire ne peut être exigé sous un nom inexistant.
+Métadonnées GitHub examinées : branche non protégée, collection de rulesets vide ; aucun contournement. Pour la suite, proposer une PR obligatoire, au moins une revue et les checks CI avant fusion, avec protection contre force-push/suppression. Ces réglages n'ont pas été modifiés et requièrent un accord distinct. Le lien de fork et l'historique d'origine restent conservés ; les forks ne sont pas avancés automatiquement. Maintenir AGPL-3.0-only, LICENSE, MODIFICATIONS et les crédits JinxTheCatto/luluwaffless/Arknight38/contributeurs.
 
-**Procédure future après accord spécifique pour main et son push :**
+L'ancien `.env` était déjà dans main historique et ne contient que HOST/NODE_ENV/ports publics et commentaires ; il est absent de la RC. Contrôle des 163 commits accessibles supplémentaires : 1 140 blobs, aucun secret à forte confiance détecté. Ce contrôle ne constitue pas une preuve universelle d'absence de secret.
 
-```powershell
-git status --porcelain=v1
-git fetch --no-prune origin
-git ls-remote origin refs/heads/main
-if ((git rev-parse main) -ne '46877e120f9e7bc721084fdf88a9ae8f006cb117') { throw 'Main local a changé' }
-if ((git rev-parse origin/main) -ne '46877e120f9e7bc721084fdf88a9ae8f006cb117') { throw 'Main distant a changé' }
-git merge-base --is-ancestor origin/main fe392266a0605349f227e005a5e62904903b531f
-if ($LASTEXITCODE -ne 0) { throw 'Avance rapide impossible' }
-git switch main
-git merge --ff-only fe392266a0605349f227e005a5e62904903b531f
-if ($LASTEXITCODE -ne 0) { throw 'Arrêter et examiner' }
-git branch --set-upstream-to=origin/main main
-npm.cmd run check:logged
-if ($LASTEXITCODE -ne 0) { throw 'Contrôles en échec' }
-npm.cmd run build
-if ($LASTEXITCODE -ne 0) { throw 'Build en échec' }
-git diff --check
-git status --porcelain=v1
-git rev-parse HEAD
-# Exiger arbre propre et SHA fe392266 avant le push explicitement approuvé :
-git push --dry-run origin main:main
-git push origin main:main
-git ls-remote origin refs/heads/main
-```
-
-Aucun git pull sur main. Ne pas utiliser update.bat pour cette promotion : il dépend du suivi courant. Le générateur d'archive doit rester épinglé au commit réellement diffusé ; l'archive RC fe39226 est conservée comme RC et n'inclut pas 2A–2D. Aucun tag ni release ne découle de ce plan.
-
-L'ancien historique contient un .env de configuration par défaut, déjà examiné en 2B ; retirer un fichier de HEAD n'efface pas l'histoire. Le contrôle de publication 2C a examiné les 162 blobs des 31 commits non encore présents sur origin, sans secret à forte confiance ni données privées détectées. Cela ne garantit pas l'absence de tout secret imaginable et ne justifie aucune réécriture de l'histoire.
+L'archive RC `fe39226` reste épinglée à son contenu, avec son empreinte d'origine. Aucun tag, release ou nouvel artefact public n'a été créé.
 
 ## 3. Sauvegardes vérifiées et rétention
 
-Les sauvegardes Git n'incluent pas automatiquement les fichiers ignorés. Le pack WIP complète les bundles : ne pas le remplacer par un simple bundle --all. Les résultats détaillés de restauration 2C restent dans [RAPPORT-PHASE2C.md](RAPPORT-PHASE2C.md).
+Les sauvegardes Git et celles des données sont distinctes. Les nouveaux bundles externes sous `GeoPlacer-sauvegardes` :
+
+| Sous-dossier / fichier | SHA-256 | Vérification |
+|---|---|---|
+| `2026-11-17-phase2d-publication/GeoPlacer-phase2d-publication.bundle` | `fb0b819a6c4878f03d50c9650866cf31d72f814069dd6ef99ced3a862ef8b68a` | Bundle vérifié, restauration autonome et fsck 0 ; aucun alternates |
+| `2026-11-17-avant-phase2e/GeoPlacer-avant-phase2e.bundle` | `8379ebff4e21709f1a0dc3f7b88b8b599d47da68d8cf35eef579f0b1b1e4c524` | Bundle vérifié, restauration autonome et fsck 0 ; aucun alternates |
+| `2026-11-17-main-rc-documentation/GeoPlacer-main-rc-documentation.bundle` | `f56a0831b6d502150acf0b872cbfde638a34416432bacb07d597a270812aa0e4` | Bundle vérifié, restauration autonome et fsck 0 ; aucun alternates |
+
+Sauvegardes antérieures conservées, non recréées pendant 2E :
+
+
+Les sauvegardes Git ne couvrent pas les données ignorées. Le pack WIP complète les bundles : ne pas le remplacer par un simple bundle --all. Les résultats détaillés de restauration 2C restent dans [RAPPORT-PHASE2C.md](RAPPORT-PHASE2C.md).
 
 | Sauvegarde externe sous GeoPlacer-sauvegardes | SHA-256 | Preuve |
 |---|---|---|
@@ -165,9 +148,11 @@ Les sauvegardes Git n'incluent pas automatiquement les fichiers ignorés. Le pac
 
 Pack externe `wip-objects/all-objects-before-phase2b.pack` : SHA-256 `5847a9dd2e2c91c44852e100f3cc953b71a5297a81936333e246c27325afb939`. Quatre WIP conservés : `938fe05710b2ed300cb6ef2bd7911c9964fda8cf`, `745de607b7f8dd041f665af2db326b292a32ebce`, `52f32f4b7011631ae809342b4e34219713c5223f`, `1eb4d4ebafac7709cc4cb592d39f12286547cd80`. L'utilitaire de récupération et les manifestes sont externes et privés ; les références de récupération sont créées uniquement dans une destination neuve de restauration.
 
-Conserver les jalons avant réécriture, avant 2A, 2C validée et le dernier état avant nettoyage. Pour les données, conserver trois sauvegardes récentes et trois mensuelles, sans entamer une rotation pendant cette phase. Inclure configuration, modèles, journaux, checkpoints, simulateur et `connector-observations.json`. Les capacités de canal ne sont pas restaurées. Garder une copie sur un autre support physique et vérifier une restauration avant toute suppression. Aucun GC/prune, nettoyage forcé ou réécriture requis.
+Conserver les jalons avant réécriture, avant 2A, 2C validée et le dernier état avant nettoyage. Pour les données, conserver trois sauvegardes récentes et trois mensuelles, sans entamer une rotation pendant cette phase. Inclure configuration, modèles, journaux, checkpoints, simulateur et `connector-observations.json` et `connector-regions.json`. Les capacités de canal ne sont pas restaurées. Garder une copie sur un autre support physique et vérifier une restauration avant toute suppression. Aucun GC/prune, nettoyage forcé ou réécriture requis.
 
-## 4. Dossiers : inventaire historique et vérification actualisée
+
+## 4. Dossiers : inventaire historique et contrôle 2E
+
 
 L'inventaire détaillé suivant est conservé du **16 novembre 2026 (2B)** ; les tailles de GeoPlacer, sauvegardes et dépendances ne sont pas des mesures courantes du 17. La vérification SHA-256 actuelle porte sur les deux dossiers candidats et leurs copies, pas sur une reconstruction de l'audit.
 
@@ -194,48 +179,49 @@ Tailles **logiques** au relevé initial, pas l'allocation NTFS ; les jonctions n
 
 
 
-### Vérification du 17 novembre et retrait des deux originaux
 
-Les copies existent dans Archives-Projets depuis 2C. Les 50 fichiers cachés ou visibles, leurs tailles et tous leurs SHA-256 correspondent toujours aux originaux. Liens et jonctions refusés ; aucun ancien script exécuté. Manifestes conservés à côté des copies :
+### Copies revérifiées en 2E
 
-| Dossier | Fichiers | Octets | SHA-256 du manifeste |
-|---|---:|---:|---|
-| GeoPlacer-phase0 | 18 | 531897 | `20b731a9e61cc196cce6d1399c1e8655f422bb0d76a880ecd03d3c3d212cbe60` |
-| GeoPlacer-phase1a | 32 | 99498 | `89ad475b700f2d1966f9969c40abd3d5ce073a3a2bdcd3634729aaf599f9c14d` |
+- Phase0 : **18 fichiers, 531 897 octets** ; manifeste `20b731a9e61cc196cce6d1399c1e8655f422bb0d76a880ecd03d3c3d212cbe60`.
+- Phase1a : **32 fichiers, 99 498 octets** ; manifeste `89ad475b700f2d1966f9969c40abd3d5ce073a3a2bdcd3634729aaf599f9c14d`.
 
-Seuls `D:\Téléchargements\Code\GeoPlacer-phase0` et `D:\Téléchargements\Code\GeoPlacer-phase1a` sont proposés à retrait ultérieur, avec accord explicite. Ne pas déplacer ou supprimer GeoPlacer, Audit, GhostPixelBot-FR, sauvegardes ou copies d'archives. Le gain est environ 0,6 Mo.
+Tous les fichiers, y compris cachés, correspondent à leurs originaux et au manifeste original : chemin relatif, taille et SHA-256. Aucune jonction ou lien symbolique dans les arbres contrôlés ; aucun ancien script exécuté. Les originaux et Archives-Projets restent intégralement en place.
 
-Avant retrait : choisir un autre disque physique, copier les deux archives ET leurs manifestes, les bundles, pack WIP, notices et données privées nécessaires ; comparer tous les fichiers au SHA-256, puis restaurer un bundle et les données dans une destination neuve. Une autre partition du même disque ne couvre pas sa perte. Exemple de contrôle du support, **sans supposer que E: existe** :
+### Autre support physique : préalable non satisfait
+
+Partition/disque physique vérifiés : **D: → disque 2**, **C: → disque 1**, **E: → disque 0**. E: est donc un autre disque dans cette machine, mais aucune copie durable GeoPlacer n'a été retrouvée dans les emplacements usuels examinés sur E: ou C:. Ce contrôle ne prétend pas inventorier tout leur contenu. Les restaurations dans %TEMP% sur C: sont sur un autre disque mais restent des tests temporaires, pas une politique de sauvegarde durable.
+
+Avant tout retrait, faire choisir et autoriser une destination durable sur un disque indépendant, idéalement déconnectable. Y copier dans un dossier neuf :
+
+1. Les trois nouveaux bundles ci-dessus, leurs SHA256SUMS et preuves de restauration ; puis le dernier bundle 2E après ses commits.
+2. L'ensemble critique `2026-11-17-phase2c-final` : données applicatives privées, pack WIP, références/manifeste et utilitaire de récupération, pas seulement le bundle.
+3. Les jalons antérieurs conservés selon la rétention, les archives Phase0/Phase1a et leurs manifestes.
+4. Une sauvegarde à froid actualisée des données utiles : configuration locale, modèles, journaux, checkpoints, simulateur, historique et configuration des régions. Une capacité de canal ne doit jamais être sauvegardée pour être réactivée.
+
+Contrôler les disques par `Get-Partition`/`Get-Disk`, les chemins absolus, l'absence de jonction, puis comparer nombres de fichiers, tailles et SHA-256. Restaurer dans une destination neuve sur ce support et vérifier Git (y compris les quatre WIP), modèles et données. Préserver les preuves sur le support. Deux partitions d'un même disque ne suffisent pas. Aucune copie vers E: n'a été effectuée sans accord.
+
+### Retrait futur proposé, pas exécuté
+
+Uniquement après copie indépendante et accord nominatif, les deux seuls originaux candidats sont :
+
+- `D:\Téléchargements\Code\GeoPlacer-phase0`.
+- `D:\Téléchargements\Code\GeoPlacer-phase1a`.
+
+Prévisualisation PowerShell, après vérification des manifestes et des chemins résolus :
 
 ```powershell
-# E: est un exemple à remplacer par le support réellement choisi.
-$disqueProjet = Get-Partition -DriveLetter D | Get-Disk
-$disqueSauvegarde = Get-Partition -DriveLetter E | Get-Disk
-if ($disqueProjet.UniqueId -eq $disqueSauvegarde.UniqueId) { throw 'Même support physique : choisir un autre disque' }
-# Copier vers un dossier neuf, refuser toute destination existante et les jonctions.
-# Vérifier fichiers, tailles et SHA-256 après copie ET après restauration.
+$racineCode = [IO.Path]::GetFullPath('D:\Téléchargements\Code')
+$cibleHistorique = (Resolve-Path -LiteralPath (Join-Path $racineCode 'GeoPlacer-phase0')).Path
+if ($cibleHistorique -ne (Join-Path $racineCode 'GeoPlacer-phase0')) { throw 'Chemin inattendu' }
+if ((Get-Item -LiteralPath $cibleHistorique -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Jonction refusée' }
+# Revérifier aussi tous les descendants et leurs SHA-256.
+Remove-Item -LiteralPath $cibleHistorique -Recurse -WhatIf
+# Répéter séparément pour Phase1a ; ne retirer -WhatIf qu'après autorisation.
 ```
 
-Les scripts historiques peuvent contenir des anciens chemins : les conserver comme preuves inertes. Les fichiers de sauvegarde sont privés et ne doivent pas être publiés sur GitHub.
+Le contrôle doit rester PowerShell de bout en bout ; aucune interpolation vers cmd/batch pour supprimer. Ne retirer ni GeoPlacer, ni GeoPlacer-Audit, ni GhostPixelBot-FR, ni GeoPlacer-sauvegardes, ni Archives-Projets.
 
-Après validation de la copie sur autre support, réexaminer chaque chemin résolu et la présence des manifestes, puis demander l'accord précis de retrait. Prévisualisation seulement :
-
-```powershell
-$racineCode = (Resolve-Path -LiteralPath 'D:\Téléchargements\Code').Path
-$ancienPhase0 = (Resolve-Path -LiteralPath 'D:\Téléchargements\Code\GeoPlacer-phase0').Path
-$ancienPhase1a = (Resolve-Path -LiteralPath 'D:\Téléchargements\Code\GeoPlacer-phase1a').Path
-if ($ancienPhase0 -ne (Join-Path $racineCode 'GeoPlacer-phase0')) { throw 'Chemin phase0 inattendu' }
-if ($ancienPhase1a -ne (Join-Path $racineCode 'GeoPlacer-phase1a')) { throw 'Chemin phase1a inattendu' }
-if ((Get-Item -LiteralPath $ancienPhase0 -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Lien à examiner' }
-if ((Get-Item -LiteralPath $ancienPhase1a -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Lien à examiner' }
-# Recontrôler aussi les descendants et les SHA-256 immédiatement avant le retrait.
-Remove-Item -LiteralPath $ancienPhase0 -Recurse -WhatIf
-Remove-Item -LiteralPath $ancienPhase1a -Recurse -WhatIf
-```
-
-Ces commandes ne sont pas exécutées ici. Retirer -WhatIf serait une action destructive nécessitant une nouvelle autorisation après lecture des preuves ; aucune commande de retrait réelle n'est préparée pour exécution automatique.
-
-## 5. Organisation cible et décisions requises
+## 5. Organisation cible et décisions restantes
 
 ```text
 Code/
@@ -248,6 +234,6 @@ Code/
     └── GeoPlacer-phase1a/
 ```
 
-Les deux originaux subsistent aujourd'hui en plus de cette arborescence. Les branches 2D et les commits documentaires sont locaux seulement. Autorisations encore nécessaires : copie sur un autre support choisi, retrait des deux originaux nommés, suppressions locales/distance des branches nommées, tags d'archive éventuels, promotion et push de main, modifications GitHub de protection/CI, toute publication 2D. Aucune de ces actions ne résulte automatiquement du push 2C autorisé.
+Les deux originaux subsistent en plus de cette cible. Restent soumis à votre accord : destination et copie durable sur autre support, retrait des deux originaux, suppression des 16 branches locales et cinq distantes nommées, changements GitHub de protection/CI, publication 2E et tout tag/release. Main et 2D ont déjà été publiées avec les autorisations de cette phase ; ne pas répéter leur promotion.
 
-Avant et après toute intervention future : status, refs et SHA, remotes, worktrees, fsck ; restauration réelle indépendante ; installation, import/export, modèle et simulation. Conserver les manifestes et journaux avec les sauvegardes. Arrêter sur toute divergence au lieu de forcer.
+Avant/après une future intervention : contrôler refs/SHA/worktrees, fsck, restaurations Git/données, installation, import/export, simulateur et lecteur. Arrêter sur toute divergence et conserver les journaux. Ne jamais déduire une autorisation de nettoyage de la réussite de ces vérifications.

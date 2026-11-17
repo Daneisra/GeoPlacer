@@ -11,10 +11,16 @@ double-cliquer sur `setup.bat` (ou `npm run setup:windows`). Ensuite,
 
 ## Candidate consolidée 6.0.0-rc.1
 
-Utiliser l’archive candidate issue du commit de consolidation, ou la branche
-`integrate/6.0.0-rc.1-geopixels` après sa publication autorisée. L’ancienne
-archive du commit `4a62e5d` ne contient ni l’export intégré ni ces palettes et
-ne représente plus la candidate complète. `main` reste historique.
+Utiliser main, version de démonstration issue de la RC consolidée `fe392266`,
+ou l’archive candidate correspondante. L’ancienne archive du commit `4a62e5d`
+ne contient ni l’export intégré ni les palettes et ne représente plus la
+candidate complète. Les connecteurs expérimentaux 2A–2D ne sont pas inclus.
+
+```powershell
+git clone --branch main https://github.com/Daneisra/GeoPlacer.git
+cd GeoPlacer
+npm run setup:windows
+```
 
 Après l’installation : tableau de bord pour la **simulation locale**, menu
 **Préparer pour GeoPixels** pour le PNG et ses quatre modes de palette.
