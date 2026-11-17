@@ -26,70 +26,84 @@ export interface CommandResultLike {
 }
 
 export interface EngineApi {
-  readonly connector?: import('@geoplacer/engine-service').GeoPixelsProvider;
-  readonly pairing?: import('@geoplacer/engine-service').ConnectorPairing;
-  selectSource?(source: 'simulation' | 'geopixels'): Promise<CommandResultLike>;
-  bindConnector?(): Promise<unknown>;
-  connectorView?(): Promise<unknown>;
-  connectorProposals?(policy: import('@geoplacer/core').UpgradePolicy): Promise<unknown>;
+    readonly connector?: import('@geoplacer/engine-service').GeoPixelsProvider;
+    readonly pairing?: import('@geoplacer/engine-service').ConnectorPairing;
+    selectSource?(source: 'simulation' | 'geopixels'): Promise<CommandResultLike>;
+    bindConnector?(): Promise<unknown>;
+    connectorView?(): Promise<unknown>;
+    configureConnectorRegions?(regions: unknown, restore?: boolean): Promise<unknown>;
+    connectorProposals?(policy: import('@geoplacer/core').UpgradePolicy): Promise<unknown>;
 
-  status(): unknown;
-  start(): Promise<CommandResultLike>;
-  pause(): Promise<CommandResultLike>;
-  resume(): CommandResultLike;
-  stop(options?: { readonly abort?: boolean }): Promise<CommandResultLike>;
-  subscribe(listener: (e: EngineEventEnvelopeLike) => void): () => void;
-  readonly stream: { readonly id: string; readonly seq: number };
+    status(): unknown;
+    start(): Promise<CommandResultLike>;
+    pause(): Promise<CommandResultLike>;
+    resume(): CommandResultLike;
+    stop(options?: { readonly abort?: boolean }): Promise<CommandResultLike>;
+    subscribe(listener: (e: EngineEventEnvelopeLike) => void): () => void;
+    readonly stream: { readonly id: string; readonly seq: number };
 
-  listTemplates(): Promise<unknown>;
-  importTemplate(input: { readonly name: string; readonly png: Uint8Array; readonly x: number; readonly y: number; readonly strategy: string }): Promise<unknown>;
-  templateInfoOf(templateId: string): Promise<unknown>;
-  templateImage(templateId: string, rect?: { readonly minX: number; readonly minY: number; readonly width: number; readonly height: number }, scale?: number): Promise<unknown>;
-  selectTemplate(templateId: string): Promise<CommandResultLike>;
-  moveTemplate(templateId: string, x: number, y: number): Promise<unknown>;
+    listTemplates(): Promise<unknown>;
+    importTemplate(input: {
+        readonly name: string;
+        readonly png: Uint8Array;
+        readonly x: number;
+        readonly y: number;
+        readonly strategy: string;
+    }): Promise<unknown>;
+    templateInfoOf(templateId: string): Promise<unknown>;
+    templateImage(
+        templateId: string,
+        rect?: { readonly minX: number; readonly minY: number; readonly width: number; readonly height: number },
+        scale?: number
+    ): Promise<unknown>;
+    selectTemplate(templateId: string): Promise<CommandResultLike>;
+    moveTemplate(templateId: string, x: number, y: number): Promise<unknown>;
 
-  readonly settings: unknown;
-  configure(patch: {
-    readonly simulator?: Record<string, number>;
-    readonly agent?: Record<string, number>;
-    readonly run?: Record<string, number>;
-    readonly resetWorld?: boolean;
-  }): Promise<CommandResultLike>;
-  resetWorld(confirm: string): Promise<CommandResultLike>;
-  resetAgent(): Promise<CommandResultLike>;
-  canvasRegion(rect?: { readonly minX: number; readonly minY: number; readonly width: number; readonly height: number }, scale?: number): Promise<unknown>;
-  simulateExternalEdit(count: number): Promise<unknown>;
+    readonly settings: unknown;
+    configure(patch: {
+        readonly simulator?: Record<string, number>;
+        readonly agent?: Record<string, number>;
+        readonly run?: Record<string, number>;
+        readonly resetWorld?: boolean;
+    }): Promise<CommandResultLike>;
+    resetWorld(confirm: string): Promise<CommandResultLike>;
+    resetAgent(): Promise<CommandResultLike>;
+    canvasRegion(
+        rect?: { readonly minX: number; readonly minY: number; readonly width: number; readonly height: number },
+        scale?: number
+    ): Promise<unknown>;
+    simulateExternalEdit(count: number): Promise<unknown>;
 
-  resourcesView(): Promise<unknown>;
-  applyUpgrade(proposalId: string, confirmed: boolean): Promise<unknown>;
+    resourcesView(): Promise<unknown>;
+    applyUpgrade(proposalId: string, confirmed: boolean): Promise<unknown>;
 
-  attemptsView(): unknown;
-  journalDiagnosis(): Promise<unknown>;
-  compact(): Promise<unknown>;
-  /** Backup of the data directory, stopped only, into the server's backup directory (Phase 1B.10). */
-  backup(): Promise<unknown>;
-  /** Demonstration (Phase 1B.10): availability (empty project only), and its setup. */
-  demoAvailability(): Promise<unknown>;
-  setupDemo(): Promise<CommandResultLike>;
+    attemptsView(): unknown;
+    journalDiagnosis(): Promise<unknown>;
+    compact(): Promise<unknown>;
+    /** Backup of the data directory, stopped only, into the server's backup directory (Phase 1B.10). */
+    backup(): Promise<unknown>;
+    /** Demonstration (Phase 1B.10): availability (empty project only), and its setup. */
+    demoAvailability(): Promise<unknown>;
+    setupDemo(): Promise<CommandResultLike>;
 
-  /**
-   * Phase 1C.1: GeoPixels ghost image export. Local only: the PNG is imported by hand in the
-   * native tool of GeoPixels; nothing is ever sent to GeoPixels.
-   */
-  importGhost(input: {
-    readonly name: string;
-    readonly png: Uint8Array;
-    readonly palette: readonly string[];
-    readonly width?: number;
-    readonly height?: number;
-    readonly alphaThreshold?: number;
-    readonly x?: number;
-    readonly y?: number;
-  }): Promise<unknown>;
-  listGhosts(): Promise<unknown>;
-  ghostInfoOf(templateId: string): Promise<unknown>;
-  exportGhost(templateId: string): Promise<{ readonly png: Uint8Array; readonly filename: string }>;
-  deleteGhost(templateId: string): Promise<unknown>;
+    /**
+     * Phase 1C.1: GeoPixels ghost image export. Local only: the PNG is imported by hand in the
+     * native tool of GeoPixels; nothing is ever sent to GeoPixels.
+     */
+    importGhost(input: {
+        readonly name: string;
+        readonly png: Uint8Array;
+        readonly palette: readonly string[];
+        readonly width?: number;
+        readonly height?: number;
+        readonly alphaThreshold?: number;
+        readonly x?: number;
+        readonly y?: number;
+    }): Promise<unknown>;
+    listGhosts(): Promise<unknown>;
+    ghostInfoOf(templateId: string): Promise<unknown>;
+    exportGhost(templateId: string): Promise<{ readonly png: Uint8Array; readonly filename: string }>;
+    deleteGhost(templateId: string): Promise<unknown>;
 }
 
 /** True for an error thrown by the engine with a stable code (EngineServiceError and the like). */

@@ -15,28 +15,30 @@ import { rename, readFile, open } from 'node:fs/promises';
 import { GeoPixelsProvider } from './geopixels/provider.js';
 import { ConnectorPairing } from './geopixels/pairing.js';
 import { parseObservationHistory } from './geopixels/monitor.js';
+import { parseRegions, type ImageRegion } from './geopixels/regions.js';
+import { RegionalProgressCache } from './geopixels/region-progress.js';
 import { check } from './geopixels/protocol.js';
 import path from 'node:path';
 import type {
-  AgentId,
-  AttemptId,
-  AttemptManager,
-  CanvasRect,
-  ProgressSnapshot,
-  ProjectId,
-  ResourceManager,
-  ResourceRules,
-  SchedulerConfig,
-  SchedulerEvent,
-  SchedulerState,
-  SchedulerStatus,
-  TaskScheduler,
-  Template,
-  TemplateId,
-  TemplateManager,
-  TemplateRef,
-  UpgradeProposal,
-  UpgradePolicy,
+    AgentId,
+    AttemptId,
+    AttemptManager,
+    CanvasRect,
+    ProgressSnapshot,
+    ProjectId,
+    ResourceManager,
+    ResourceRules,
+    SchedulerConfig,
+    SchedulerEvent,
+    SchedulerState,
+    SchedulerStatus,
+    TaskScheduler,
+    Template,
+    TemplateId,
+    TemplateManager,
+    TemplateRef,
+    UpgradeProposal,
+    UpgradePolicy,
 } from '@geoplacer/core';
 import {
   DEFAULT_AUTO_COMPACTION,
@@ -128,7 +130,13 @@ export class EngineServiceError extends Error {
 }
 
 /** Scheduler states in which the loop is alive. */
-const ACTIVE: ReadonlySet<SchedulerState> = new Set(['initializing', 'running', 'paused', 'waiting-resources', 'waiting-reconciliation']);
+const ACTIVE: ReadonlySet<SchedulerState> = new Set([
+    'initializing',
+    'running',
+    'paused',
+    'waiting-resources',
+    'waiting-reconciliation',
+]);
 /** Default: world checkpoint after this many logged changes. */
 export const WORLD_CHECKPOINT_RECORDS = 2_000;
 const RECENT_ATTEMPTS = 100;
@@ -328,83 +336,150 @@ export class EngineService {
   private readonly templateCache = new Map<string, Template>();
   private observationSave: Promise<void> = Promise.resolve();
   private observationStoreHealthy = true;
-  private connectorProgressCache: { key: string; until: number; progress: ProgressSnapshot } | null = null;
+    private readonly regionalProgress = new RegionalProgressCache();
+    private savedRegions: {
+        schemaVersion: 1;
+        identity: string;
+        width: number;
+        height: number;
+        regions: ImageRegion[];
+    } | null = null;
 
-  private constructor(root: string, lock: DataDirectoryLock, settings: EngineSettings, clock: MonotonicClock, options: EngineServiceOptions) {
-    this.root = root;
-    this.lock = lock;
-    this.settingsValue = settings;
-    this.rules = rulesOf(settings.simulator);
-    this.clock = clock;
-    this.log = options.log ?? (() => undefined);
-    this.worldStoreOptions = options.worldStore ?? {};
-    this.checkpointRecords = options.worldCheckpointRecords ?? WORLD_CHECKPOINT_RECORDS;
-    this.backupDir = path.resolve(options.backupDir ?? path.join(root, '..', 'sauvegardes'));
-    // Phase 1B.10: incremental by default (measured: -39 % per cycle at 2000², -42 % at 4096²; verified every 10 cycles).
-    this.progressMode = options.progressMode ?? 'incremental';
-    this.cooperative = options.cooperative === false ? false : { slicePixels: options.cooperative?.slicePixels ?? DEFAULT_SLICE_PIXELS };
-    this.onCycle = options.onCycle;
-    this.hub = new EngineEventHub({ intervalMs: options.eventIntervalMs ?? 250, now: () => this.clock.now() });
-    this.templates = createTemplateManager({ storage: new NodeTemplateStorage(lock), hasher: nodeSha256Hasher, codec: pngjsCodec, ids: randomIdSource, clock: systemClock });
-    this.simulationJournal = new FileAttemptJournal(lock);
-    this.simulationHistory = new FileHistoryStore(lock);
-    this.connectorJournal = new FileAttemptJournal(lock, { namespace: 'geopixels' });
-    this.connectorHistory = new FileHistoryStore(lock, { namespace: 'geopixels' });
-    this.connector.monitoring.subscribe((kind) => {
-      this.hub.connector();
-      if (kind === 'capture') {
-        const capture = this.connector.monitoring.view().lastCapture;
-        const epoch = this.connector.channelEpoch;
-        if (capture) void this.connectorView().then(view => {
-          if (!this.closed && epoch === this.connector.channelEpoch)
-            this.connector.monitoring.annotate(capture.id, view.bound ? view.selection?.templateId ?? null : null, view.progress);
-        }).catch(() => this.hub.notice('warning', 'Progression de la capture indisponible.'));
-      }
-      if (kind === 'history' && this.observationStoreHealthy && !this.closed) {
-        const data = structuredClone(this.connector.monitoring.persisted());
-        this.observationSave = this.observationSave.then(() => this.durableConnectorJson('connector-observations.json', data)).catch(() => {
-          this.observationStoreHealthy = false;
-          this.hub.notice('warning', 'Historique des observations non sauvegardé ; vérifier le stockage local.');
+    private constructor(
+        root: string,
+        lock: DataDirectoryLock,
+        settings: EngineSettings,
+        clock: MonotonicClock,
+        options: EngineServiceOptions
+    ) {
+        this.root = root;
+        this.lock = lock;
+        this.settingsValue = settings;
+        this.rules = rulesOf(settings.simulator);
+        this.clock = clock;
+        this.log = options.log ?? (() => undefined);
+        this.worldStoreOptions = options.worldStore ?? {};
+        this.checkpointRecords = options.worldCheckpointRecords ?? WORLD_CHECKPOINT_RECORDS;
+        this.backupDir = path.resolve(options.backupDir ?? path.join(root, '..', 'sauvegardes'));
+        // Phase 1B.10: incremental by default (measured: -39 % per cycle at 2000², -42 % at 4096²; verified every 10 cycles).
+        this.progressMode = options.progressMode ?? 'incremental';
+        this.cooperative =
+            options.cooperative === false
+                ? false
+                : { slicePixels: options.cooperative?.slicePixels ?? DEFAULT_SLICE_PIXELS };
+        this.onCycle = options.onCycle;
+        this.hub = new EngineEventHub({ intervalMs: options.eventIntervalMs ?? 250, now: () => this.clock.now() });
+        this.templates = createTemplateManager({
+            storage: new NodeTemplateStorage(lock),
+            hasher: nodeSha256Hasher,
+            codec: pngjsCodec,
+            ids: randomIdSource,
+            clock: systemClock,
         });
-      }
-    });
-  }
-
-  /** Opens the engine on `dataDir`; throws DataDirectoryLockedError when another instance holds it. */
-  static async open(options: EngineServiceOptions): Promise<EngineService> {
-    const root = path.resolve(options.dataDir);
-    // An interrupted restore must be finished (or rolled back) first (Phase 1B.10).
-    await assertNoRestoreInProgress(root);
-    const lock = await acquireDataDirectoryLock(root);
-    try {
-      const settings = await loadSettings(root);
-      const service = new EngineService(root, lock, settings, options.clock ?? monotonicClock(), options);
-      await service.openWorld();
-      try {
-        const source = JSON.parse(await readFile(path.join(root, 'provider.json'), 'utf8')) as unknown;
-        check(source === 'simulation' || source === 'geopixels', 'invalid saved provider');
-        service.source = source;
-      } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-      await service.newManagers();
-      try {
-        const raw = await readFile(path.join(root, 'connector-observations.json'), 'utf8');
-        check(raw.length <= 1_000_000, 'observation history too large');
-        service.connector.monitoring.restore(parseObservationHistory(JSON.parse(raw)));
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-          service.observationStoreHealthy = false;
-          service.log('warn', 'observation history invalid; preserved without overwriting');
-          service.hub.notice('warning', 'Historique invalide conservé sur disque ; surveillance en mémoire seulement.');
-        }
-      }
-      const selection = settings.selection;
-      if (selection !== null) await service.currentTemplate(service.ref(selection.templateId)).catch(() => service.log('warn', `selected template ${selection.templateId} cannot be loaded`));
-      return service;
-    } catch (error) {
-      await lock.release();
-      throw error;
+        this.simulationJournal = new FileAttemptJournal(lock);
+        this.simulationHistory = new FileHistoryStore(lock);
+        this.connectorJournal = new FileAttemptJournal(lock, { namespace: 'geopixels' });
+        this.connectorHistory = new FileHistoryStore(lock, { namespace: 'geopixels' });
+        this.connector.monitoring.subscribe((kind) => {
+            this.hub.connector();
+            if (kind === 'capture') {
+                const capture = this.connector.monitoring.view().lastCapture;
+                const epoch = this.connector.channelEpoch;
+                if (capture)
+                    void this.connectorView()
+                        .then((view) => {
+                            if (!this.closed && epoch === this.connector.channelEpoch)
+                                this.connector.monitoring.annotate(
+                                    capture.id,
+                                    view.bound ? (view.selection?.templateId ?? null) : null,
+                                    capture.regionId
+                                        ? (view.regionViews.find((r) => r.id === capture.regionId)?.progress ?? null)
+                                        : view.progress
+                                );
+                        })
+                        .catch(() => this.hub.notice('warning', 'Progression de la capture indisponible.'));
+            }
+            if (kind === 'history' && this.observationStoreHealthy && !this.closed) {
+                const data = structuredClone(this.connector.monitoring.persisted());
+                this.observationSave = this.observationSave
+                    .then(() => this.durableConnectorJson('connector-observations.json', data))
+                    .catch(() => {
+                        this.observationStoreHealthy = false;
+                        this.hub.notice(
+                            'warning',
+                            'Historique des observations non sauvegardé ; vérifier le stockage local.'
+                        );
+                    });
+            }
+        });
     }
-  }
+
+    /** Opens the engine on `dataDir`; throws DataDirectoryLockedError when another instance holds it. */
+    static async open(options: EngineServiceOptions): Promise<EngineService> {
+        const root = path.resolve(options.dataDir);
+        // An interrupted restore must be finished (or rolled back) first (Phase 1B.10).
+        await assertNoRestoreInProgress(root);
+        const lock = await acquireDataDirectoryLock(root);
+        try {
+            const settings = await loadSettings(root);
+            const service = new EngineService(root, lock, settings, options.clock ?? monotonicClock(), options);
+            await service.openWorld();
+            try {
+                const source = JSON.parse(await readFile(path.join(root, 'provider.json'), 'utf8')) as unknown;
+                check(source === 'simulation' || source === 'geopixels', 'invalid saved provider');
+                service.source = source;
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+            }
+            await service.newManagers();
+            try {
+                const raw = await readFile(path.join(root, 'connector-observations.json'), 'utf8');
+                check(raw.length <= 1_000_000, 'observation history too large');
+                service.connector.monitoring.restore(parseObservationHistory(JSON.parse(raw)));
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+                    service.observationStoreHealthy = false;
+                    service.log('warn', 'observation history invalid; preserved without overwriting');
+                    service.hub.notice(
+                        'warning',
+                        'Historique invalide conservé sur disque ; surveillance en mémoire seulement.'
+                    );
+                }
+            }
+            try {
+                const raw = await readFile(path.join(root, 'connector-regions.json'), 'utf8');
+                check(raw.length <= 32000, 'region configuration too large');
+                const saved = JSON.parse(raw) as NonNullable<EngineService['savedRegions']>;
+                check(
+                    saved &&
+                        Object.keys(saved).length === 5 &&
+                        saved.schemaVersion === 1 &&
+                        typeof saved.identity === 'string' &&
+                        saved.identity.length <= 2048 &&
+                        Number.isSafeInteger(saved.width) &&
+                        saved.width > 0 &&
+                        saved.width <= 4096 &&
+                        Number.isSafeInteger(saved.height) &&
+                        saved.height > 0 &&
+                        saved.height <= 4096,
+                    'invalid saved regions'
+                );
+                service.savedRegions = { ...saved, regions: parseRegions(saved.regions, saved.width, saved.height) };
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+                    service.log('warn', 'invalid saved regions preserved; reconfigure explicitly');
+            }
+            const selection = settings.selection;
+            if (selection !== null)
+                await service
+                    .currentTemplate(service.ref(selection.templateId))
+                    .catch(() => service.log('warn', `selected template ${selection.templateId} cannot be loaded`));
+            return service;
+        } catch (error) {
+            await lock.release();
+            throw error;
+        }
+    }
 
   // ───────────────────────── World ─────────────────────────
 
@@ -753,25 +828,88 @@ export class EngineService {
     return { simulated: true, executable: false, proposals };
   }
 
-  async connectorView() {
-    const view = this.connector.status();
-    const t = this.selectedTemplate;
-    let bound = view.bound;
-    if (t !== null && bound) { try { this.connector.assertBinding(t); } catch { bound = false; } }
-    if (!bound && this.connector.monitoring.control().state !== 'stopped')
-      this.connector.monitoring.stop('Liaison du modèle perdue : vérifier le modèle et recommencer le couplage.');
-    const key = `${this.connector.channelEpoch}/${this.connector.observationRevision}/${bound}/${t?.id}/${t?.revision}/${t?.placement.topLeft.x}/${t?.placement.topLeft.y}/${view.connected}`;
-    let progress: ProgressSnapshot | null = null;
-    if (bound && t !== null) {
-      if (this.connectorProgressCache?.key === key && Date.now() <= this.connectorProgressCache.until) progress = this.connectorProgressCache.progress;
-      else {
-        const snapshot = await this.connector.reader.readRegion({ minX: t.placement.topLeft.x, minY: t.placement.topLeft.y, width: t.image.width, height: t.image.height });
-        progress = computeProgress(t, snapshot, this.clock.now(), { freshness: { 'geopixels-observed': { maxAgeMs: 30_000 }, 'geopixels-fixture': { maxAgeMs: 30_000 } } });
-        this.connectorProgressCache = { key, until: this.connector.readValidUntil, progress };
-      }
+    async connectorView() {
+        const view = this.connector.status();
+        const t = this.selectedTemplate;
+        let bound = view.bound;
+        if (t !== null && bound) {
+            try {
+                this.connector.assertBinding(t);
+            } catch {
+                bound = false;
+            }
+        }
+        if (!bound && this.connector.monitoring.control().state !== 'stopped')
+            this.connector.monitoring.stop('Liaison du modèle perdue : vérifier le modèle et recommencer le couplage.');
+        let progress: ProgressSnapshot | null = null;
+        let regionViews: Awaited<ReturnType<RegionalProgressCache['compute']>>['regions'] = [];
+        let recomputedCells = 0;
+        if (bound && t !== null) {
+            try {
+                const calculated = await this.regionalProgress.compute(t, this.connector, Date.now());
+                this.connector.assertBinding(t);
+                check(this.selectedTemplate === t, 'template changed during observation');
+                progress = calculated.progress;
+                regionViews = calculated.regions;
+                recomputedCells = calculated.recomputedCells;
+            } catch {
+                bound = false;
+            }
+        }
+        return {
+            ...view,
+            bound,
+            source: this.source,
+            selection: t === null ? null : this.templateInfo(t),
+            progress,
+            regionViews,
+            recomputedCells,
+            savedRegionConfiguration: {
+                available: this.savedRegions !== null,
+                count: this.savedRegions?.regions.length ?? 0,
+                matching: bound && t !== null && this.savedRegions?.identity === this.regionIdentity(t),
+            },
+            scheduler: this.source === 'geopixels' ? (this.scheduler?.status() ?? null) : null,
+            rules: this.source === 'geopixels' && view.mode === 'local-fake' ? this.rules : null,
+        };
     }
-    return { ...view, bound, source: this.source, selection: t === null ? null : this.templateInfo(t), progress, scheduler: this.source === 'geopixels' ? this.scheduler?.status() ?? null : null, rules: this.source === 'geopixels' && view.mode === 'local-fake' ? this.rules : null };
-  }
+    private regionIdentity(t: Template) {
+        return JSON.stringify([t.id, t.revision, t.placement, this.connector.status().project]);
+    }
+    async configureConnectorRegions(value: unknown, restore = false) {
+        this.guard();
+        check(!this.connectorControl, 'provider control in progress');
+        const t = this.selectedTemplate;
+        check(
+            t !== null && this.source === 'geopixels' && this.connector.status().mode === 'read-only',
+            'bind the real reader first'
+        );
+        this.connector.assertBinding(t);
+        const m = this.connector.monitoring.view();
+        check(m.regionalSupported && m.state !== 'running' && !m.inFlight, 'pause before changing observation regions');
+        const identity = this.regionIdentity(t);
+        if (restore)
+            check(this.savedRegions?.identity === identity, 'saved regions belong to another model or position');
+        const regions = parseRegions(restore ? this.savedRegions!.regions : value, t.image.width, t.image.height);
+        this.connectorControl = true;
+        try {
+            const saved = {
+                schemaVersion: 1 as const,
+                identity,
+                width: t.image.width,
+                height: t.image.height,
+                regions,
+            };
+            await this.durableConnectorJson('connector-regions.json', saved);
+            this.connector.assertBinding(t);
+            check(identity === this.regionIdentity(t), 'binding changed during region save');
+            this.savedRegions = saved;
+            this.connector.monitoring.configureRegions(regions, t.image.width, t.image.height);
+            return this.connectorView();
+        } finally {
+            this.connectorControl = false;
+        }
+    }
 
   private async startNow(): Promise<CommandResult> {
     check(!this.connectorControl, 'provider control in progress');

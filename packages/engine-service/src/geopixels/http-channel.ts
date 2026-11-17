@@ -92,76 +92,108 @@ export class ConnectorHttpChannel {
     s.requests.push(this.now());
     return s;
   }
-  status(capability: string, readerVersion?: 3, ack?: { revision: number; state: 'running' | 'paused' | 'stopped' }) {
-    const s = this.authenticate(capability);
-    s.lastSeen = this.now();
-    if (s.approved) {
-      this.provider.heartbeat();
-      this.provider.monitoring.capabilities(readerVersion === 3);
-      if (ack) this.provider.monitoring.acknowledge(ack.revision, ack.state);
+    status(
+        capability: string,
+        readerVersion?: 3 | 4,
+        ack?: { revision: number; state: 'running' | 'paused' | 'stopped' },
+        abortedCapture?: string
+    ) {
+        const s = this.authenticate(capability);
+        s.lastSeen = this.now();
+        if (s.approved) {
+            this.provider.heartbeat();
+            this.provider.monitoring.capabilities(readerVersion === 3 || readerVersion === 4, readerVersion === 4);
+            if (abortedCapture) {
+                check(readerVersion === 4, 'regional reader required');
+                this.provider.monitoring.abortCapture(abortedCapture);
+            }
+            if (ack) this.provider.monitoring.acknowledge(ack.revision, ack.state);
+        }
+        return {
+            approved: s.approved,
+            expires: s.deadline,
+            lastSequence: s.lastSequence,
+            fingerprint: s.fingerprint,
+            ...(readerVersion === 4 ? { regionalProtocol: 1 } : {}),
+            ...(readerVersion === 3 || readerVersion === 4
+                ? { monitoring: this.provider.monitoring.control(), pacing: 'server-50ms' }
+                : {}),
+        };
     }
-    return { approved: s.approved, expires: s.deadline, lastSequence: s.lastSequence, fingerprint: s.fingerprint,
-      ...(readerVersion === 3 ? { monitoring: this.provider.monitoring.control(), pacing: 'server-50ms' } : {}) };
-  }
-  /** One bounded held HTTP response. No browser timer, no permission renewal beyond deadline. */
-  async poll(capability: string, readerVersion: 3, ack: { revision: number; state: 'running' | 'paused' | 'stopped' } | undefined, signal: AbortSignal) {
-    this.status(capability, readerVersion, ack);
-    const s = this.session!;
-    check(!s.releasePoll, 'concurrent reader poll');
-    await new Promise<void>(resolve => {
-      let done = false;
-      const finish = () => {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        unsubscribe();
-        signal.removeEventListener('abort', finish);
-        delete s.releasePoll;
-        resolve();
-      };
-      const unsubscribe = this.provider.monitoring.subscribe(kind => { if (kind === 'state') finish(); });
-      const timer = setTimeout(finish, 5000);
-      s.releasePoll = finish;
-      signal.addEventListener('abort', finish, { once: true });
-      if (signal.aborted) finish();
-    });
-    check(!signal.aborted, 'reader poll aborted');
-    return this.status(capability, readerVersion);
-  }
-  batch(capability: string, values: readonly unknown[]) {
-    const s = this.authenticate(capability);
-    check(s.approved && s.epoch === this.provider.channelEpoch, 'HTTP request not approved or replaced');
-    check(values.length >= 1 && values.length <= 2, 'invalid observation batch');
-    // Validate the entire batch before accepting anything. No partial acknowledgement.
-    const observations: BrowserObservation[] = values.map((v) => parseObservation(v, this.now()));
-    check(observations.length === 1 || observations.every(o => o.capture === undefined), 'capture bands require individual acknowledgements');
-    check(observations.reduce((sum, o) => sum + o.pixels.length, 0) <= 65_536, 'oversized HTTP batch');
-    const digest = createHash('sha256').update(JSON.stringify(values)).digest('hex');
-    const first = observations[0]!,
-      last = observations.at(-1)!;
-    if (last.sequence === s.lastSequence) {
-      check(digest === s.lastDigest, 'conflicting duplicate batch');
-      s.lastSeen = this.now();
-      this.provider.heartbeat();
-      return { accepted: true, sequence: last.sequence, duplicate: true };
+    /** One bounded held HTTP response. No browser timer, no permission renewal beyond deadline. */
+    async poll(
+        capability: string,
+        readerVersion: 3 | 4,
+        ack: { revision: number; state: 'running' | 'paused' | 'stopped' } | undefined,
+        signal: AbortSignal,
+        abortedCapture?: string
+    ) {
+        this.status(capability, readerVersion, ack, abortedCapture);
+        const s = this.session!;
+        check(!s.releasePoll, 'concurrent reader poll');
+        await new Promise<void>((resolve) => {
+            let done = false;
+            const finish = () => {
+                if (done) return;
+                done = true;
+                clearTimeout(timer);
+                unsubscribe();
+                signal.removeEventListener('abort', finish);
+                delete s.releasePoll;
+                resolve();
+            };
+            const unsubscribe = this.provider.monitoring.subscribe((kind) => {
+                if (kind === 'state') finish();
+            });
+            const timer = setTimeout(finish, 5000);
+            s.releasePoll = finish;
+            signal.addEventListener('abort', finish, { once: true });
+            if (signal.aborted) finish();
+        });
+        check(!signal.aborted, 'reader poll aborted');
+        return this.status(capability, readerVersion);
     }
-    check(
-      first.sequence === s.lastSequence + 1 && observations.every((o, i) => o.sequence === first.sequence + i),
-      'HTTP sequence gap or replay'
-    );
-    // A batch cannot combine different model/session identities.
-    check(
-      observations.every(
-        (o) => o.session === first.session && JSON.stringify(o.project) === JSON.stringify(first.project)
-      ),
-      'mixed observation identities'
-    );
-    for (const o of observations) this.provider.observe(o);
-    s.lastSequence = last.sequence;
-    s.lastDigest = digest;
-    s.lastSeen = this.now();
-    return { accepted: true, sequence: last.sequence, duplicate: false };
-  }
+    batch(capability: string, values: readonly unknown[]) {
+        const s = this.authenticate(capability);
+        check(s.approved && s.epoch === this.provider.channelEpoch, 'HTTP request not approved or replaced');
+        check(values.length >= 1 && values.length <= 2, 'invalid observation batch');
+        // Validate the entire batch before accepting anything. No partial acknowledgement.
+        const observations: BrowserObservation[] = values.map((v) => parseObservation(v, this.now()));
+        check(
+            observations.length === 1 || observations.every((o) => o.capture === undefined),
+            'capture bands require individual acknowledgements'
+        );
+        check(observations.reduce((sum, o) => sum + o.pixels.length, 0) <= 65_536, 'oversized HTTP batch');
+        const digest = createHash('sha256').update(JSON.stringify(values)).digest('hex');
+        const first = observations[0]!,
+            last = observations.at(-1)!;
+        if (last.sequence === s.lastSequence) {
+            check(digest === s.lastDigest, 'conflicting duplicate batch');
+            s.lastSeen = this.now();
+            this.provider.heartbeat();
+            return { accepted: true, sequence: last.sequence, duplicate: true };
+        }
+        check(
+            first.sequence === s.lastSequence + 1 && observations.every((o, i) => o.sequence === first.sequence + i),
+            'HTTP sequence gap or replay'
+        );
+        // A batch cannot combine different model/session identities.
+        check(
+            observations.every(
+                (o) => o.session === first.session && JSON.stringify(o.project) === JSON.stringify(first.project)
+            ),
+            'mixed observation identities'
+        );
+        for (const o of observations) this.provider.observe(o);
+        this.provider.monitoring.noteWire(
+            Buffer.byteLength(JSON.stringify({ protocol: 1, observations: values })),
+            observations.length
+        );
+        s.lastSequence = last.sequence;
+        s.lastDigest = digest;
+        s.lastSeen = this.now();
+        return { accepted: true, sequence: last.sequence, duplicate: false };
+    }
   disconnect(capability: string) {
     this.authenticate(capability);
     this.revoke('HTTP reader disconnected');

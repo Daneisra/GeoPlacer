@@ -105,10 +105,11 @@ describe('Repeated cache observation, without service freshness claims', () => {
     s.provider.bind({ id: 'local', revision: 1, image: { width: 2, height: 2 }, coordinateSystem: { yAxis: 'down' }, placement: { topLeft: { x: 0, y: 0 } } } as Template);
     s.provider.monitoring.command('start', 5000);
     const project = { ...s.project, ...(kind === 'position' ? { gridX: 998 } : kind === 'palette' ? { generation: 'new-palette' } : kind === 'image' ? { id: 'new-image' } : {}) };
-    s.send([0,0,0,0], { project, session: kind === 'session' ? 'new-session' : 'opaque-session', rect: { x: project.gridX, y: 1000, width: 2, height: 2 } });
+    expect(()=>s.send([0,0,0,0], { project, session: kind === 'session' ? 'new-session' : 'opaque-session', rect: { x: project.gridX, y: 1000, width: 2, height: 2 } })).toThrow(/Pair and bind/);
     expect(s.provider.status().bound).toBe(false);
     expect(s.provider.monitoring.view().state).toBe('stopped');
-    expect(s.provider.monitoring.view().history[1]!.projectKey).not.toBe(s.provider.monitoring.view().history[0]!.projectKey);
+    expect(s.provider.status().connected).toBe(false);
+    expect(s.provider.monitoring.view().history).toHaveLength(1);
   });
   it('does not silently extend the absolute coupling lifetime with monitoring', () => {
     const s = setup(); s.send(); s.provider.monitoring.command('start', 5000);

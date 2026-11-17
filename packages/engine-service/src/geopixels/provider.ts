@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { ObservationMonitor } from './monitor.js';
+import { OBSERVATION_CACHE_BYTES } from './regions.js';
 import {
   UNKNOWN,
   createArraySnapshot,
@@ -72,6 +73,8 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
   private sequence = 0;
   private pixels = new Int32Array();
   private dates = new Float64Array();
+    private captures = new Float64Array();
+    private cells = new Float64Array();
   private resourceValue: ObservedResources | null = null;
   private lastSeen: number | null = null;
   private lastCapture: number | null = null;
@@ -97,23 +100,25 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
     this.lastError = null;
   }
 
-  disconnect(reason = 'browser disconnected'): void {
-    this.observationRevision++;
-    this.monitoring.stop(reason);
-    this.channelEpoch++;
-    this.dated = false;
-    this.send = null;
-    this.channelMode = null;
-    this.session = null;
-    this.project = null;
-    this.binding = null;
-    this.resourceValue = null;
-    this.sequence = 0;
-    this.pixels = new Int32Array();
-    this.dates = new Float64Array();
-    this.lastError = reason;
-    this.uncertain();
-  }
+    disconnect(reason = 'browser disconnected'): void {
+        this.observationRevision++;
+        this.monitoring.stop(reason);
+        this.channelEpoch++;
+        this.dated = false;
+        this.send = null;
+        this.channelMode = null;
+        this.session = null;
+        this.project = null;
+        this.binding = null;
+        this.resourceValue = null;
+        this.sequence = 0;
+        this.pixels = new Int32Array();
+        this.dates = new Float64Array();
+        this.captures = new Float64Array();
+        this.cells = new Float64Array();
+        this.lastError = reason;
+        this.uncertain();
+    }
 
   heartbeat(): void {
     check(this.send !== null, 'no channel');
@@ -126,60 +131,81 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
     return JSON.stringify([this.session, this.project]);
   }
 
-  observe(value: unknown): void {
-    check(this.send !== null, 'no paired channel');
-    const o = parseObservation(value, this.now());
-    check(o.sequence > this.sequence, 'replayed or out-of-order observation');
-    const project = {
-      id: o.project.id,
-      generation: o.project.generation,
-      width: o.project.width,
-      height: o.project.height,
-      gridX: o.project.gridX,
-      gridY: o.project.gridY,
-      layer: o.project.layer,
-    };
-    const changed = this.session !== o.session || JSON.stringify(this.project) !== JSON.stringify(project);
-    if (changed && this.project !== null) this.monitoring.stop('Identité du projet modifiée : relier le modèle avant de reprendre.');
-    const projectKey = JSON.stringify([o.session, project]);
-    // Validate cycle metadata before changing the active project or any pixels.
-    this.monitoring.prepare(o, projectKey);
-    if (changed) {
-      this.binding = null;
-      this.uncertain();
-      this.pixels = new Int32Array(o.project.width * o.project.height).fill(UNKNOWN);
-      this.dates = new Float64Array(this.pixels.length);
-      this.resourceValue = null;
+    observe(value: unknown): void {
+        check(this.send !== null, 'no paired channel');
+        const o = parseObservation(value, this.now());
+        check(o.sequence > this.sequence, 'replayed or out-of-order observation');
+        const project = {
+            id: o.project.id,
+            generation: o.project.generation,
+            width: o.project.width,
+            height: o.project.height,
+            gridX: o.project.gridX,
+            gridY: o.project.gridY,
+            layer: o.project.layer,
+        };
+        const changed = this.session !== o.session || JSON.stringify(this.project) !== JSON.stringify(project);
+        if (changed && this.project !== null && this.channelMode === 'read-only') {
+            this.disconnect('Projet, position, palette ou session modifié : nouveau couplage requis.');
+            throw new ConnectorError('CONNECTOR_PROJECT_CHANGED', 'Pair and bind the changed project again');
+        }
+        if (changed && this.project !== null)
+            this.monitoring.stop('Identité du projet modifiée : relier le modèle avant de reprendre.');
+        const projectKey = JSON.stringify([o.session, project]);
+        // Validate cycle metadata before changing the active project or any pixels.
+        this.monitoring.prepare(o, projectKey);
+        if (changed) {
+            check(
+                o.project.width * o.project.height * 20 <= OBSERVATION_CACHE_BYTES,
+                'observation memory budget exceeded'
+            );
+            this.binding = null;
+            this.uncertain();
+            this.pixels = new Int32Array(o.project.width * o.project.height).fill(UNKNOWN);
+            this.dates = new Float64Array(this.pixels.length);
+            this.captures = new Float64Array(this.pixels.length);
+            this.cells = new Float64Array(Math.ceil(o.project.width / 256) * Math.ceil(o.project.height / 256));
+            this.resourceValue = null;
+        }
+        this.project = project;
+        this.session = o.session;
+        this.sequence = o.sequence;
+        this.lastCapture = o.capturedAt;
+        this.dated = o.observedAt !== null && (changed || this.dated);
+        this.lastSeen = this.now();
+        const delta = { changedKnown: 0, newlyKnown: 0, becameUnknown: 0, unchanged: 0 };
+        for (let y = 0; y < o.rect.height; y++) {
+            const iy = o.project.gridY - (o.rect.y + y);
+            for (let x = 0; x < o.rect.width; x++) {
+                const dest = iy * o.project.width + o.rect.x + x - o.project.gridX;
+                const date = o.observedAt ?? -o.capturedAt;
+                if (
+                    o.capturedAt < this.captures[dest]! ||
+                    (o.capturedAt === this.captures[dest] && Math.abs(date) < Math.abs(this.dates[dest]!))
+                )
+                    continue;
+                const old = this.pixels[dest]!,
+                    next = o.pixels[y * o.rect.width + x]!;
+                if (old === next) delta.unchanged++;
+                else if (old === UNKNOWN) delta.newlyKnown++;
+                else if (next === UNKNOWN) delta.becameUnknown++;
+                else delta.changedKnown++;
+                this.pixels[dest] = o.pixels[y * o.rect.width + x]!;
+                this.dates[dest] = date;
+                this.captures[dest] = o.capturedAt;
+                this.cells[
+                    Math.floor(iy / 256) * Math.ceil(o.project.width / 256) +
+                        Math.floor((o.rect.x + x - o.project.gridX) / 256)
+                ] = this.observationRevision + 1;
+            }
+        }
+        if (o.resources !== null && (o.resources.observedAt ?? 0) >= (this.resourceValue?.observedAt ?? 0)) {
+            this.resourceValue = structuredClone(o.resources);
+        }
+        this.lastError = null;
+        this.observationRevision++;
+        this.monitoring.region(o, delta);
     }
-    this.project = project;
-    this.session = o.session;
-    this.sequence = o.sequence;
-    this.lastCapture = o.capturedAt;
-    this.dated ||= o.observedAt !== null;
-    this.lastSeen = this.now();
-    const delta = { changedKnown: 0, newlyKnown: 0, becameUnknown: 0, unchanged: 0 };
-    for (let y = 0; y < o.rect.height; y++) {
-      const iy = o.project.gridY - (o.rect.y + y);
-      for (let x = 0; x < o.rect.width; x++) {
-        const dest = iy * o.project.width + o.rect.x + x - o.project.gridX;
-        const date = o.observedAt ?? -o.capturedAt;
-        if (Math.abs(date) < Math.abs(this.dates[dest]!)) continue; // A later envelope cannot overwrite a newer pixel.
-        const old = this.pixels[dest]!, next = o.pixels[y * o.rect.width + x]!;
-        if (old === next) delta.unchanged++;
-        else if (old === UNKNOWN) delta.newlyKnown++;
-        else if (next === UNKNOWN) delta.becameUnknown++;
-        else delta.changedKnown++;
-        this.pixels[dest] = o.pixels[y * o.rect.width + x]!;
-        this.dates[dest] = date;
-      }
-    }
-    if (o.resources !== null && (o.resources.observedAt ?? 0) >= (this.resourceValue?.observedAt ?? 0)) {
-      this.resourceValue = structuredClone(o.resources);
-    }
-    this.lastError = null;
-    this.observationRevision++;
-    this.monitoring.region(o, delta);
-  }
 
   /** Explicit user binding: shape alone never silently selects another local model. */
   bind(template: Template): void {
@@ -211,43 +237,88 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
     );
   }
 
-  async readRegion(rect: CanvasRect): Promise<CanvasSnapshot> {
-    check(
-      integer(rect.width, 1, 2000) && integer(rect.height, 1, 2000) && Number.isSafeInteger(rect.minX) && Number.isSafeInteger(rect.minY),
-      'invalid read region'
-    );
-    const out = new Int32Array(rect.width * rect.height).fill(UNKNOWN);
-    let observedAt = this.now();
-    let known = false;
-    this.readValidUntil = this.now() + CONNECTOR_MAX_AGE_MS;
-    const p = this.project,
-      b = this.binding;
-    if (this.connected() && p !== null && b !== null && b.key === this.key()) {
-      for (let y = 0; y < rect.height; y++)
-        for (let x = 0; x < rect.width; x++) {
-          const ix = rect.minX + x - b.x,
-            iy = rect.minY + y - b.y;
-          if (ix < 0 || iy < 0 || ix >= p.width || iy >= p.height) continue;
-          const index = iy * p.width + ix;
-          const date = this.dates[index]!;
-          if (date !== 0 && this.now() - Math.abs(date) > CONNECTOR_MAX_AGE_MS) continue;
-          if (date !== 0) this.readValidUntil = Math.min(this.readValidUntil, Math.abs(date) + CONNECTOR_MAX_AGE_MS);
-          const color = this.pixels[index]!;
-          out[y * rect.width + x] = color;
-          if (color !== UNKNOWN) {
-            known = true;
-            observedAt = Math.min(observedAt, Math.max(0, date));
-          }
-        }
+    async readRegion(rect: CanvasRect): Promise<CanvasSnapshot> {
+        return (await this.readWindow(rect)).snapshot;
     }
-    return createArraySnapshot({
-      rect,
-      coordinateSystem: this.reader.coordinateSystem,
-      source: this.channelMode === 'local-fake' ? 'geopixels-fixture' : 'geopixels-observed',
-      observedAt: known ? observedAt : 0,
-      pixels: out,
-    });
-  }
+    regionStamp(rect: CanvasRect): number {
+        const b = this.binding,
+            p = this.project;
+        if (!b || !p) return -1;
+        let version = 0;
+        for (
+            let y = Math.max(0, Math.floor((rect.minY - b.y) / 256));
+            y <= Math.min(Math.ceil(p.height / 256) - 1, Math.floor((rect.minY + rect.height - 1 - b.y) / 256));
+            y++
+        )
+            for (
+                let x = Math.max(0, Math.floor((rect.minX - b.x) / 256));
+                x <= Math.min(Math.ceil(p.width / 256) - 1, Math.floor((rect.minX + rect.width - 1 - b.x) / 256));
+                x++
+            )
+                version = Math.max(version, this.cells[y * Math.ceil(p.width / 256) + x]!);
+        return version;
+    }
+    async readWindow(rect: CanvasRect) {
+        check(
+            integer(rect.width, 1, 4096) &&
+                integer(rect.height, 1, 4096) &&
+                Number.isSafeInteger(rect.minX) &&
+                Number.isSafeInteger(rect.minY),
+            'invalid read region'
+        );
+        const out = new Int32Array(rect.width * rect.height).fill(UNKNOWN);
+        let observedAt = this.now();
+        let known = false;
+        this.readValidUntil = Number.MAX_SAFE_INTEGER;
+        let capturedMin = Infinity,
+            capturedMax = 0,
+            sourceMin = Infinity,
+            sourceMax = 0,
+            undated = false;
+        const p = this.project,
+            b = this.binding;
+        if (this.connected() && p !== null && b !== null && b.key === this.key()) {
+            for (let y = 0; y < rect.height; y++)
+                for (let x = 0; x < rect.width; x++) {
+                    const ix = rect.minX + x - b.x,
+                        iy = rect.minY + y - b.y;
+                    if (ix < 0 || iy < 0 || ix >= p.width || iy >= p.height) continue;
+                    const index = iy * p.width + ix;
+                    const date = this.dates[index]!;
+                    const sampled = this.captures[index] !== 0 || this.pixels[index] !== UNKNOWN;
+                    if (sampled && this.now() - Math.abs(date) > CONNECTOR_MAX_AGE_MS) continue;
+                    if (sampled)
+                        this.readValidUntil = Math.min(this.readValidUntil, Math.abs(date) + CONNECTOR_MAX_AGE_MS);
+                    const color = this.pixels[index]!;
+                    out[y * rect.width + x] = color;
+                    if (color !== UNKNOWN) {
+                        known = true;
+                        capturedMin = Math.min(capturedMin, this.captures[index]!);
+                        capturedMax = Math.max(capturedMax, this.captures[index]!);
+                        if (date < 0) undated = true;
+                        else {
+                            sourceMin = Math.min(sourceMin, date);
+                            sourceMax = Math.max(sourceMax, date);
+                        }
+                        observedAt = Math.min(observedAt, Math.max(0, date));
+                    }
+                }
+        }
+        const snapshot = createArraySnapshot({
+            rect,
+            coordinateSystem: this.reader.coordinateSystem,
+            source: this.channelMode === 'local-fake' ? 'geopixels-fixture' : 'geopixels-observed',
+            observedAt: known ? observedAt : 0,
+            pixels: out,
+        });
+        return {
+            snapshot,
+            validUntil: this.readValidUntil,
+            captureRange: capturedMax ? { oldest: capturedMin, newest: capturedMax } : null,
+            sourceRange: known && !undated && sourceMax ? { oldest: sourceMin, newest: sourceMax } : null,
+            sourceUndated: undated,
+        };
+    }
 
   resourceSource(rules: ResourceRules): ResourceSource {
     return {

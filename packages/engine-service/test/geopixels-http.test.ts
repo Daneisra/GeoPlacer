@@ -107,8 +107,9 @@ describe('Privileged HTTP reader capability and sequence protocol', () => {
     if (kind === 'model') next.project.id = 'other-ghost';
     if (kind === 'position') next.project.gridY++;
     if (kind === 'position') next.rect.y++;
-    s.http.batch(c.capability, [next]);
+    expect(() => s.http.batch(c.capability, [next])).toThrow(/Pair and bind/);
     expect(s.provider.status().bound).toBe(false);
+    expect(s.provider.status().connected).toBe(false);
   });
   it('expires an unapproved claim and a silent approved reader', () => {
     const s = setup(),

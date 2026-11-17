@@ -87,6 +87,34 @@ function browser(s: EngineService, width: number, height: number, opts: { lost?:
 }
 
 describe('Existing scheduler through GeoPixels browser provider', () => {
+  it('persists region configuration but restores neither observations nor live authority', async () => {
+    const {s,dir}=await prepare(8,5);
+    const project={id:'regional-fixture',generation:'palette',width:8,height:5,gridX:999,gridY:1001,layer:'base'};
+    const attach=async(service:EngineService)=>{
+      service.connector.connect('read-only',()=>{throw new Error('read only');});
+      service.connector.monitoring.capabilities(true,true);
+      service.connector.observe({type:'observation',sequence:1,session:'new-private-context',project,capturedAt:Date.now(),observedAt:null,resources:null,
+        rect:{x:project.gridX,y:project.gridY-4,width:8,height:5},pixels:new Array(40).fill(-2)});
+      await service.bindConnector();
+    };
+    await attach(s);
+    const regions=[{id:'left',name:'Left',x:0,y:0,width:4,height:5,priority:'primary',enabled:true}];
+    await s.configureConnectorRegions(regions);
+    expect((await s.connectorView()).monitoring.configuredRegions).toEqual(regions);
+    await s.close();opened.splice(opened.indexOf(s),1);
+    const restored=await EngineService.open({dataDir:dir});opened.push(restored);
+    expect((await restored.connectorView())).toMatchObject({connected:false,savedRegionConfiguration:{available:true,matching:false,count:1},monitoring:{state:'stopped',configuredRegions:[]}});
+    await expect(restored.configureConnectorRegions([],true)).rejects.toThrow();
+    await attach(restored);
+    expect((await restored.connectorView()).savedRegionConfiguration.matching).toBe(true);
+    await restored.configureConnectorRegions([],true);
+    expect(restored.connector.monitoring.view().configuredRegions).toEqual(regions);
+    restored.connector.disconnect('new session');
+    project.gridX++;
+    await attach(restored);
+    await expect(restored.configureConnectorRegions([],true)).rejects.toThrow(/another model or position/);
+    expect(restored.connector.canWrite()).toBe(false);
+  });
   it('records real-reader progress using core rules and restores history without restarting monitoring', async () => {
     const {s,dir,t}=await prepare(8,5);
     s.connector.connect('read-only',()=>{ throw new Error('must never execute'); });
