@@ -1,6 +1,6 @@
-# Lecteur GeoPixels HTTP — Phase 2C
+# Lecteur GeoPixels HTTP et surveillance — Phase 2D
 
-Version du lecteur : **0.2.2**. GeoPlacer : **6.0.0-rc.1**, branche de développement `feat/phase2c-connector-transport`. Ce guide concerne la lecture du cache d'une page GeoPixels déjà ouverte par l'utilisateur. Il ne propose aucun placement ni achat réel.
+Version du lecteur : **0.3.1**. GeoPlacer : **6.0.0-rc.1**, branche locale `feat/phase2d-live-observation`, non publiée. La branche 2C publiée conserve son lecteur 0.2.2 et son rapport historique. Le lecteur 0.3.1 nécessite le serveur 2D : son contrôle de compatibilité refuse un ancien serveur sans cadence HTTP négociée. Ce guide concerne uniquement le cache d'une page déjà ouverte ; aucun placement ni achat réel.
 
 ## Installation et lancement
 
@@ -17,7 +17,7 @@ Ouvrir l'adresse locale réellement affichée (par défaut `http://127.0.0.1:300
 
 1. Choisir « GeoPixels — connecteur expérimental ».
 2. Saisir la clé privée dans « Clé locale d'approbation ». Elle reste dans la mémoire du formulaire pendant ce montage.
-3. Télécharger et installer le lecteur Tampermonkey proposé. Vérifier **0.2.2** et un seul lecteur GeoPlacer actif.
+3. Télécharger et installer le lecteur Tampermonkey proposé. Vérifier **0.3.1**, désactiver les anciens lecteurs GeoPlacer, puis recharger GeoPixels. Un seul lecteur doit être actif.
 4. Les seules pages autorisées sont `https://geopixels.net/*` et `https://www.geopixels.net/*`. La permission réseau GM est **127.0.0.1**, sans `*` et sans permission de récupération sur le service. Si Tampermonkey demande l'autorisation locale, contrôler cette destination précise.
 5. Garder tous les bots de placement arrêtés. Ouvrir/recharger la page GeoPixels et conserver une copie de son fantôme et de sa position avant de changer d'image.
 
@@ -29,7 +29,9 @@ Ouvrir l'adresse locale réellement affichée (par défaut `http://127.0.0.1:300
 4. Comparer les empreintes courtes de la demande dans les deux panneaux, puis cliquer « Confirmer la demande HTTP » dans le dashboard avant expiration. L'origine est **déclarée**, pas attestée cryptographiquement par HTTP.
 5. Attendre « Couplé par HTTP privilégié, en lecture seule ». Aucun cookie, identifiant Google ou token GeoPixels n'est demandé.
 
-La capacité de canal reste en mémoire du lecteur. Inactivité maximale : 30 secondes ; durée absolue : 10 minutes. Les heartbeats maintiennent le canal pendant cette durée, mais ne renouvellent pas les observations. Après rechargement, redémarrage, expiration ou révocation : nouveau code et nouvelle confirmation.
+La capacité reste en mémoire. Inactivité maximale : **30 secondes** ; durée absolue : **10 minutes**, jamais renouvelée silencieusement. Les échanges de statut maintiennent le canal, sans renouveler les pixels. Après rechargement, redémarrage, expiration ou révocation : nouveau code et confirmation.
+
+Le statut utilise une attente HTTP côté serveur de 5 secondes au plus, interrompue par une commande. Les réponses de statut et d'observation sont cadencées côté serveur (50 ms minimum). Aucune cadence de capture ne dépend d'un setInterval ou d'un petit setTimeout de la page. Cela traite le ralentissement des temporisateurs d'un onglet masqué ; cela ne garantit pas l'exécution d'une page gelée ou abandonnée par le navigateur. Si le navigateur suspend réellement le lecteur, le canal expire normalement. Ne pas désactiver les protections ou l'économie d'énergie globale pour ce test.
 
 ## Première observation reproductible
 
@@ -42,7 +44,22 @@ Le fichier **[geoplacer-8x5.png](../../public/fixtures/geoplacer-8x5.png)** est 
 5. Comparer dimensions, image, filtres et position avant de cliquer « Lier ce modèle » dans le dashboard. Une dimension identique ne prouve pas une image identique.
 6. Relever immédiatement corrects, incorrects et inconnus. Leur somme doit être **38** pour cette fixture ; les 2 pixels transparents de la cible sont exclus.
 
-**Une capture expire au bout de 30 secondes.** Le moteur retire alors les couleurs anciennes et les pixels redeviennent inconnus. Le dashboard affiche « Capture expirée ». Cliquer de nouveau sur « Observer le modèle » pour une nouvelle lecture. Une valeur transparente observée dans le cache est connue ; une tuile absente, un bitmap fermé ou une lecture impossible reste inconnu.
+**Une capture expire au bout de 30 secondes.** Les couleurs anciennes sont retirées et les pixels redeviennent inconnus. Une nouvelle capture relit le cache, sans preuve de son actualisation côté GeoPixels. Un transparent observé est connu ; une tuile absente, un bitmap fermé ou une lecture impossible reste inconnu.
+
+## Surveillance pendant une session
+
+1. Après le couplage et la liaison du modèle, choisir une **pause entre captures de 5 à 60 secondes**, 10 par défaut.
+2. Cliquer « Démarrer la surveillance » dans le dashboard. Le lecteur confirme la révision de cette commande ; l'interface distingue la demande et sa confirmation.
+3. Laisser le lecteur parcourir les bitmaps déjà chargés. Il ne charge aucune tuile et ne contacte aucune API du service.
+4. Le temps entre deux débuts de capture est la durée de la capture précédente + la pause, avec la granularité des réponses HTTP de 5 secondes. Aucun rattrapage en rafale, aucune capture simultanée. Le bouton manuel est désactivé pendant la surveillance.
+5. « Mettre la surveillance en pause », « Reprendre la surveillance » et « Arrêter la surveillance » sont distincts du scheduler factice. Une capture déjà en cours se termine avant confirmation de la pause/arrêt. Le canal reste couplé jusqu'à sa révocation ou expiration.
+6. Une pause longue ou une cadence de 60 secondes peut laisser expirer des pixels : l'interface doit alors afficher l'inconnu, sans prolonger leur validité artificiellement.
+
+Le panneau distingue heure de réception, début de la dernière capture complète, âge de lecture, date source si elle est connue, couverture des cibles et progression du cache. **Relire une ancienne tuile ne date pas sa source.** Des captures identiques peuvent rester connues comme lectures récentes du cache, tout en étant explicitement de fraîcheur source non vérifiée. Le pourcentage du modèle est indéterminé si la couverture des cibles est incomplète ; il ne constitue jamais une mesure certifiée de la toile entière.
+
+Les changements de valeurs connues, nouvelles valeurs connues, valeurs devenues inconnues et valeurs identiques sont comptés séparément. Un pixel effacé est un transparent connu, pas une tuile inconnue. Les rectangles parcourus peuvent inclure des parties non chargées. La courbe ne relie que des captures à couverture complète du même projet/session et du même modèle local.
+
+L'historique conserve **120 captures complètes** au maximum, avec comptes de progression du moteur, et 40 événements de session. Les bandes incomplètes ne deviennent pas une capture complète. Les agrégats d'avancement sont sauvegardés dans `data/engine/connector-observations.json` (ou le GEOPLACER_ENGINE_DIR choisi), inclus dans les sauvegardes de données. Aucun pixel brut, token ou capacité n'y est conservé. Au redémarrage l'historique est consultable ; ni liaison, ni autorisation, ni surveillance active ne sont restaurées. Les changements de projet sont séparés par leur identité, jamais assimilés à des modifications de pixels.
 
 Pour contrôler couleurs et orientation : utiliser une zone déjà colorée, comparer la couleur du coin avec l'outil natif de lecture, et vérifier le L noir en haut à gauche / les points isolés en bas à droite du fantôme. Les indices de rangées PNG sont convertis explicitement vers Y natif décroissant. Les tests locaux couvrent les quatre bords de tuiles, des coordonnées négatives et des tuiles absentes.
 
@@ -52,7 +69,7 @@ Après une capture, un changement de modèle, position, filtres, couche ou compt
 
 « Déconnecter » ferme le canal depuis le lecteur. « Révoquer le canal » le rend inutilisable depuis le dashboard ; une observation ultérieure doit être refusée. Arrêter le serveur rend toutes ses capacités invalides. Elles ne sont pas restaurées avec les sauvegardes.
 
-La lecture repose sur les bitmaps **déjà chargés**. Elle ne charge pas toute la carte, ne contacte pas une API GeoPixels et n'offre pas de surveillance continue. L'âge réel des bitmaps reste inconnu lorsque le frontend n'en donne pas une date fiable. Les ressources peuvent être lisibles tout en étant anciennes ou non datées ; aucun recalcul d'énergie réel n'est inventé.
+La lecture repose sur les bitmaps **déjà chargés**. Elle ne charge pas toute la carte et ne contacte pas une API GeoPixels. L'âge réel des bitmaps reste inconnu sans date fiable. Les ressources peuvent être lisibles tout en étant anciennes ou non datées ; aucun recalcul d'énergie réel n'est inventé.
 
 ## Tests locaux
 
@@ -61,10 +78,11 @@ npm.cmd run check:logged
 npm.cmd run build
 node --import tsx scripts/test-privileged-reader.mjs
 node --import tsx scripts/test-connector-channel.mjs
+node --expose-gc --import tsx scripts/bench-live-observation.mjs test-logs/phase2d/benchmark
 # Playwright disponible séparément, Edge installé :
 $env:GEOPLACER_PLAYWRIGHT_CORE = '<chemin vers playwright-core>'
-node scripts/recette-connecteur.mjs test-logs/phase2c/edge
+node scripts/recette-connecteur.mjs test-logs/phase2d/edge
 # Pour cibler uniquement la nouvelle recette HTTP : ajouter --http-only.
 ```
 
-Pour Firefox, définir aussi `GEOPLACER_BROWSER_ENGINE=firefox` et `PLAYWRIGHT_BROWSERS_PATH` vers son installation Playwright. La recette HTTP locale reproduit une page CSP et **simule l'API GM via Node** ; elle n'installe pas Tampermonkey et ne contacte pas le site. Voir le [rapport de Phase 2C](RAPPORT-PHASE2C.md) pour distinguer ces résultats de la validation utilisateur réelle.
+Pour Firefox, définir aussi `GEOPLACER_BROWSER_ENGINE=firefox` et `PLAYWRIGHT_BROWSERS_PATH`. La recette reproduit une page CSP, ralentit ses temporisateurs courts à 60 secondes et **simule l'API GM via Node** ; elle n'installe pas Tampermonkey et ne contacte pas le site. Voir le [rapport 2D](RAPPORT-PHASE2D.md) pour les résultats exacts, les limites et la validation utilisateur, distincte de ces fixtures.

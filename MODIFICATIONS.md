@@ -1,5 +1,13 @@
 # Modifications (GNU AGPL v3, section 5a)
 
+## 17 novembre 2026 — Phase 2D, surveillance du cache en lecture seule
+
+- Commandes de surveillance confirmées, captures sans chevauchement, couverture, changements et historique local borné.
+- Heures de capture/réception et fraîcheur source séparées ; aucun pourcentage global inventé à couverture incomplète.
+- Lecteur 0.3.1 : attente HTTP cadencée par le serveur pour les onglets masqués, sans prolongation d'autorisation ni modification de la CSP.
+- Réutilisation du moteur de progression, du scheduler et du WebSocket ; écritures et achats réels toujours indisponibles.
+- Publication autorisée de la seule branche 2C ; Phase 2D locale et plan de nettoyage actualisé, sans suppression.
+
 ## 17 novembre 2026 — Phase 2C, lecteur HTTP local expérimental
 
 - Transport d'observations GM_xmlhttpRequest limité à 127.0.0.1, avec approbation volontaire, capacités éphémères, révocation et lots dédupliqués.
