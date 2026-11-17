@@ -12,6 +12,8 @@ type View = {
   project: { id: string; width: number; height: number; gridX: number; gridY: number } | null;
   selection: TemplateInfo | null;
   lastSync: number | null;
+  captureAgeMs: number | null;
+  captureExpired: boolean;
   freshness: string;
   resourcesStale: boolean;
   error: string | null;
@@ -19,6 +21,7 @@ type View = {
   progress: { correct: number; incorrect: number; unknown: number; total: number } | null;
   scheduler: { state: string; reason: string | null; openAttempts: number; uncertainAttempts: string[] } | null;
 };
+type HttpReaderInfo = { enabled: boolean; active: boolean; pending: { requestId: string; fingerprint: string; originClaim: string; expires: number } | null };
 type Proposal = {
   allowed: boolean;
   reasons: string[];
@@ -33,6 +36,8 @@ const kindLabels: Record<string, string> = {
 const number = (n: number | null | undefined) => (n == null ? 'Indisponible' : n.toLocaleString('fr-FR'));
 
 export function ConnectorDashboard() {
+  const [approvalKey, setApprovalKey] = useState('');
+  const [httpReader, setHttpReader] = useState<HttpReaderInfo | null>(null);
   const [readerOrigin, setReaderOrigin] = useState('https://geopixels.net');
   const [view, setView] = useState<View | null>(null);
   const [templates, setTemplates] = useState<TemplateInfo[]>([]);
@@ -49,8 +54,8 @@ export function ConnectorDashboard() {
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       try {
-        const response = await engineHttp.get<View>('/connector/status', { signal: abort.signal });
-        if (!abort.signal.aborted) setView(response.data);
+        const [response, http] = await Promise.all([engineHttp.get<View>('/connector/status', { signal: abort.signal }), engineHttp.get<HttpReaderInfo>('/connector/http', { signal: abort.signal })]);
+        if (!abort.signal.aborted) { setView(response.data); setHttpReader(http.data); }
       } catch {
         if (!abort.signal.aborted) setError('État du connecteur indisponible');
       }
@@ -121,6 +126,23 @@ export function ConnectorDashboard() {
       <p>
         Choisir l’origine exacte affichée dans l’adresse du site ; aucun sous-domaine supplémentaire n’est autorisé.
       </p>
+      <div className="rounded border p-3 space-y-2">
+        <h3>Transport HTTP Tampermonkey — lecture seule</h3>
+        <p>{httpReader?.enabled ? 'Transport activé. La clé d’approbation n’est jamais envoyée au lecteur.' : 'Pour activer ce transport : arrêter le serveur puis lancer npm run start:reader. La clé privée apparaît dans sa console.'}</p>
+        <label>Clé locale d’approbation privée
+          <input aria-label="Clé locale d’approbation" className="block w-full font-mono" type="password" autoComplete="off" value={approvalKey} onChange={(e) => setApprovalKey(e.target.value)} />
+        </label>
+        <p>Cette clé ne doit pas être saisie dans le lecteur. Le code temporaire ci-dessous lui est destiné.</p>
+        {httpReader?.pending && <div role="status">
+          <p>Demande HTTP : <strong>{httpReader.pending.fingerprint}</strong></p>
+          <p>Origine déclarée : {httpReader.pending.originClaim} (non attestée cryptographiquement).</p>
+          <p>Comparer l’empreinte avec le panneau Tampermonkey avant de confirmer.</p>
+          <button disabled={busy || !/^[a-f0-9]{64}$/.test(approvalKey)} onClick={() => void action(async () => {
+            await engineHttp.post('/connector/http/approve', { requestId: httpReader.pending!.requestId }, { headers: { 'X-GeoPlacer-Approval': approvalKey } });
+            setCapability('');
+          })}>Confirmer la demande HTTP</button>
+        </div>}
+      </div>
       <div className="flex flex-wrap gap-2">
         <button disabled={busy || active} onClick={() => void action(() => pair('local-fake'))}>
           Coupler un navigateur factice
@@ -139,7 +161,11 @@ export function ConnectorDashboard() {
         <a href="/connector-fixture.html" target="_blank" rel="noreferrer">
           Ouvrir la page factice
         </a>
-        <button disabled={busy || active} onClick={() => void action(() => pair('read-only'))}>
+        <button disabled={busy || active} onClick={() => void action(async () => {
+            setCapability('');
+            const r = await engineHttp.post<{ token: string }>('/connector/http/pair', { origin: readerOrigin }, { headers: { 'X-GeoPlacer-Approval': approvalKey } });
+            setCapability(r.data.token);
+          })}>
           Coupler le lecteur GeoPixels
         </button>
         <a href="/geopixels-connector.user.js" download>
@@ -212,7 +238,8 @@ export function ConnectorDashboard() {
             <dt>Inconnus</dt>
             <dd id="observedUnknown">{number(view?.progress?.unknown)}</dd>
           </dl>
-          <p>Dernière réception : {view?.lastSync ? new Date(view.lastSync).toLocaleTimeString('fr-FR') : 'Aucune'}</p>
+          <p>Dernière capture reçue : {view?.lastSync ? new Date(view.lastSync).toLocaleTimeString('fr-FR') : 'Aucune'}</p>
+          {view?.captureExpired && <p role="status">Capture expirée (plus de 30 secondes) : utiliser « Observer le modèle » dans le lecteur. Les pixels anciens redeviennent inconnus.</p>}
           <p>
             {view?.freshness === 'dated'
               ? 'Observations datées ; les données anciennes deviennent inconnues.'

@@ -117,6 +117,8 @@ describe('GeoPixels native coordinate and observation contracts', () => {
     p.bind(template());
     now += 30_001;
     p.heartbeat();
+    expect(p.status().captureExpired).toBe(true);
+    expect(p.status().captureAgeMs).toBe(30_001);
     expect((await p.reader.readRegion({ minX: 5, minY: 8, width: 1, height: 1 })).get({ x: 5, y: 8 })).toBe(UNKNOWN);
     p.disconnect();
     expect(p.status().connected).toBe(false);
@@ -155,6 +157,7 @@ describe('GeoPixels native coordinate and observation contracts', () => {
     p.bind(template());
     const s = await p.reader.readRegion({ minX: 5, minY: 8, width: 1, height: 1 });
     expect(s.observedAt).toBe(0);
+    expect(s.get({ x: 5, y: 8 })).toBe(1); // Cache color retained, without inventing a date.
     expect(s.source).toBe('geopixels-observed');
     expect(p.status().freshness).toBe('unverified');
     p.close();

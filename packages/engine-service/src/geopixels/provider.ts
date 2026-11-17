@@ -380,6 +380,8 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
       project: this.project,
       bound: this.binding !== null,
       lastSync: this.lastCapture,
+      captureAgeMs: this.lastCapture === null ? null : Math.max(0, this.now() - this.lastCapture),
+      captureExpired: this.lastCapture !== null && this.now() - this.lastCapture > CONNECTOR_MAX_AGE_MS,
       freshness: this.dated ? 'dated' : 'unverified',
       resources: r,
       resourcesStale: r === null || r.observedAt === null || this.now() - r.observedAt > CONNECTOR_MAX_AGE_MS,
