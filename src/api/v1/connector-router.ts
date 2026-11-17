@@ -1,5 +1,6 @@
 import { Router, type Request } from 'express';
 import { z } from 'zod';
+import type { ConnectorHttpChannel } from '@geoplacer/engine-service';
 import { asRgb } from '@geoplacer/core';
 import type { EngineApi } from './engine-api.js';
 import { hostnameFromHostHeader } from '../../middleware/local-access.js';
@@ -14,7 +15,7 @@ export function isLoopbackChannel(req: { headers: { host?: string }; socket: { r
   );
 }
 
-export function createConnectorRouter(engine: EngineApi): Router {
+export function createConnectorRouter(engine: EngineApi, httpChannel?: ConnectorHttpChannel): Router {
   const router = Router();
   router.use((req, res, next) => {
     // This control surface stays loopback-only even when the dashboard is exposed to a LAN.
@@ -56,6 +57,17 @@ export function createConnectorRouter(engine: EngineApi): Router {
     '/status',
     action(() => engine.connectorView!())
   );
+  router.get('/http', action(() => httpChannel?.info() ?? { enabled: false, pending: null, active: false }));
+  router.post('/http/pair', action((req) => {
+    const b = z.strictObject({ origin: z.enum(['https://geopixels.net', 'https://www.geopixels.net']) }).parse(req.body);
+    if (!httpChannel) throw new Error('reader unavailable');
+    return httpChannel.issue(req.header('X-GeoPlacer-Approval') ?? '', b.origin);
+  }));
+  router.post('/http/approve', action((req) => {
+    const b = z.strictObject({ requestId: z.string().regex(/^[a-f0-9]{64}$/) }).parse(req.body);
+    if (!httpChannel) throw new Error('reader unavailable');
+    return httpChannel.approve(req.header('X-GeoPlacer-Approval') ?? '', b.requestId);
+  }));
   router.post(
     '/source',
     action((req) => {

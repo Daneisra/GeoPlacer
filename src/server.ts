@@ -1,3 +1,5 @@
+import { ConnectorHttpChannel } from '@geoplacer/engine-service';
+import { createPrivilegedReaderRouter } from './api/v1/connector-http.js';
 /**
  * Main server entry point
  * WPlace auto-drawing bot
@@ -168,8 +170,10 @@ const accessPolicy: LocalAccessPolicy = {
   originPatterns: compileOriginPatterns(ALLOWED_ORIGINS),
 };
 
-// Host/Origin checks, CORS, rate limiter (every route, before the body is
-// parsed), JSON size limit: see app-base.ts.
+// Management Host/Origin, CORS, rate and body protections remain unchanged.
+// The closed privileged ingress below has its own loopback/capability checks.
+const privilegedReaderIngress = Router();
+app.use('/api/v1/connector/privileged', privilegedReaderIngress);
 applyBaseProtections(app, {
   policy: accessPolicy,
   rateLimitWindowMs: RATE_LIMIT_WINDOW_MS,
@@ -468,7 +472,12 @@ async function startServer(): Promise<void> {
       }
       throw error;
     }
-    apiV1.use('/connector', createConnectorRouter(engine.api));
+    const httpReader = new ConnectorHttpChannel(engine.api.pairing!, engine.api.connector!, process.env.GEOPLACER_READER_APPROVAL_KEY);
+    privilegedReaderIngress.use(createPrivilegedReaderRouter(httpReader));
+    const httpExpiry = setInterval(() => httpReader.tick(), 1000);
+    httpExpiry.unref();
+    serverState.intervals.push(httpExpiry);
+    apiV1.use('/connector', createConnectorRouter(engine.api, httpReader));
     apiV1.use(createEngineRouter(engine.api));
     logger.info('Engine ready: simulation and opt-in browser observer; real placement and purchases disabled.');
 

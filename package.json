@@ -12,6 +12,7 @@
   "scripts": {
     "prestart": "npm run build:packages --silent",
     "setup:windows": "node scripts/setup-windows.mjs",
+    "start:reader": "node scripts/start-reader.mjs",
     "start": "node --env-file-if-exists=.env dist/server.js",
     "predev": "npm run build:packages --silent",
     "dev": "concurrently --prefix-colors=blue,green --names=backend,frontend \"node --watch --env-file-if-exists=.env --import tsx src/server.ts\" \"npm run dev:frontend\"",
