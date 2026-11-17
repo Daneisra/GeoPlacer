@@ -4,13 +4,18 @@
   let transport = null,
     heartbeat = null,
     generation = 0,
-    observing = false;
+    observing = false,
+    ticking = false,
+    monitoring = null,
+    nextDue = 0;
   const panel = document.createElement('aside');
   panel.style.cssText =
     'position:fixed;bottom:12px;right:12px;z-index:99999;background:#17212b;color:white;padding:12px;max-width:340px;font:14px sans-serif;border:1px solid #669;border-radius:8px';
   const title = document.createElement('strong');
   title.textContent = `GeoPlacer — lecteur HTTP ${GeoPlacerReaderVersion}`;
   const status = document.createElement('p');
+  const watchStatus = document.createElement('p');
+  watchStatus.textContent = 'Surveillance arrêtée. Commandes dans le dashboard local.';
   status.textContent = 'Déconnecté. Lecture seule ; aucun placement ni achat.';
   const connect = document.createElement('button');
   connect.textContent = 'Coupler';
@@ -28,7 +33,7 @@
       status.textContent = 'Diagnostic du contexte de page indisponible';
     }
   };
-  panel.append(title, status, connect, sync, disconnect, diagnose);
+  panel.append(title, status, watchStatus, connect, sync, disconnect, diagnose);
   document.body.append(panel);
   async function close(message = 'Déconnecté') {
     generation++;
@@ -37,6 +42,9 @@
     const previous = transport;
     transport = null;
     observing = false;
+    monitoring = null;
+    nextDue = 0;
+    watchStatus.textContent = 'Surveillance arrêtée. Nouveau couplage si le canal a expiré.';
     sync.disabled = true;
     connect.disabled = false;
     status.textContent = message;
@@ -72,22 +80,41 @@
       status.textContent = 'Couplé par HTTP privilégié, en lecture seule';
       sync.disabled = false;
       heartbeat = setInterval(async () => {
-        if (observing || current !== generation) return;
+        if (observing || ticking || current !== generation) return;
+        ticking = true;
         try {
           if (!(await GeoPlacerPageReader.unchanged()))
             throw new Error('Modèle, position, palette, couche ou session modifié : nouveau couplage nécessaire.');
-          await next.heartbeat();
+          const answer = await next.heartbeat(monitoring ? { revision: monitoring.revision, state: monitoring.state } : undefined);
+          if (current !== generation) return;
+          const m = answer?.monitoring;
+          if (m) {
+            if (!Number.isSafeInteger(m.revision) || !['running', 'paused', 'stopped'].includes(m.state) ||
+                !Number.isSafeInteger(m.intervalMs) || m.intervalMs < 5000 || m.intervalMs > 60000)
+              throw new Error('Commande de surveillance invalide');
+            if (!monitoring || m.revision > monitoring.revision) {
+              monitoring = m;
+              nextDue = 0;
+            }
+          }
+          watchStatus.textContent = `Surveillance : ${monitoring?.state === 'running' ? 'active' : monitoring?.state === 'paused' ? 'en pause' : 'arrêtée'}. Cache chargé uniquement ; fraîcheur source non vérifiée.`;
+          sync.disabled = monitoring?.state === 'running';
+          if (monitoring?.state === 'running' && Date.now() >= nextDue) {
+            await observe(true);
+            if (current === generation && monitoring)
+              nextDue = Date.now() + monitoring.intervalMs; // Rest between captures; never overlap or catch up in a burst.
+          }
         } catch (error) {
           if (current === generation) await close(error.message);
-        }
-      }, 5000);
+        } finally { ticking = false; }
+      }, 1000);
     } catch (error) {
       code = null;
       if (current === generation) await close(error.message);
     }
   };
-  sync.onclick = async () => {
-    if (observing || !transport?.connected()) return;
+  async function observe(fromWatch = false) {
+    if (observing || (ticking && !fromWatch) || !transport?.connected()) return;
     const current = generation,
       channel = transport;
     observing = true;
@@ -104,8 +131,9 @@
     } finally {
       if (current === generation) {
         observing = false;
-        sync.disabled = !transport?.connected();
+        sync.disabled = !transport?.connected() || monitoring?.state === 'running';
       }
     }
-  };
+  }
+  sync.onclick = () => observe(false);
 })();

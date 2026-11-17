@@ -7,9 +7,8 @@ globalThis.GeoPlacerCapture = (() => {
       tileY = Math.floor(y / TILE) * TILE;
     return { tileX, tileY, localX: x - tileX, localY: y - tileY };
   }
-  function readRegion(project, rect, cache, createCanvas, report = () => {}) {
+  function readRegion(project, rect, cache, createCanvas, report = () => {}, decoded = new Map()) {
     const pixels = new Array(rect.width * rect.height).fill(-2);
-    const decoded = new Map();
     for (let y = 0; y < rect.height; y++)
       for (let x = 0; x < rect.width; x++) {
         const gx = rect.x + x,
@@ -18,8 +17,8 @@ globalThis.GeoPlacerCapture = (() => {
           continue;
         const t = tileAt(gx, gy),
           key = `${t.tileX},${t.tileY}`;
-        if (!decoded.has(key)) {
-          const bitmap = cache.get(key)?.colorBitmap;
+        const bitmap = cache.get(key)?.colorBitmap;
+        if (!decoded.has(key) || decoded.get(key).bitmap !== bitmap || decoded.get(key).width !== bitmap?.width || decoded.get(key).height !== bitmap?.height) {
           let data = null;
           if (bitmap && bitmap.width === TILE && bitmap.height === TILE) {
             try {
@@ -34,9 +33,9 @@ globalThis.GeoPlacerCapture = (() => {
           }
           if (!bitmap) report('missing-bitmap');
           else if (bitmap.width !== TILE || bitmap.height !== TILE) report('invalid-bitmap-size');
-          decoded.set(key, data);
+          decoded.set(key, { bitmap, width: bitmap?.width, height: bitmap?.height, data });
         }
-        const data = decoded.get(key);
+        const data = decoded.get(key).data;
         if (!data) continue;
         const i = (t.localY * TILE + t.localX) * 4;
         pixels[y * rect.width + x] = data[i + 3] === 0 ? -1 : data[i + 3] === 255 ? (data[i] << 16) | (data[i + 1] << 8) | data[i + 2] : -2;

@@ -129,12 +129,18 @@ const GeoPlacerPageReader = (() => {
       typeof Colors === 'undefined' ? null : Colors
     );
     const cacheStats = { known: 0, unknown: 0, transparent: 0 };
+    // Per-cycle only: never retain a decoded tile between captures or infer a source timestamp.
+    const decoded = new Map(), captureId = crypto.randomUUID();
+    const rowsPerBand = Math.max(1, Math.floor(16384 / project.width));
+    const bandCount = Math.ceil(project.height / rowsPerBand);
+    let bandIndex = 0;
     for (let row = 0; row < project.height;) {
       if (!connected() || !unchanged() || (await contract()).id !== c.id || (await contract()).layer !== 'base')
         throw new Error('Modèle, position, palette, couche ou session modifié pendant la lecture');
-      const height = Math.min(project.height - row, Math.max(1, Math.floor(16384 / project.width)));
+      const height = Math.min(project.height - row, rowsPerBand);
       const rect = { x: project.gridX, y: project.gridY - row - height + 1, width: project.width, height };
-      const pixels = GeoPlacerCapture.readRegion(project, rect, tileImageCache, (w, h) => new OffscreenCanvas(w, h));
+      const capturedAt = Date.now();
+      const pixels = GeoPlacerCapture.readRegion(project, rect, tileImageCache, (w, h) => new OffscreenCanvas(w, h), () => {}, decoded);
       for (const value of pixels) {
         if (value === -2) cacheStats.unknown++;
         else {
@@ -146,7 +152,8 @@ const GeoPlacerPageReader = (() => {
         type: 'observation',
         session,
         project,
-        capturedAt: Date.now(),
+        capturedAt,
+        capture: { id: captureId, index: bandIndex++, count: bandCount },
         observedAt: null,
         rect,
         pixels,

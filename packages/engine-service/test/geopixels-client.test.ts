@@ -12,6 +12,9 @@ async function setup(origin = 'https://geopixels.net') {
   const elements: Element[] = [],
     requests: unknown[] = [];
   let connected = false;
+  let now = 100000;
+  let interval: (() => Promise<void>) | undefined;
+  let control: { revision: number; state: string; intervalMs: number } | undefined;
   const channel = {
     pair: async (_code: string, _origin: string, pending: (s: string) => void) => {
       pending('123456abcdef');
@@ -20,7 +23,7 @@ async function setup(origin = 'https://geopixels.net') {
     send: async (value: unknown) => {
       requests.push(value);
     },
-    heartbeat: async () => {},
+    heartbeat: async () => control ? { monitoring: control } : undefined,
     disconnect: async () => {
       connected = false;
     },
@@ -53,7 +56,8 @@ async function setup(origin = 'https://geopixels.net') {
     GM_xmlhttpRequest: () => {},
     GeoPlacerHttpTransport: () => channel,
     GeoPlacerPageReader: reader,
-    setInterval: () => 1,
+    Date: { now: () => now },
+    setInterval: (fn: () => Promise<void>) => { interval = fn; return 1; },
     clearInterval: () => {},
     WebSocket: () => {
       throw new Error('page WebSocket forbidden');
@@ -61,9 +65,35 @@ async function setup(origin = 'https://geopixels.net') {
   });
   vm.runInContext(await readFile(new URL('../../../browser/geopixels-client.js', import.meta.url), 'utf8'), context);
   const button = (text: string) => elements.find((e) => e.textContent === text)!;
-  return { context, elements, channel, reader, button, requests };
+  return { context, elements, channel, reader, button, requests, tick: () => interval!(), advance: (ms: number) => { now += ms; }, setControl: (value: typeof control) => { control = value; } };
 }
 describe('Passive HTTP reader panel in a local DOM fixture', () => {
+  it('captures repeatedly only when requested, then pauses, resumes and stops without catching up', async () => {
+    const s = await setup(); await s.button('Coupler').onclick!();
+    await s.tick(); expect(s.requests).toHaveLength(0);
+    s.setControl({ revision:1, state:'running', intervalMs:5000 }); await s.tick();
+    expect(s.requests).toHaveLength(1);
+    s.advance(4999); await s.tick(); expect(s.requests).toHaveLength(1);
+    s.advance(1); await s.tick(); expect(s.requests).toHaveLength(2);
+    s.setControl({ revision:2, state:'paused', intervalMs:5000 }); await s.tick();
+    s.advance(60000); await s.tick(); expect(s.requests).toHaveLength(2);
+    s.setControl({ revision:3, state:'running', intervalMs:5000 }); await s.tick(); expect(s.requests).toHaveLength(3);
+    s.setControl({ revision:4, state:'stopped', intervalMs:5000 }); await s.tick();
+    s.advance(60000); await s.tick(); expect(s.requests).toHaveLength(3);
+  });
+  it('never overlaps captures or applies a late control response after disconnect', async () => {
+    const s = await setup(); await s.button('Coupler').onclick!();
+    let finish: (() => void) | undefined;
+    s.channel.heartbeat = () => new Promise(resolve => { finish = () => resolve({ monitoring:{ revision:1, state:'running', intervalMs:5000 } }); });
+    const running=s.tick(); await s.tick(); await s.button('Déconnecter').onclick!(); finish!(); await running;
+    expect(s.requests).toHaveLength(0); expect(s.channel.connected()).toBe(false);
+  });
+  it('stops after a changed model and does not auto-pair again', async () => {
+    const s = await setup(); await s.button('Coupler').onclick!();
+    s.setControl({ revision:1, state:'running', intervalMs:5000 });
+    s.reader.unchanged=async()=>false; await s.tick();
+    expect(s.requests).toHaveLength(0); expect(s.channel.connected()).toBe(false);
+  });
   it.each(['https://geopixels.net', 'https://www.geopixels.net'])(
     'couples only the HTTP reader on %s',
     async (origin) => {

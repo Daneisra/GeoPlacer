@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 
 type Capture = {
-  readRegion: (p: unknown, r: unknown, c: Map<string, unknown>, f: () => unknown, report?: (reason: string) => void) => number[];
+  readRegion: (p: unknown, r: unknown, c: Map<string, unknown>, f: () => unknown, report?: (reason: string) => void, decoded?: Map<string, unknown>) => number[];
   resources: (s: unknown, c: unknown) => Record<string, unknown>;
   tileAt: (x: number, y: number) => unknown;
 };
@@ -13,6 +13,18 @@ async function library(): Promise<Capture> {
   return context.GeoPlacerCapture as Capture;
 }
 describe('Browser contract fixture: current GeoPixelsFront cache, no service calls', () => {
+  it('decodes once per capture and rereads the same bitmap on the next capture', async () => {
+    const capture=await library(), bitmap={width:1000,height:1000}, cache=new Map([['0,0',{colorBitmap:bitmap}]]);
+    let decodes=0,color=1;
+    const canvas=()=>({getContext:()=>({drawImage:()=>{},getImageData:()=>{
+      decodes++;const data=new Uint8Array(4_000_000);data.set([0,0,color,255]);return{data};
+    }})});
+    const p={gridX:0,gridY:0,width:1,height:1},r={x:0,y:0,width:1,height:1}, cycle=new Map();
+    expect(capture.readRegion(p,r,cache,canvas,undefined,cycle)).toEqual([1]);
+    color=2;expect(capture.readRegion(p,r,cache,canvas,undefined,cycle)).toEqual([1]);expect(decodes).toBe(1);
+    expect(capture.readRegion(p,r,cache,canvas,undefined,new Map())).toEqual([2]);expect(decodes).toBe(2);
+    bitmap.width=0;expect(capture.readRegion(p,r,cache,canvas,undefined,cycle)).toEqual([-2]);
+  });
   it('reads only loaded color bitmaps, Y as native bitmap row, across negative tile edges', async () => {
     const capture = await library();
     const bitmap = { width: 1000, height: 1000 };

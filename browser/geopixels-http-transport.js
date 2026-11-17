@@ -95,7 +95,7 @@ const GeoPlacerHttpTransport = (address, request) => {
       capability = claimed.capability;
       pending(claimed.fingerprint);
       for (let i = 0; i < 60; i++) {
-        const state = await post('status', { protocol: 1 });
+        const state = await post('status', { protocol: 1, readerVersion: 3 });
         if (state.approved === true && state.lastSequence === 0) {
           active = true;
           return;
@@ -129,13 +129,14 @@ const GeoPlacerHttpTransport = (address, request) => {
         busy = false;
       }
     },
-    async heartbeat() {
+    async heartbeat(monitoring) {
       if (!active || busy) return;
-      const answer = await post('status', { protocol: 1 });
+      const answer = await post('status', { protocol: 1, readerVersion: 3, ...(monitoring ? { monitoring } : {}) });
       if (answer.approved !== true || answer.lastSequence !== sequence) {
         active = false;
         throw new Error('Canal expiré ou séquence incertaine');
       }
+      return answer;
     },
     async disconnect() {
       active = false;
