@@ -442,6 +442,14 @@ export function createAttemptManager(deps: AttemptManagerDeps): AttemptManager {
         return closed;
       }),
 
+    interrupt: (id, reason, now) => serialized(async () => {
+      guard();
+      const attempt = openOf(id);
+      if (attempt.state === 'needs-reconciliation') return attempt;
+      if (attempt.state !== 'started') throw new AttemptError('INVALID_TRANSITION', 'only a started attempt can be interrupted');
+      return toReconciliation(attempt, reason, now);
+    }),
+
     expire: (now) =>
       serialized(async () => {
         guard();

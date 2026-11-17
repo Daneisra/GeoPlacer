@@ -71,3 +71,5 @@ export { ConnectorError, parseObservation } from './geopixels/protocol.js';
 export type { ConnectorMode, BrowserProject, BrowserObservation } from './geopixels/protocol.js';
 
 export { ConnectorHttpChannel } from './geopixels/http-channel.js';
+
+export { SinglePixelWriter, type SinglePixelCommand } from './geopixels/single-pixel-writer.js';

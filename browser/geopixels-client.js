@@ -27,6 +27,25 @@
   disconnect.textContent = 'Déconnecter';
   const diagnose = document.createElement('button');
   diagnose.textContent = 'Diagnostiquer';
+  const pixel = document.createElement('button');
+  pixel.textContent = 'Examiner le pixel préparé (essai réel)';
+  pixel.onclick = async (event) => {
+    if (!event.isTrusted || !transport?.connected()) return;
+    const channel = transport, current = generation;
+    pixel.disabled = true;
+    try {
+      const command = await channel.claimPixel();
+      if (!command) { status.textContent = 'Aucun pixel autorisé dans le dashboard.'; return; }
+      const result = await GeoPlacerPageWriter.execute(command,
+        id => current === generation && channel.connected() ? channel.pixelAllowed(id) : false, true);
+      const ack = await channel.pixelResult(command.attemptId,result);
+      status.textContent = result === 'confirmed' && ack.state === 'finished'
+        ? 'Envoi unique confirmé par GeoPixels. Observer à nouveau pour mesurer la progression ; recharger avant un nouvel essai.'
+        : result === 'not-sent' && ack.state === 'failed' ? 'Pixel non envoyé.' : 'Résultat incertain. Aucun renvoi ; réconciliation nécessaire.';
+    } catch {
+      status.textContent = 'Réponse absente : résultat potentiellement incertain. Consulter le dashboard ; aucun renvoi.';
+    } finally { pixel.disabled = false; }
+  };
   diagnose.onclick = async () => {
     try {
       status.textContent = await GeoPlacerPageReader.inspect();
@@ -34,9 +53,10 @@
       status.textContent = 'Diagnostic du contexte de page indisponible';
     }
   };
-  panel.append(title, status, watchStatus, connect, sync, disconnect, diagnose);
+  panel.append(title, status, watchStatus, connect, sync, disconnect, diagnose, pixel);
   document.body.append(panel);
   async function close(message = 'Déconnecté') {
+    GeoPlacerPageWriter.stop();
     generation++;
     const previous = transport;
     transport = null;

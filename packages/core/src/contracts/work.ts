@@ -427,6 +427,8 @@ export interface AttemptManager {
   fail(attemptId: AttemptId, reason: string, outcomes: readonly PixelWriteOutcome[], now: Timestamp, reported?: ResourceObservation): Promise<Attempt>;
   /** Only an attempt never started can be cancelled. */
   cancel(attemptId: AttemptId, reason: string, now: Timestamp): Promise<Attempt>;
+  /** Stop an operation already dispatched: retain its reservation until reconciliation. */
+  interrupt(attemptId: AttemptId, reason: string, now: Timestamp): Promise<Attempt>;
   /** Expired leases: leased ones are cancelled, started ones need reconciliation. */
   expire(now: Timestamp): Promise<readonly Attempt[]>;
   /** A new revision of a template: older open attempts are cancelled (never started) or sent to reconciliation. */

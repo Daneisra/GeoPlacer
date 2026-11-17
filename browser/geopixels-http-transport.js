@@ -21,7 +21,7 @@ const GeoPlacerHttpTransport = (address, request) => {
     busy = false;
   let latencyMs = null;
   async function post(operation, body, authenticated = true) {
-    if (!['claim', 'status', 'observations', 'disconnect'].includes(operation)) throw new Error('Opération interdite');
+    if (!['claim', 'status', 'observations', 'disconnect', 'pixel-claim', 'pixel-check', 'pixel-result'].includes(operation)) throw new Error('Opération interdite');
     if (authenticated && !capability) throw new Error('Canal non couplé');
     const data = JSON.stringify(body);
     if (new TextEncoder().encode(data).length > 768 * 1024) throw new Error('Lot trop volumineux');
@@ -144,6 +144,18 @@ const GeoPlacerHttpTransport = (address, request) => {
         throw new Error('Canal expiré ou séquence incertaine');
       }
       return answer;
+    },
+    // Single delivery. In particular, NEVER retry a command claim or a site operation.
+    async claimPixel() {
+      if (!active) throw new Error('Canal non couplé');
+      return (await post('pixel-claim', {protocol:1})).command;
+    },
+    async pixelAllowed(attemptId) {
+      if (!active) return false;
+      return (await post('pixel-check', {protocol:1,attemptId})).allowed === true;
+    },
+    async pixelResult(attemptId,result) {
+      return post('pixel-result', {protocol:1,attemptId,result});
     },
     async disconnect() {
       active = false;

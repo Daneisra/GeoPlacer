@@ -78,6 +78,34 @@ export function createConnectorRouter(engine: EngineApi, httpChannel?: Connector
             return engine.configureConnectorRegions!(b.regions);
         })
     );
+    router.post('/pixel/prepare', action((req) => {
+        if (!httpChannel) throw new ConnectorError('CONNECTOR_UNAVAILABLE', 'approval channel required');
+        httpChannel.control(req.header('X-GeoPlacer-Approval') ?? '');
+        const b = z.strictObject({mode:z.enum(['fake','real'])}).parse(req.body);
+        if (b.mode === 'real') regionControl(req);
+        return engine.singlePixelWriter!.prepare(b.mode);
+    }));
+    router.post('/pixel/confirm', action((req) => {
+        if (!httpChannel) throw new ConnectorError('CONNECTOR_UNAVAILABLE', 'approval channel required');
+        httpChannel.control(req.header('X-GeoPlacer-Approval') ?? '');
+        const b = z.strictObject({attemptId:z.string().uuid(),
+            gridX:z.number().int().safe(),gridY:z.number().int().safe(),color:z.number().int().min(0).max(0xffffff),
+            approved:z.literal(true)}).parse(req.body);
+        if (engine.singlePixelWriter!.view().mode === 'real') regionControl(req);
+        return engine.singlePixelWriter!.confirm(b.attemptId,b);
+    }));
+    router.post('/pixel/stop', action((req) => {
+        if (!httpChannel) throw new ConnectorError('CONNECTOR_UNAVAILABLE', 'approval channel required');
+        httpChannel.control(req.header('X-GeoPlacer-Approval') ?? '');
+        z.strictObject({}).parse(req.body);
+        return engine.singlePixelWriter!.stop();
+    }));
+    router.post('/pixel/reconcile', action((req) => {
+        if (!httpChannel) throw new ConnectorError('CONNECTOR_UNAVAILABLE', 'approval channel required');
+        httpChannel.control(req.header('X-GeoPlacer-Approval') ?? '');
+        z.strictObject({}).parse(req.body);
+        return engine.singlePixelWriter!.reconcile();
+    }));
     router.post(
         '/regions/restore',
         action((req) => {

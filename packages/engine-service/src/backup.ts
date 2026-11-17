@@ -332,6 +332,8 @@ async function checkContent(dir: string): Promise<string[]> {
   if (journal.verdict !== 'healthy' && journal.verdict !== 'empty') warnings.push(`attempt journal: ${journal.verdict} (it is reconciled or repaired at the next start)`);
   const connectorJournal = await diagnoseJournal(path.join(dir, 'providers', 'geopixels'));
   if (connectorJournal.verdict !== 'healthy' && connectorJournal.verdict !== 'empty') warnings.push(`browser attempt journal: ${connectorJournal.verdict} (requires connector reconciliation or repair)`);
+  const pixelJournal = await diagnoseJournal(path.join(dir, 'providers', 'geopixels-writer'));
+  if (pixelJournal.verdict !== 'healthy' && pixelJournal.verdict !== 'empty') warnings.push(`single pixel attempt journal: ${pixelJournal.verdict} (requires writer reconciliation or repair)`);
   return warnings;
 }
 

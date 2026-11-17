@@ -56,6 +56,7 @@ async function setup(origin = 'https://geopixels.net') {
     GM_xmlhttpRequest: () => {},
     GeoPlacerHttpTransport: () => channel,
     GeoPlacerPageReader: reader,
+    GeoPlacerPageWriter: { stop: () => {}, execute: () => { throw new Error('unexpected writer call'); } },
     Date: { now: () => now },
     setInterval: () => { throw new Error('Page cadence timers are forbidden by this fixture'); },
     WebSocket: () => {

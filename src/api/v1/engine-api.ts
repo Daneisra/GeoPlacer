@@ -26,6 +26,7 @@ export interface CommandResultLike {
 }
 
 export interface EngineApi {
+    readonly singlePixelWriter?: import('@geoplacer/engine-service').SinglePixelWriter;
     readonly connector?: import('@geoplacer/engine-service').GeoPixelsProvider;
     readonly pairing?: import('@geoplacer/engine-service').ConnectorPairing;
     selectSource?(source: 'simulation' | 'geopixels'): Promise<CommandResultLike>;

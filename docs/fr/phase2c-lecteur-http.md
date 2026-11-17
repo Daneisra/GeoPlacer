@@ -1,6 +1,6 @@
 # Lecteur GeoPixels HTTP, surveillance et régions — Phase 2E
 
-Version du lecteur : **0.4.0**. GeoPlacer : **6.0.0-rc.1**, branche locale `feat/phase2e-regional-observation`, non publiée. La branche 2D publiée conserve le lecteur **0.3.1**, validé réellement par l'utilisateur ; main fournit la RC de démonstration sans connecteur. Le lecteur 0.4.0 négocie le protocole régional 1 avec le serveur 2E ; les lecteurs 0.3.1 restent utilisables en capture complète sur ce serveur, sans configuration régionale. Aucun placement ni achat réel.
+Version du lecteur : **0.5.0**, serveur Phase 2F local. Le lecteur reste passif par défaut et conserve les observations régionales du protocole 1 ; les lecteurs 0.3.1/0.4.0 restent compatibles pour leurs observations respectives. Le port écrivain séparé prépare seulement un essai d'un pixel soumis à confirmation explicite dans le dashboard **et** dans le navigateur. Aucun achat ; aucun placement réel validé en Phase 2F. Voir la [recette et les limites de cet essai](RAPPORT-PHASE2F.md). Main fournit toujours la RC de démonstration sans connecteur expérimental.
 
 ## Installation et lancement
 
@@ -17,7 +17,7 @@ Taper directement l'adresse locale dans la barre d'adresse d'un nouvel onglet (p
 
 1. Choisir « GeoPixels — connecteur expérimental ».
 2. Saisir la clé privée dans « Clé locale d'approbation ». Elle reste dans la mémoire du formulaire pendant ce montage.
-3. Télécharger et installer le lecteur Tampermonkey proposé. Vérifier **0.4.0**, désactiver les anciens lecteurs GeoPlacer, puis recharger GeoPixels. Un seul lecteur doit être actif.
+3. Télécharger et installer le lecteur Tampermonkey proposé. Vérifier **0.5.0**, désactiver les anciens lecteurs GeoPlacer, puis recharger GeoPixels. Un seul lecteur doit être actif.
 4. Les seules pages autorisées sont `https://geopixels.net/*` et `https://www.geopixels.net/*`. La permission réseau GM est **127.0.0.1**, sans `*` et sans permission de récupération sur le service. Si Tampermonkey demande l'autorisation locale, contrôler cette destination précise.
 5. Garder tous les bots de placement arrêtés. Ouvrir/recharger la page GeoPixels et conserver une copie de son fantôme et de sa position avant de changer d'image.
 
@@ -103,6 +103,8 @@ npm.cmd run check:logged
 npm.cmd run build
 node --import tsx scripts/test-privileged-reader.mjs
 node --import tsx scripts/test-connector-channel.mjs
+# Phase 2F : écrivain entièrement factice, aucun appel au site
+node --import tsx scripts/test-single-pixel.mjs
 node --expose-gc --import tsx scripts/bench-regional-observation.mjs test-logs/phase2e/benchmark
 # Playwright disponible séparément, Edge installé :
 $env:GEOPLACER_PLAYWRIGHT_CORE = '<chemin vers playwright-core>'

@@ -31,7 +31,9 @@ export async function runHttpReaderRecipe({ browser, page, api, base, approvalKe
   const html = `<!doctype html><html><body><h1>LOCAL CSP FIXTURE — no GeoPixels connection</h1><script>
 let ghostImageOriginalData = new ImageData(new Uint8ClampedArray(${JSON.stringify([...png.data])}),8,5);
 let ghostImageTopLeft = {gridX:999,gridY:1001}; let ghostActivePaletteColors = new Set();
-let tileImageCache = new Map(); let userID='local-fixture-only'; let userData={}; let Colors=['#000000','#ffffff'];
+let tileImageCache = new Map(); let userID=7; let userData={colors:[0,16777215]}; let Colors=['#000000','#ffffff'];
+let tokenUser='synthetic-browser-fixture-only', subject='synthetic-browser-subject';
+let currentEnergy=10, queuedPixelsObjects=new Map(), isPlacingRequestInProgress=false;
 function getSelectedEventId(){return null;}
 function loadFixtureTiles(){
   tileImageCache.clear();
@@ -251,6 +253,35 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     const regionalEnd=await api('connector/status',undefined,'GET');
     writeFileSync(path.join(out,'regional-metrics.json'),JSON.stringify({fixture:true,realExtension:false,regions:regionalEnd.monitoring.configuredRegions,progress:regionalEnd.progress,regionViews:regionalEnd.regionViews,usage:regionalEnd.monitoring.usage},null,2));
     record('OK regional UI: two image rectangles, one-shot partial coverage, weighted monitoring covers both, pause and stop; no service requests');
+    // One-pixel UI flow. The page's site fetch is replaced by a stub; no request can reach GeoPixels.
+    await reader.evaluate(()=>{
+      const entry=tileImageCache.get('0,1000');
+      entry.colorBitmap.getContext('2d').clearRect(999,1,1,1);
+      globalThis.fixtureSiteCalls=0;
+      globalThis.fetch=async(url,options)=>{
+        if(url!==location.origin+'/PlacePixels' || JSON.parse(options.body).Pixels.length!==1)
+          throw new Error('Unexpected fixture site operation');
+        globalThis.fixtureSiteCalls++;
+        return new Response('Ok',{status:200});
+      };
+    });
+    await reader.getByRole('button',{name:'Observer le modèle',exact:true}).click();
+    await page.locator('#observedIncorrect').filter({hasText:/^1$/}).waitFor();
+    const pixelPanel=page.getByRole('group',{name:/Essai d’un pixel/});
+    await pixelPanel.getByRole('button',{name:'Préparer un pixel avec le planificateur',exact:true}).click();
+    await pixelPanel.getByText('Préparée — réservation durable',{exact:true}).waitFor();
+    await pixelPanel.getByRole('checkbox').check();
+    await pixelPanel.getByRole('button',{name:'Autoriser cet essai — confirmer ensuite dans Tampermonkey',exact:true}).click();
+    reader.once('dialog',dialog=>dialog.accept());
+    await reader.getByRole('button',{name:'Examiner le pixel préparé (essai réel)',exact:true}).click();
+    await pixelPanel.getByText('Confirmée',{exact:true}).waitFor();
+    assert.equal(await reader.evaluate(()=>globalThis.fixtureSiteCalls),1);
+    assert.equal((await api('connector/status',undefined,'GET')).progress.incorrect,1);
+    await reader.evaluate(()=>loadFixtureTiles());
+    await reader.getByRole('button',{name:'Observer le modèle',exact:true}).click();
+    await page.locator('#observedCorrect').filter({hasText:/^38$/}).waitFor();
+    await pixelPanel.getByRole('button',{name:'Arrêt immédiat de l’essai',exact:true}).click();
+    record('OK single-pixel dashboard and trusted browser confirmation; site fetch STUB ONLY, independent reader progress, stop available');
     await reader.screenshot({ path: path.join(out, 'http-reader-local-fixture.png'), fullPage: true });
     await page.screenshot({ path: path.join(out, 'http-dashboard-local-fixture.png'), fullPage: true });
     await reader.getByRole('button', { name: 'Déconnecter', exact: true }).click();

@@ -108,7 +108,7 @@ export function ObservationSupervision({
                     Arrêter la surveillance
                 </button>
             </div>
-            {!m.supported && <p>Installer le lecteur 0.4.0, le coupler et lier le modèle pour surveiller.</p>}
+            {!m.supported && <p>Installer le lecteur 0.4.0 ou ultérieur, le coupler et lier le modèle pour surveiller.</p>}
             {m.inFlight && (
                 <p role="status">
                     Capture en cours. Les commandes de pause et d’arrêt interrompent la capture entre deux bandes

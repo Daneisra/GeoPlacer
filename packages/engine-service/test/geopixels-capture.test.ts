@@ -104,14 +104,14 @@ describe('Browser contract fixture: current GeoPixelsFront cache, no service cal
     expect(JSON.stringify(resources)).not.toContain('secret');
     expect(capture.resources(null, [])).toBeNull();
   });
-  it('keeps generated reader bundle deterministic and has no service writer or network interception', async () => {
-    const paths = ['geopixels-capture.js', 'geopixels-reader.js', 'geopixels-http-transport.js', 'geopixels-client.js'];
+  it('keeps the bundle deterministic, the reader passive and the writer separate without interception', async () => {
+    const paths = ['geopixels-capture.js', 'geopixels-reader.js', 'geopixels-http-transport.js', 'geopixels-writer.js', 'geopixels-client.js'];
     const sources = await Promise.all(paths.map((p) => readFile(new URL('../../../browser/' + p, import.meta.url), 'utf8')));
     const bundle = await readFile(new URL('../../../public/geopixels-connector.user.js', import.meta.url), 'utf8');
     const version = bundle.match(/@version\s+([^\s]+)/)![1]!;
     const expected = '(() => {\nconst GeoPlacerReaderVersion = ' + JSON.stringify(version) + ';\n' + sources.map((s) => s.replace(/\r\n/g, '\n')).join('\n') + '\n})();\n';
     expect(bundle.replace(/\r\n/g, '\n').endsWith(expected)).toBe(true);
-    expect(sources.join('\n')).not.toMatch(/tokenUser|document\.cookie|PlacePixels|MakePurchase|window\.fetch|localStorage/);
+    expect(sources.filter((_s,i)=>paths[i] !== 'geopixels-writer.js').join('\n')).not.toMatch(/tokenUser|document\.cookie|PlacePixels|MakePurchase|window\.fetch|localStorage/);
     expect(bundle).toContain('// @grant        GM_xmlhttpRequest');
     expect(bundle).toContain('// @connect      127.0.0.1');
     expect(bundle).not.toMatch(/@connect\s+(?:\*|self|geopixels)/);

@@ -2,6 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { ConnectorPairing } from './pairing.js';
 import type { GeoPixelsProvider } from './provider.js';
 import { check, parseObservation, type BrowserObservation } from './protocol.js';
+import type { SinglePixelWriter } from './single-pixel-writer.js';
 
 export const HTTP_IDLE_MS = 30_000;
 export const HTTP_LIFETIME_MS = 10 * 60_000;
@@ -31,7 +32,8 @@ export class ConnectorHttpChannel {
     private readonly pairing: ConnectorPairing,
     private readonly provider: GeoPixelsProvider,
     approvalKey: string | undefined,
-    private readonly now: () => number = Date.now
+    private readonly now: () => number = Date.now,
+    private readonly writer?: SinglePixelWriter
   ) {
     check(approvalKey === undefined || /^[a-f0-9]{64}$/.test(approvalKey), 'invalid local approval key');
     this.controlKey = approvalKey ?? null;
@@ -82,6 +84,22 @@ export class ConnectorHttpChannel {
   verify(capability: string): void {
     this.tick();
     check(this.session !== null && equal(capability, this.session.capability), 'HTTP capability expired or refused');
+  }
+  private writerAccess(capability: string) {
+    const s = this.authenticate(capability);
+    check(s.approved && s.epoch === this.provider.channelEpoch && this.writer !== undefined,
+      'approved writer channel required');
+    s.lastSeen = this.now();
+    return this.writer;
+  }
+  claimPixel(capability: string) { return this.writerAccess(capability).claim(); }
+  pixelAllowed(capability: string, attemptId: string) {
+    const view = this.writerAccess(capability).view();
+    return {allowed:view.mode === 'real' && view.state === 'started' && view.destination?.attemptId === attemptId
+      && this.now() < view.destination.deadline};
+  }
+  pixelResult(capability: string, attemptId: string, result: 'confirmed'|'not-sent'|'uncertain') {
+    return this.writerAccess(capability).result(attemptId,result);
   }
   authenticate(capability: string): Session {
     this.tick();

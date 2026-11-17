@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import './ConnectorDashboard.css';
+import { SinglePixelPanel, type SinglePixelView } from './SinglePixelPanel';
 import { STATE_LABELS } from '../../lib/engine';
 import { translateReason } from '../../lib/i18n';
 import { engineHttp, type TemplateInfo } from '../../lib/engine';
@@ -18,6 +19,7 @@ type View = {
     captureAgeMs: number | null;
     captureExpired: boolean;
     monitoring: Monitoring;
+    singlePixel: SinglePixelView;
     regionViews: RegionView[];
     savedRegionConfiguration: { available: boolean; matching: boolean; count: number };
     freshness: string;
@@ -122,7 +124,7 @@ export function ConnectorDashboard() {
                 <p>
                     {view?.mode === 'local-fake'
                         ? 'Fournisseur factice local : écritures synthétiques uniquement.'
-                        : 'Observation du cache navigateur en lecture seule. Placement et achats réels indisponibles.'}
+                        : 'Lecture du cache ; essai d’un pixel réel séparé, soumis à confirmation. Achats indisponibles.'}
                 </p>
                 <p>
                     Connexion : <strong id="connectorConnection">{view?.connected ? 'Connecté' : 'Déconnecté'}</strong>{' '}
@@ -132,6 +134,9 @@ export function ConnectorDashboard() {
                         : 'Indisponible'}
                 </p>
             </div>
+            {view?.singlePixel && <SinglePixelPanel view={view.singlePixel} approvalKey={approvalKey}
+                fake={view.mode === 'local-fake'} ready={view.connected && view.bound && !active}
+                refresh={async()=>{setView((await engineHttp.get<View>('/connector/status')).data);}}/>}
             {error && (
                 <p role="alert" className="text-red-300">
                     {error}
@@ -154,7 +159,7 @@ export function ConnectorDashboard() {
                 autorisé.
             </p>
             <div className="rounded border p-3 space-y-2">
-                <h3>Transport HTTP Tampermonkey — lecture seule</h3>
+                <h3>Couplage HTTP Tampermonkey</h3>
                 <p>
                     {httpReader?.enabled
                         ? 'Transport activé. La clé d’approbation n’est jamais envoyée au lecteur.'

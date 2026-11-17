@@ -4,7 +4,7 @@
  * Wires the existing planner, attempts, resources and single scheduler to a selected
  * canvas provider. Simulation retains its durable FileWorldStore; Phase 2A adds
  * browser observations and an independently journaled local fixture writer.
- * Real service placements and purchases remain disabled.
+ * Real writes require the separately approved single-pixel port; real scheduling and purchases remain disabled.
  *
  * One data directory = one engine: the directory lock (plus the named pipe
  * guard on Windows) is taken first; a second instance is refused.
@@ -12,6 +12,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { rename, readFile, open } from 'node:fs/promises';
+import { SinglePixelWriter } from './geopixels/single-pixel-writer.js';
 import { GeoPixelsProvider } from './geopixels/provider.js';
 import { ConnectorPairing } from './geopixels/pairing.js';
 import { parseObservationHistory } from './geopixels/monitor.js';
@@ -309,6 +310,7 @@ export class EngineService {
   private rules: ResourceRules;
   private world: { canvas: SimulatedCanvasProvider; store: FileWorldStore } | null = null;
   private worldError: { code: string; message: string } | null = null;
+  readonly singlePixelWriter: SinglePixelWriter;
   private resources!: ResourceManager;
   private attempts!: AttemptManager;
   private scheduler: TaskScheduler | null = null;
@@ -380,6 +382,9 @@ export class EngineService {
         this.simulationHistory = new FileHistoryStore(lock);
         this.connectorJournal = new FileAttemptJournal(lock, { namespace: 'geopixels' });
         this.connectorHistory = new FileHistoryStore(lock, { namespace: 'geopixels' });
+        this.singlePixelWriter = new SinglePixelWriter(lock, this.connector,
+            () => !this.closed && this.source === 'geopixels' && !this.active && !this.stopping && !this.connectorControl && !this.backingUp && this.attempts?.open().length === 0 ? this.selectedTemplate : null,
+            value => this.durableConnectorJson('connector-writer-intent.json', value));
         this.connector.monitoring.subscribe((kind) => {
             this.hub.connector();
             if (kind === 'capture') {
@@ -474,6 +479,10 @@ export class EngineService {
                 await service
                     .currentTemplate(service.ref(selection.templateId))
                     .catch(() => service.log('warn', `selected template ${selection.templateId} cannot be loaded`));
+            let writerIntent: unknown = null;
+            try { writerIntent = JSON.parse(await readFile(path.join(root, 'connector-writer-intent.json'), 'utf8')); }
+            catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+            await service.singlePixelWriter.open(writerIntent);
             return service;
         } catch (error) {
             await lock.release();
@@ -766,6 +775,7 @@ export class EngineService {
     check(source === 'simulation' || source === 'geopixels', 'invalid source');
     if (source === this.source) return { changed: false, status: this.status() };
     this.requireIdle('changing the canvas provider');
+    check(this.singlePixelWriter.view().open === 0, 'reconcile or cancel the single pixel before changing source');
     check(this.attempts.open().length === 0, 'reconcile open attempts before changing source');
     this.connectorControl = true;
     try {
@@ -861,6 +871,7 @@ export class EngineService {
         }
         return {
             ...this.connector.status(),
+            singlePixel: this.singlePixelWriter.view(),
             error: this.connector.status().error ?? calculationError,
             bound,
             source: this.source,
@@ -916,6 +927,7 @@ export class EngineService {
     }
 
   private async startNow(): Promise<CommandResult> {
+    check(this.singlePixelWriter.view().open === 0, 'reconcile or cancel the single pixel before starting the scheduler');
     check(!this.connectorControl, 'provider control in progress');
     if (this.stopping !== null) throw new EngineServiceError('ENGINE_BUSY', 409, 'a stop is in progress');
     if (this.active) {
@@ -1068,6 +1080,7 @@ export class EngineService {
     const info = await this.templateInfoOf(templateId);
     if (this.settingsValue.selection?.templateId === templateId) return { changed: false, status: this.status() };
     this.requireIdle('changing the template');
+    check(this.singlePixelWriter.view().open === 0, 'reconcile or cancel the single pixel before changing model');
     this.connector.monitoring.stop('Modèle local modifié : nouvelle liaison nécessaire.');
     if (this.source === 'simulation') this.assertInsideCanvas(info.width, info.height, info.placement?.x ?? 0, info.placement?.y ?? 0);
     await this.saveSettingsValue({ ...this.settingsValue, selection: { templateId } });
@@ -1086,6 +1099,7 @@ export class EngineService {
    */
   async moveTemplate(templateId: string, x: number, y: number): Promise<TemplateInfo> {
     this.guard();
+    check(this.singlePixelWriter.view().open === 0, 'reconcile or cancel the single pixel before moving the model');
     const info = await this.templateInfoOf(templateId);
     this.assertInsideCanvas(info.width, info.height, x, y);
     await this.templates.revise(this.ref(templateId), { placement: { topLeft: { x, y } } });
@@ -1571,6 +1585,7 @@ export class EngineService {
     if (this.backingUp || this.compacting) throw new EngineServiceError('ENGINE_BUSY', 409, 'a backup or a compaction is already in progress');
     this.backingUp = true;
     try {
+      if (this.singlePixelWriter.view().open > 0) await this.singlePixelWriter.stop('Sauvegarde : autorisation retirée, envoi commencé à réconcilier.');
       await this.checkpointing;
       let result: { dir: string; manifest: BackupManifest };
       try {
@@ -1603,6 +1618,7 @@ export class EngineService {
         await this.scheduler?.stop({ abort: true });
       }
     }
+    await this.singlePixelWriter.close();
     this.unsubscribe?.();
     this.hub.close();
     await this.checkpointing;

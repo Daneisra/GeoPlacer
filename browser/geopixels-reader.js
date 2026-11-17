@@ -9,6 +9,7 @@ const GeoPlacerPageReader = (() => {
     session = crypto.randomUUID(),
     lastCapture = null,
     lastContract = null,
+    lastProject = null,
     decodedCache = GeoPlacerCapture.createReadCache?.(),
     decodedIdentity = null;
   const identity = () => (typeof userID === 'undefined' ? '' : String(userID));
@@ -172,14 +173,17 @@ const GeoPlacerPageReader = (() => {
     }
     lastCapture = unchanged;
     lastContract = c.id;
+    lastProject = project;
     return { project, contract: c.id, cacheStats };
   }
   return {
     contract,
+    project: () => lastProject,
     inspect,
     observe,
     reset: () => {
       lastCapture = null;
+      lastProject = null;
       lastContract = null;
       decodedCache?.clear(); decodedIdentity=null;
     },

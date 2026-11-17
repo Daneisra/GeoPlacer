@@ -472,14 +472,14 @@ async function startServer(): Promise<void> {
       }
       throw error;
     }
-    const httpReader = new ConnectorHttpChannel(engine.api.pairing!, engine.api.connector!, process.env.GEOPLACER_READER_APPROVAL_KEY);
+    const httpReader = new ConnectorHttpChannel(engine.api.pairing!, engine.api.connector!, process.env.GEOPLACER_READER_APPROVAL_KEY, Date.now, engine.api.singlePixelWriter);
     privilegedReaderIngress.use(createPrivilegedReaderRouter(httpReader));
     const httpExpiry = setInterval(() => httpReader.tick(), 1000);
     httpExpiry.unref();
     serverState.intervals.push(httpExpiry);
     apiV1.use('/connector', createConnectorRouter(engine.api, httpReader));
     apiV1.use(createEngineRouter(engine.api));
-    logger.info('Engine ready: simulation and opt-in browser observer; real placement and purchases disabled.');
+    logger.info('Engine ready: simulation and passive observer; single-pixel trial requires explicit dashboard and browser confirmation. Purchases disabled.');
 
     // Attempt to bind to available ports
     const ports = [APP_PRIMARY_PORT, ...APP_FALLBACK_PORTS];

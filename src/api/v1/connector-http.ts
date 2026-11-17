@@ -64,6 +64,26 @@ export function createPrivilegedReaderRouter(channel: ConnectorHttpChannel): Rou
     });
     const pace = (start: number) =>
         new Promise((resolve) => setTimeout(resolve, Math.max(0, 50 - (Date.now() - start))));
+    router.post('/pixel-claim', small, async (req,res) => {
+        try {
+            z.strictObject({protocol:z.literal(1)}).parse(req.body);
+            res.json({command:await channel.claimPixel(res.locals.capability as string)});
+        } catch { fail(res); }
+    });
+    router.post('/pixel-check', small, (req,res) => {
+        try {
+            const b=z.strictObject({protocol:z.literal(1),attemptId:z.string().uuid()}).parse(req.body);
+            res.json(channel.pixelAllowed(res.locals.capability as string,b.attemptId));
+        } catch { fail(res); }
+    });
+    router.post('/pixel-result', small, async (req,res) => {
+        try {
+            const b=z.strictObject({protocol:z.literal(1),attemptId:z.string().uuid(),
+                result:z.enum(['confirmed','not-sent','uncertain'])}).parse(req.body);
+            const view = await channel.pixelResult(res.locals.capability as string,b.attemptId,b.result);
+            res.json({accepted:true,state:view.state});
+        } catch { fail(res); }
+    });
     router.post('/status', small, async (req, res) => {
         try {
             const start = Date.now();
