@@ -163,7 +163,7 @@ try {
   record('OK external canvas modification observed');
   await page.getByRole('button', { name: 'Démarrer le fournisseur factice' }).click();
   await page.locator('#connectorState[data-state=completed]').waitFor({ timeout: 30_000 });
-  const details = page.locator('details');
+  const details = page.locator('details').filter({ has: page.getByText('Politique d’améliorations — propositions factices', { exact: true }) });
   await details.locator('summary').click();
   await page.getByRole('button', { name: 'Calculer les propositions' }).click();
   await details.locator('li').first().waitFor();

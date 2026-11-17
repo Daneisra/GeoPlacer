@@ -6,6 +6,7 @@ import { webcrypto, randomBytes } from 'node:crypto';
 import { createCanvas } from 'canvas';
 import express from 'express';
 import { GeoPixelsProvider, ConnectorPairing, ConnectorHttpChannel } from '@geoplacer/engine-service';
+import { computeProgress } from '@geoplacer/core';
 import { createPrivilegedReaderRouter } from '../src/api/v1/connector-http.ts';
 
 const out=process.argv[2] ?? 'test-logs/phase2d/benchmark'; mkdirSync(out,{recursive:true});
@@ -32,7 +33,7 @@ for (const [width,height] of [[64,64],[595,894],[2000,2000]]) {
       const start=performance.now();bytes+=Buffer.byteLength(o.data);
       const abort=new AbortController();
       fetch(o.url,{method:'POST',headers:o.headers,body:o.data,signal:abort.signal,redirect:'error'})
-        .then(async r=>{requests.push(performance.now()-start);o.onload({status:r.status,finalUrl:r.url,responseText:await r.text()});})
+        .then(async r=>{if(o.url.endsWith('/observations'))requests.push(performance.now()-start);o.onload({status:r.status,finalUrl:r.url,responseText:await r.text()});})
         .catch(()=>o.onerror());
       return{abort:()=>abort.abort()};
     }});
@@ -51,11 +52,19 @@ for (const [width,height] of [[64,64],[595,894],[2000,2000]]) {
         await context.transport.send(observation);peakRss=Math.max(peakRss,process.memoryUsage().rss);
       },()=>context.transport.connected());
       const elapsedMs=performance.now()-start,used=process.cpuUsage(cpu),summary=provider.monitoring.view().lastCapture;
+      const template={id:'local-benchmark',revision:1,image:{width,height,pixels:new Uint32Array(width*height)},coordinateSystem:{yAxis:'down'},placement:{topLeft:{x:0,y:0}}};
+      provider.bind(template);
+      const progressStart=performance.now();
+      const snapshot=await provider.reader.readRegion({minX:0,minY:0,width,height});
+      const progress=computeProgress(template,snapshot,Date.now(),{freshness:{'geopixels-observed':{maxAgeMs:30000}}});
+      assert.equal(progress.total,width*height);assert.equal(progress.correct+progress.incorrect+progress.unknown,progress.total);
+      peakRss=Math.max(peakRss,process.memoryUsage().rss);
       assert.equal(value.cacheStats.known,width*height);assert.equal(summary.sourceObservedAt,null);
       if(round)assert.equal(summary.changedKnown,1);
       captures.push({round,elapsedMs,cpuMs:(used.user+used.system)/1000,processCpuPercentOneCore:(used.user+used.system)/10/elapsedMs,
         sentBytes:bytes-beforeBytes,bands:summary.regionCount,known:summary.known,unknown:summary.unknown,changedKnown:summary.changedKnown,
-        sourceObservedAt:summary.sourceObservedAt,rssBytes:process.memoryUsage().rss});
+        sourceObservedAt:summary.sourceObservedAt,rssBytes:process.memoryUsage().rss,
+        engineProgress:{correct:progress.correct,incorrect:progress.incorrect,unknown:progress.unknown},progressCalculationMs:performance.now()-progressStart});
     }
     const sorted=requests.toSorted((a,b)=>a-b);
     results.push({width,height,scope:'Single Node process: capture+canvas+GM shim+HTTP+provider; not actual GeoPixels/browser CPU',
