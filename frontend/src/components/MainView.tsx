@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
-import { ConnectorDashboard } from './geopixels/ConnectorDashboard';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { engineHttp } from '../lib/engine';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardDescription } from './ui';
 import { SimulationDashboard } from './simulation/SimulationDashboard';
+const ConnectorDashboard = lazy(() => import('./geopixels/ConnectorDashboard').then(m => ({ default: m.ConnectorDashboard })));
 
 export default function MainView() {
   const navigate = useNavigate();
@@ -46,7 +46,7 @@ export default function MainView() {
       </select></label>
       {sourceError && <p role="alert">{sourceError}</p>}
       {source === 'simulation' && <SimulationDashboard />}
-      {source === 'geopixels' && <ConnectorDashboard />}
+      {source === 'geopixels' && <Suspense fallback={<p>Chargement du connecteur…</p>}><ConnectorDashboard /></Suspense>}
       <h2 className="mt-8 mb-3 text-xl font-semibold">Autres pages</h2>
       <div className="grid grid-cols-2 gap-4">
         {quickActions.map((action) => (

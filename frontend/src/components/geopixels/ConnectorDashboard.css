@@ -26,3 +26,17 @@
 .connector-dashboard a { color: #7dd3fc; text-decoration: underline; padding: 0.4rem; }
 .connector-dashboard dt { color: #cbd5e1; }
 .connector-dashboard dd { font-size: 1.2rem; margin-bottom: 0.35rem; }
+.observation-supervision { border: 1px solid #475569; border-radius: 0.5rem; padding: 1rem; background: #0b1526; }
+.observation-heading { display: flex; flex-wrap: wrap; gap: 1rem; justify-content: space-between; align-items: start; }
+.observation-heading h3 { font-size: 1.15rem; font-weight: 600; }
+.observation-heading strong { border: 1px solid #64748b; padding: .3rem .6rem; border-radius: .3rem; }
+.observation-heading strong[data-state='running'] { border-color: #38bdf8; color: #7dd3fc; }
+.observation-controls { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem; margin: 1rem 0; }
+.observation-controls label { display: flex; flex-direction: column; }
+.source-freshness { border-left: 3px solid #fbbf24; padding-left: .7rem; margin: 1rem 0; }
+.observation-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: .8rem; margin: 1rem 0; }
+.observation-supervision details { margin: .8rem 0; }
+.observation-supervision svg { max-height: 140px; width: 100%; }
+.observation-table { overflow-x: auto; }
+.observation-table table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+.observation-table td, .observation-table th { text-align: left; padding: .5rem; border-bottom: 1px solid #334155; white-space: nowrap; }

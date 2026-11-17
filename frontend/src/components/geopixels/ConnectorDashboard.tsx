@@ -3,6 +3,8 @@ import './ConnectorDashboard.css';
 import { STATE_LABELS } from '../../lib/engine';
 import { translateReason } from '../../lib/i18n';
 import { engineHttp, type TemplateInfo } from '../../lib/engine';
+import { onConnectorChange } from '../../hooks/useEngine';
+import { ObservationSupervision, type Monitoring } from './ObservationSupervision';
 
 type View = {
   connected: boolean;
@@ -14,6 +16,7 @@ type View = {
   lastSync: number | null;
   captureAgeMs: number | null;
   captureExpired: boolean;
+  monitoring: Monitoring;
   freshness: string;
   resourcesStale: boolean;
   error: string | null;
@@ -49,18 +52,25 @@ export function ConnectorDashboard() {
   const [capacity, setCapacity] = useState(100);
   const [enabled, setEnabled] = useState(false);
   const [proposals, setProposals] = useState<Proposal[]>([]);
+  const [captureInterval, setCaptureInterval] = useState(10);
   useEffect(() => {
     const abort = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
+    let inFlight = false;
     const poll = async () => {
+      clearTimeout(timer);
+      if (inFlight || abort.signal.aborted) return;
+      inFlight = true;
       try {
         const [response, http] = await Promise.all([engineHttp.get<View>('/connector/status', { signal: abort.signal }), engineHttp.get<HttpReaderInfo>('/connector/http', { signal: abort.signal })]);
         if (!abort.signal.aborted) { setView(response.data); setHttpReader(http.data); }
       } catch {
         if (!abort.signal.aborted) setError('État du connecteur indisponible');
       }
+      inFlight = false;
       if (!abort.signal.aborted) timer = setTimeout(poll, 1500);
     };
+    const unsubscribe = onConnectorChange(() => { void poll(); });
     void poll();
     void engineHttp
       .get<{ templates: TemplateInfo[] }>('/templates', { signal: abort.signal })
@@ -69,6 +79,7 @@ export function ConnectorDashboard() {
     return () => {
       abort.abort();
       clearTimeout(timer);
+      unsubscribe();
     };
   }, []);
   async function action(fn: () => Promise<unknown>) {
@@ -238,8 +249,8 @@ export function ConnectorDashboard() {
             <dt>Inconnus</dt>
             <dd id="observedUnknown">{number(view?.progress?.unknown)}</dd>
           </dl>
-          <p>Dernière capture reçue : {view?.lastSync ? new Date(view.lastSync).toLocaleTimeString('fr-FR') : 'Aucune'}</p>
-          {view?.captureExpired && <p role="status">Capture expirée (plus de 30 secondes) : utiliser « Observer le modèle » dans le lecteur. Les pixels anciens redeviennent inconnus.</p>}
+          <p>Capture du lecteur (dernière bande) : {view?.lastSync ? new Date(view.lastSync).toLocaleTimeString('fr-FR') : 'Aucune'}</p>
+          {view?.captureExpired && <p role="status">Capture expirée (plus de 30 secondes) : les pixels anciens redeviennent inconnus. {view.monitoring.state === 'running' ? 'La surveillance attend la prochaine capture.' : 'Utiliser « Observer le modèle » ou reprendre la surveillance.'}</p>}
           <p>
             {view?.freshness === 'dated'
               ? 'Observations datées ; les données anciennes deviennent inconnues.'
@@ -260,6 +271,10 @@ export function ConnectorDashboard() {
           <p>Tentatives incertaines : {view?.scheduler?.uncertainAttempts.length ?? 0}</p>
         </div>
       </div>
+      {view?.monitoring && <ObservationSupervision monitoring={view.monitoring} progress={view.progress}
+        enabled={view.connected && view.bound && view.mode === 'read-only' && /^[a-f0-9]{64}$/.test(approvalKey)}
+        busy={busy} interval={captureInterval} onInterval={setCaptureInterval}
+        onCommand={command => void action(() => engineHttp.post('/connector/monitor', { action: command, intervalMs: captureInterval * 1000 }, { headers: { 'X-GeoPlacer-Approval': approvalKey } }))} />}
       <div className="flex flex-wrap gap-3">
         <button
           disabled={busy || active || !view?.bound || view.mode !== 'local-fake' || view.resourcesStale}

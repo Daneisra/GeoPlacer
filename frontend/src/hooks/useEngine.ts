@@ -12,6 +12,7 @@ import { useSyncExternalStore } from 'react';
 import type { AttemptSummary, EngineStatus, SchedulerState } from '../lib/engine';
 
 type WsEvent =
+  | { type: 'connector' }
   | { type: 'status'; status: EngineStatus }
   | { type: 'state'; from: SchedulerState; to: SchedulerState; reason: string | null }
   | { type: 'attempts'; attempts: AttemptSummary[]; dropped: number }
@@ -46,6 +47,7 @@ export type CanvasMessage = { kind: 'pixels'; seq: number; stream: string; pixel
 let store: EngineStore = { connection: 'connecting', status: null, stream: null, seq: 0, attempts: [], errors: [], notices: [] };
 const listeners = new Set<() => void>();
 const canvasListeners = new Set<(m: CanvasMessage) => void>();
+const connectorListeners = new Set<() => void>();
 let socket: WebSocket | null = null;
 let retryMs = 1000;
 let started = false;
@@ -70,6 +72,9 @@ function handle(message: WsMessage): void {
   const e = message.event;
   set({ seq: Math.max(store.seq, message.seq) });
   switch (e.type) {
+    case 'connector':
+      for (const listener of connectorListeners) listener();
+      break;
     case 'status':
       set({ status: e.status });
       break;
@@ -141,6 +146,11 @@ export function useEngine(): EngineStore {
 export function onCanvas(listener: (m: CanvasMessage) => void): () => void {
   canvasListeners.add(listener);
   return () => canvasListeners.delete(listener);
+}
+export function onConnectorChange(listener: () => void): () => void {
+  if (!started) { started = true; connect(); }
+  connectorListeners.add(listener);
+  return () => { connectorListeners.delete(listener); };
 }
 
 /**
