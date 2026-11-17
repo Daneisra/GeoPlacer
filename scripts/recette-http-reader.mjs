@@ -146,6 +146,54 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     );
     assert.equal((await page.locator('#observedIncorrect').textContent()).trim(), '0');
     record('OK missing tile stays unknown, never incorrect; resources unavailable remain unavailable');
+    const profile = browser.browserType().name() === 'chromium' ? await context.newCDPSession(reader) : null;
+    if (profile) await profile.send('Performance.enable');
+    const beforeProfile = profile ? await profile.send('Performance.getMetrics') : null;
+    const profileStart = performance.now();
+    await reader.evaluate(() => loadFixtureTiles());
+    await page.getByLabel('Cadence de surveillance', { exact: true }).fill('5');
+    await page.getByRole('button', { name: 'Démarrer la surveillance', exact: true }).click();
+    await page.locator('#observedCorrect').filter({ hasText: /^38$/ }).waitFor();
+    await page.waitForFunction(() => Number(document.querySelector('#observationHistoryCount').textContent.split('/')[0].trim()) >= 4);
+    const firstWatch = await api('connector/status', undefined, 'GET');
+    const countBeforeChange = firstWatch.monitoring.history.length;
+    await reader.evaluate(() => {
+      const x=ghostImageTopLeft.gridX, y=ghostImageTopLeft.gridY;
+      const key=Math.floor(x/1000)*1000+','+Math.floor(y/1000)*1000;
+      const ctx=tileImageCache.get(key).colorBitmap.getContext('2d');
+      ctx.fillStyle='#ff0000';ctx.fillRect(x%1000,y%1000,1,1);
+    });
+    await page.locator('#observedIncorrect').filter({ hasText: /^1$/ }).waitFor();
+    await page.waitForFunction(() => document.querySelector('#observationChanges').textContent.includes('connues : 1'));
+    const changed = await api('connector/status', undefined, 'GET');
+    assert.equal(changed.progress.unknown, 0);
+    assert.equal(changed.monitoring.lastCapture.changedKnown, 1);
+    assert.equal(changed.monitoring.lastCapture.sourceObservedAt, null);
+    assert.ok(changed.monitoring.history.length > countBeforeChange);
+    await page.getByRole('button', { name: 'Mettre la surveillance en pause', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('#monitorState').dataset.state === 'paused' && !document.querySelector('#monitorState').textContent.includes('attendue'));
+    const paused = (await api('connector/status', undefined, 'GET')).monitoring.history.length;
+    await reader.evaluate(() => loadFixtureTiles());
+    await new Promise(r=>setTimeout(r,6000)); // Actual configured 5 s cadence, no timeout inflation.
+    assert.equal((await api('connector/status', undefined, 'GET')).monitoring.history.length, paused);
+    await page.getByRole('button', { name: 'Reprendre la surveillance', exact: true }).click();
+    await page.locator('#observedCorrect').filter({ hasText: /^38$/ }).waitFor();
+    await page.getByRole('button', { name: 'Arrêter la surveillance', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('#monitorState').dataset.state === 'stopped' && !document.querySelector('#monitorState').textContent.includes('attendue'));
+    const stopped = (await api('connector/status', undefined, 'GET')).monitoring.history.length;
+    await new Promise(r=>setTimeout(r,6000));
+    assert.equal((await api('connector/status', undefined, 'GET')).monitoring.history.length, stopped);
+    const afterProfile = profile ? await profile.send('Performance.getMetrics') : null;
+    const finalView = await api('connector/status', undefined, 'GET');
+    const metric = (p, name) => p?.metrics.find(m=>m.name === name)?.value ?? null;
+    writeFileSync(path.join(out,'monitoring-metrics.json'), JSON.stringify({
+      fixture: true, sourceFreshness: 'unverified', captions: finalView.monitoring.history.map(p=>({ capturedAt:p.capturedAt, receivedAt:p.receivedAt, sourceObservedAt:p.sourceObservedAt })),
+      repeatedCapture: true, pauseResumeStop: true, modifiedPixelDetected: true,
+      elapsedMs:performance.now()-profileStart, pageTaskCpuMs:profile ? 1000*(metric(afterProfile,'TaskDuration')-metric(beforeProfile,'TaskDuration')) : null,
+      pageJsHeapBytes:metric(afterProfile,'JSHeapUsedSize'), measurement: 'CDP page task time/JS heap on Edge; not total browser CPU/RSS; unavailable on Firefox',
+      dashboardHistoryCount:finalView.monitoring.history.length
+    },null,2));
+    record('OK continuous read-only monitoring: repeated captures, changed pixel, pause/resume/stop, source remains undated');
     await reader.screenshot({ path: path.join(out, 'http-reader-local-fixture.png'), fullPage: true });
     await page.screenshot({ path: path.join(out, 'http-dashboard-local-fixture.png'), fullPage: true });
     await reader.getByRole('button', { name: 'Déconnecter', exact: true }).click();

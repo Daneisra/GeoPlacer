@@ -23,7 +23,7 @@ applyBaseProtections(app, {
 });
 app.use(
   '/api/v1/connector',
-  createConnectorRouter({ pairing, connector, connectorView: async () => connector.status() }, channel)
+  createConnectorRouter({ pairing, connector, connectorView: async () => ({...connector.status(), source:'geopixels'}) }, channel)
 );
 const server = createServer(app);
 server.listen(0, '127.0.0.1');
@@ -157,6 +157,22 @@ try {
     assert.equal(first.sequence, 1);
     assert.equal((await (await post(reader + '/observations', body, auth)).json()).duplicate, true);
     assert.equal((await (await post(reader + '/status', { protocol: 1 }, auth)).json()).lastSequence, 1);
+  });
+  await check('monitoring requires private control, explicit binding, negotiated capability and strict fields', async () => {
+    const path='/api/v1/connector/monitor';
+    assert.equal((await post(path,{action:'start',intervalMs:5000},{Origin:base})).status,409);
+    const controlHeaders={Origin:base,'X-GeoPlacer-Approval':key};
+    assert.equal((await post(path,{action:'start',intervalMs:5000},controlHeaders)).status,409);
+    connector.bind({id:'test-template',revision:1,image:{width:64,height:64},coordinateSystem:{yAxis:'down'},placement:{topLeft:{x:0,y:0}}});
+    assert.equal((await post(path,{action:'start',intervalMs:5000},controlHeaders)).status,409);
+    await post(reader+'/status',{protocol:1,readerVersion:3},auth);
+    assert.equal((await post(path,{action:'start',intervalMs:5000,url:'https://example.com'},controlHeaders)).status,400);
+    assert.equal((await post(path,{action:'start',intervalMs:4999},controlHeaders)).status,400);
+    assert.equal((await post(path,{action:'start',intervalMs:5000},controlHeaders)).status,200);
+    assert.equal(connector.canWrite(),false);
+    const status=await(await post(reader+'/status',{protocol:1,readerVersion:3},auth)).json();
+    assert.equal(status.monitoring.state,'running');
+    assert.equal((await post(reader+'/status',{protocol:1,readerVersion:3,monitoring:{revision:999,state:'running'}},auth)).status,409);
   });
   await check('revocation rejects the former capability', async () => {
     await post('/api/v1/connector/revoke', {}, { Origin: base });
