@@ -27,7 +27,7 @@ async function setup(failures = 0) {
       path === 'claim'
         ? { capability: 'a'.repeat(64), requestId: 'b'.repeat(64), fingerprint: 'c'.repeat(12) }
         : path === 'status'
-          ? { approved: true, lastSequence: 0, pacing: 'server-50ms' }
+          ? { approved: true, lastSequence: 0, pacing: 'server-50ms', regionalProtocol:1 }
           : path === 'observations'
             ? { accepted: true, sequence: JSON.parse(o.data).observations[0].sequence }
             : { disconnected: true };

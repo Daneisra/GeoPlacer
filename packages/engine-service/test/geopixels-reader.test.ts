@@ -48,12 +48,31 @@ async function setup(hashPending = false) {
   const reader = context.reader as {
     contract: () => Promise<{ id: string; layer: string }>;
     inspect: () => Promise<string>;
-    observe: (send: (v: unknown) => Promise<void>, connected: () => boolean) => Promise<unknown>;
+    observe: (send: (v: unknown) => Promise<void>, connected: () => boolean, region?:unknown, cancelled?:()=>boolean) => Promise<unknown>;
     unchanged: () => Promise<boolean>;
   };
   return { context, reader, project, finish: () => release!(project) };
 }
 describe('Versioned read-only page contracts', () => {
+  it('reads only the requested image rectangle in native Y-up coordinates',async()=>{
+    const s=await setup(),sent:Record<string,unknown>[]=[];
+    const region={id:'right',x:3,y:1,width:2,height:3,revision:1};
+    await s.reader.observe(async v=>{sent.push(v as Record<string,unknown>);},()=>true,region);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({rect:{x:1002,y:998,width:2,height:3},capture:{region},observedAt:null});
+    expect((sent[0]!.pixels as unknown[]).length).toBe(6);
+  });
+  it('aborts a large capture between acknowledged bands without reporting completion',async()=>{
+    const s=await setup();s.context.ghostImageOriginalData={width:2000,height:2000};s.project.width=2000;s.project.height=2000;
+    let sent=0,cancel=false;
+    await expect(s.reader.observe(async()=>{sent++;cancel=true;},()=>true,null,()=>cancel)).rejects.toMatchObject({name:'AbortError'});
+    expect(sent).toBe(1);
+  });
+  it('refuses rectangles outside the original project without sending a band',async()=>{
+    const s=await setup();let sent=0;
+    await expect(s.reader.observe(async()=>{sent++;},()=>true,{id:'a',x:7,y:0,width:2,height:1,revision:1})).rejects.toThrow(/hors du modèle/);
+    expect(sent).toBe(0);
+  });
   it('accepts the current event getter only when it identifies the base layer', async () => {
     const s = await setup();
     expect((await s.reader.contract()).layer).toBe('base');

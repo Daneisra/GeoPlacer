@@ -33,7 +33,7 @@ async function setup(origin = 'https://geopixels.net') {
   const reader = {
     inspect: async () => 'Contrat inconnu : aucune observation',
     unchanged: async () => true,
-    observe: async (send: (o: unknown) => Promise<void>) => {
+    observe: async (send: (o: unknown) => Promise<void>, _connected?:()=>boolean, _region?:unknown, _cancelled?:()=>boolean) => {
       await send({ type: 'observation' });
       return { contract: 'fixture' };
     },
@@ -81,6 +81,22 @@ describe('Passive HTTP reader panel in a local DOM fixture', () => {
     s.setControl({ revision:3, state:'running', intervalMs:5000 }); await s.tick(); expect(s.requests).toHaveLength(3);
     s.setControl({ revision:4, state:'stopped', intervalMs:5000 }); await s.tick();
     s.advance(60000); await s.tick(); expect(s.requests).toHaveLength(3);
+  });
+  it('receives stop while a large capture is pending and preserves the channel after cooperative abort',async()=>{
+    const s=await setup();await s.button('Coupler').onclick!();
+    let release!:()=>void,canAbort:(()=>boolean)|undefined;
+    s.reader.observe=async(send,_connected,_region,cancelled)=>{
+      canAbort=cancelled;await send({type:'observation'});
+      await new Promise<void>(resolve=>{release=resolve;});
+      if(cancelled?.())throw Object.assign(new Error('cancelled'),{name:'AbortError',captureId:'partial'});
+      return{contract:'fixture'};
+    };
+    s.setControl({revision:1,state:'running',intervalMs:5000});await s.tick();
+    expect(s.requests).toHaveLength(1);
+    s.setControl({revision:2,state:'stopped',intervalMs:5000});await s.tick();
+    expect(canAbort?.()).toBe(true);release();await s.tick();
+    expect(s.channel.connected()).toBe(true);expect(s.requests).toHaveLength(1);
+    expect(s.elements.some(e=>e.textContent.startsWith('Capture interrompue'))).toBe(true);
   });
   it('never overlaps captures or applies a late control response after disconnect', async () => {
     const s = await setup(); await s.button('Coupler').onclick!();

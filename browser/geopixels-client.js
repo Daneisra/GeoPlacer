@@ -6,7 +6,9 @@
     observing = false,
     ticking = false,
     monitoring = null,
-    nextDue = 0;
+    nextDue = 0,
+    abortedCapture = null,
+    lastOnce = 0;
   const panel = document.createElement('aside');
   panel.style.cssText =
     'position:fixed;bottom:12px;right:12px;z-index:99999;background:#17212b;color:white;padding:12px;max-width:340px;font:14px sans-serif;border:1px solid #669;border-radius:8px';
@@ -74,6 +76,7 @@
         return;
       }
       GeoPlacerPageReader.reset?.();
+      lastOnce=0; abortedCapture=null;
       status.textContent = 'Couplé par HTTP privilégié, en lecture seule';
       sync.disabled = false;
       async function pulse() {
@@ -81,7 +84,8 @@
         try {
           if (!observing && !(await GeoPlacerPageReader.unchanged()))
             throw new Error('Modèle, position, palette, couche ou session modifié : nouveau couplage nécessaire.');
-          const answer = await next.poll(monitoring ? { revision: monitoring.revision, state: monitoring.state } : undefined);
+          const answer = await next.poll(monitoring ? { revision: monitoring.revision, state: monitoring.state } : undefined, abortedCapture);
+          abortedCapture = null;
           if (current !== generation) return;
           if (!observing && !(await GeoPlacerPageReader.unchanged()))
             throw new Error('Modèle, position, palette, couche ou session modifié : nouveau couplage nécessaire.');
@@ -91,17 +95,22 @@
             if (!Number.isSafeInteger(m.revision) || !['running', 'paused', 'stopped'].includes(m.state) ||
                 !Number.isSafeInteger(m.intervalMs) || m.intervalMs < 5000 || m.intervalMs > 60000)
               throw new Error('Commande de surveillance invalide');
-            if (!monitoring || m.revision > monitoring.revision) {
+            if(m.region && (!/^[a-z][a-z0-9_-]{0,31}$/.test(m.region.id) || !['x','y','width','height','revision'].every(k=>Number.isSafeInteger(m.region[k]))))
+              throw new Error('Région reçue invalide');
+            if (!monitoring || m.revision >= monitoring.revision) {
+              if (!monitoring || m.revision > monitoring.revision) nextDue = 0;
               monitoring = m;
-              nextDue = 0;
             }
           }
           watchStatus.textContent = `Surveillance : ${monitoring?.state === 'running' ? 'active' : monitoring?.state === 'paused' ? 'en pause' : 'arrêtée'}. Cache chargé uniquement ; fraîcheur source non vérifiée.`;
-          sync.disabled = monitoring?.state === 'running';
-          if (monitoring?.state === 'running' && !observing && Date.now() >= nextDue) {
-            await observe(true);
-            if (current === generation && monitoring)
-              nextDue = Date.now() + monitoring.intervalMs; // Rest between captures; never overlap or catch up in a burst.
+          sync.disabled = observing || monitoring?.state === 'running';
+          const once=monitoring?.once;
+          if (!observing && ((monitoring?.state === 'running' && Date.now() >= nextDue) || (once && once.serial > lastOnce))) {
+            if(once)lastOnce=once.serial;
+            // Held control polling stays active during large captures; two captures never overlap.
+            void observe(true, monitoring?.region ?? null).finally(() => {
+              if(current===generation && monitoring)nextDue=Date.now()+monitoring.intervalMs;
+            });
           }
         } catch (error) {
           if (current === generation) await close(error.message);
@@ -114,21 +123,27 @@
       if (current === generation) await close(error.message);
     }
   };
-  async function observe(fromWatch = false) {
+  async function observe(fromWatch = false, region = null) {
     if (observing || (ticking && !fromWatch) || !transport?.connected()) return;
     const current = generation,
-      channel = transport;
+      channel = transport,
+      startedRevision = monitoring?.revision;
     observing = true;
     sync.disabled = true;
     try {
       const result = await GeoPlacerPageReader.observe(
         (o) => channel.send(o),
-        () => current === generation && channel.connected()
+        () => current === generation && channel.connected(),
+        region,
+        () => fromWatch && monitoring?.revision !== startedRevision
       );
       if (current === generation)
         status.textContent = `Observation confirmée (${result.contract}). Cache non daté.${result.cacheStats ? ` Valeurs extraites : ${result.cacheStats.known} connues (dont ${result.cacheStats.transparent} transparentes), ${result.cacheStats.unknown} inconnues.` : ''} Dernier accusé : ${channel.latency()} ms.`;
     } catch (error) {
-      if (current === generation) await close(error.message);
+      if (current === generation) {
+        if(error.name==='AbortError') { abortedCapture=error.captureId;status.textContent='Capture interrompue ; bandes partielles conservées avec leurs dates.'; }
+        else await close(error.message);
+      }
     } finally {
       if (current === generation) {
         observing = false;

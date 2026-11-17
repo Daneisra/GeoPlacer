@@ -7,38 +7,56 @@ globalThis.GeoPlacerCapture = (() => {
       tileY = Math.floor(y / TILE) * TILE;
     return { tileX, tileY, localX: x - tileX, localY: y - tileY };
   }
-  function readRegion(project, rect, cache, createCanvas, report = () => {}, decoded = new Map()) {
-    const pixels = new Array(rect.width * rect.height).fill(-2);
-    for (let y = 0; y < rect.height; y++)
-      for (let x = 0; x < rect.width; x++) {
-        const gx = rect.x + x,
-          gy = rect.y + y;
-        if (gx < project.gridX || gx >= project.gridX + project.width || gy > project.gridY || gy <= project.gridY - project.height)
-          continue;
-        const t = tileAt(gx, gy),
-          key = `${t.tileX},${t.tileY}`;
-        const bitmap = cache.get(key)?.colorBitmap;
-        if (!decoded.has(key) || decoded.get(key).bitmap !== bitmap || decoded.get(key).width !== bitmap?.width || decoded.get(key).height !== bitmap?.height) {
-          let data = null;
-          if (bitmap && bitmap.width === TILE && bitmap.height === TILE) {
-            try {
-              const canvas = createCanvas(TILE, TILE),
-                ctx = canvas.getContext('2d', { willReadFrequently: true, colorSpace: 'srgb' });
-              ctx.drawImage(bitmap, 0, 0);
-              data = ctx.getImageData(0, 0, TILE, TILE).data;
-            } catch (error) {
-              report(`decode-error:${error.name}`);
-              /* Merging, closed or tainted bitmap is unknown, never an empty tile. */
-            }
-          }
-          if (!bitmap) report('missing-bitmap');
-          else if (bitmap.width !== TILE || bitmap.height !== TILE) report('invalid-bitmap-size');
-          decoded.set(key, { bitmap, width: bitmap?.width, height: bitmap?.height, data });
+  // Native ImageBitmap has no pixel mutator. Canvas-like objects are reused only within one capture.
+  function createReadCache(maxBytes = 32 * 1024 * 1024) {
+    const entries = new Map();
+    let bytes = 0;
+    const remove = key => { const e = entries.get(key); if (e) bytes -= e.data?.byteLength ?? 0; entries.delete(key); };
+    return {
+      begin(source) {
+        for (const [key, e] of entries) {
+          const bitmap = source.get(key)?.colorBitmap;
+          if (!(typeof ImageBitmap === 'function' && e.bitmap instanceof ImageBitmap) || bitmap !== e.bitmap || bitmap.width !== TILE || bitmap.height !== TILE)
+            remove(key);
         }
-        const data = decoded.get(key).data;
-        if (!data) continue;
-        const i = (t.localY * TILE + t.localX) * 4;
-        pixels[y * rect.width + x] = data[i + 3] === 0 ? -1 : data[i + 3] === 255 ? (data[i] << 16) | (data[i + 1] << 8) | data[i + 2] : -2;
+      },
+      has: key => entries.has(key),
+      get(key) { const e = entries.get(key); if(e) { entries.delete(key); entries.set(key,e); } return e; },
+      set(key, value) {
+        remove(key);
+        const cost = value.data?.byteLength ?? 0;
+        while (bytes + cost > maxBytes && entries.size) remove(entries.keys().next().value);
+        if (cost <= maxBytes) { entries.set(key,value); bytes += cost; }
+      },
+      clear() { entries.clear(); bytes = 0; },
+      bytes: () => bytes,
+    };
+  }
+  function readRegion(project, rect, cache, createCanvas, report = () => {}, decoded = new Map()) {
+    decoded.begin?.(cache);
+    const pixels = new Array(rect.width * rect.height).fill(-2);
+    // Walk tile intersections once rather than looking up the same tile for every pixel.
+    for(let ty=Math.floor(rect.y/TILE)*TILE;ty<rect.y+rect.height;ty+=TILE)
+      for(let tx=Math.floor(rect.x/TILE)*TILE;tx<rect.x+rect.width;tx+=TILE) {
+        const key = `${tx},${ty}`, bitmap = cache.get(key)?.colorBitmap;
+        let entry = decoded.get(key);
+        if (!entry || entry.bitmap !== bitmap || entry.width !== bitmap?.width || entry.height !== bitmap?.height) {
+          let data = null;
+          if(bitmap?.width===TILE && bitmap?.height===TILE) {
+            try {
+              const canvas=createCanvas(TILE,TILE),ctx=canvas.getContext('2d',{willReadFrequently:true,colorSpace:'srgb'});
+              ctx.drawImage(bitmap,0,0);data=ctx.getImageData(0,0,TILE,TILE).data;
+            } catch(error) { report(`decode-error:${error.name}`); }
+          } else report(bitmap?'invalid-bitmap-size':'missing-bitmap');
+          entry={bitmap,width:bitmap?.width,height:bitmap?.height,data};decoded.set(key,entry);
+        }
+        const data=entry.data;if(!data)continue;
+        const x0=Math.max(rect.x,tx,project.gridX),x1=Math.min(rect.x+rect.width,tx+TILE,project.gridX+project.width);
+        const y0=Math.max(rect.y,ty,project.gridY-project.height+1),y1=Math.min(rect.y+rect.height,ty+TILE,project.gridY+1);
+        for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++) {
+          const i=((y-ty)*TILE+x-tx)*4;
+          pixels[(y-rect.y)*rect.width+x-rect.x]=data[i+3]===0?-1:data[i+3]===255?(data[i]<<16)|(data[i+1]<<8)|data[i+2]:-2;
+        }
       }
     return pixels;
   }
@@ -71,5 +89,5 @@ globalThis.GeoPlacerCapture = (() => {
       layer: 'base',
     };
   }
-  return { tileAt, readRegion, resources, identity };
+  return { tileAt, readRegion, createReadCache, resources, identity };
 })();

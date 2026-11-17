@@ -13,6 +13,23 @@ async function library(): Promise<Capture> {
   return context.GeoPlacerCapture as Capture;
 }
 describe('Browser contract fixture: current GeoPixelsFront cache, no service calls', () => {
+  it('reuses only immutable bitmap identities, bounds memory and invalidates replaced or missing tiles',async()=>{
+    class Bitmap {width=1000;height=1000;}
+    const context=vm.createContext({ImageBitmap:Bitmap});
+    vm.runInContext(await readFile(new URL('../../../browser/geopixels-capture.js',import.meta.url),'utf8'),context);
+    const capture=context.GeoPlacerCapture,decoded=capture.createReadCache(4_000_000),source=new Map([['0,0',{colorBitmap:new Bitmap()}]]);
+    let calls=0;
+    const canvas=()=>({getContext:()=>({drawImage:()=>{},getImageData:()=>{calls++;return{data:new Uint8Array(4_000_000)};}})});
+    const p={gridX:0,gridY:0,width:1,height:1},r={x:0,y:0,width:1,height:1};
+    for(let i=0;i<2;i++){decoded.begin(source);capture.readRegion(p,r,source,canvas,undefined,decoded);}
+    expect(calls).toBe(1);expect(decoded.bytes()).toBe(4_000_000);
+    source.set('0,0',{colorBitmap:new Bitmap()});decoded.begin(source);capture.readRegion(p,r,source,canvas,undefined,decoded);expect(calls).toBe(2);
+    source.get('0,0')!.colorBitmap.width=0;decoded.begin(source);expect(capture.readRegion(p,r,source,canvas,undefined,decoded)).toEqual([-2]);
+    source.clear();decoded.begin(source);expect(decoded.bytes()).toBe(0);
+    const mutable={width:1000,height:1000};source.set('0,0',{colorBitmap:mutable});
+    for(let i=0;i<2;i++){decoded.begin(source);capture.readRegion(p,r,source,canvas,undefined,decoded);}
+    expect(calls).toBe(4);
+  });
   it('decodes once per capture and rereads the same bitmap on the next capture', async () => {
     const capture=await library(), bitmap={width:1000,height:1000}, cache=new Map([['0,0',{colorBitmap:bitmap}]]);
     let decodes=0,color=1;

@@ -92,9 +92,9 @@ const GeoPlacerHttpTransport = (address, request) => {
       capability = claimed.capability;
       pending(claimed.fingerprint);
       for (let i = 0; i < 60; i++) {
-        const state = await post('status', { protocol: 1, readerVersion: 3, waitMs: 5000 });
+        const state = await post('status', { protocol: 1, readerVersion: 4, waitMs: 5000 });
         if (state.approved === true && state.lastSequence === 0) {
-          if (state.pacing !== 'server-50ms') throw new Error('Serveur incompatible : installer la Phase 2D et refaire le couplage.');
+          if (state.pacing !== 'server-50ms' || state.regionalProtocol !== 1) throw new Error('Serveur incompatible : installer la Phase 2E et refaire le couplage.');
           active = true;
           return;
         }
@@ -128,16 +128,16 @@ const GeoPlacerHttpTransport = (address, request) => {
     },
     async heartbeat(monitoring) {
       if (!active || busy) return;
-      const answer = await post('status', { protocol: 1, readerVersion: 3, ...(monitoring ? { monitoring } : {}) });
+      const answer = await post('status', { protocol: 1, readerVersion: 4, ...(monitoring ? { monitoring } : {}) });
       if (answer.approved !== true || answer.lastSequence !== sequence) {
         active = false;
         throw new Error('Canal expiré ou séquence incertaine');
       }
       return answer;
     },
-    async poll(monitoring) {
+    async poll(monitoring, abortedCapture) {
       if (!active) throw new Error('Canal non couplé');
-      const answer = await post('status', { protocol: 1, readerVersion: 3, waitMs: 5000, ...(monitoring ? { monitoring } : {}) });
+      const answer = await post('status', { protocol: 1, readerVersion: 4, waitMs: 5000, ...(abortedCapture ? {abortedCapture} : {}), ...(monitoring ? { monitoring } : {}) });
       // A manual observation may overlap a held status response. Old status is not an observation ACK.
       if (answer.approved !== true || !Number.isSafeInteger(answer.lastSequence) || answer.lastSequence > sequence + (busy ? 1 : 0)) {
         active = false;

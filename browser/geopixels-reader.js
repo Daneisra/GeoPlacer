@@ -8,7 +8,9 @@ const GeoPlacerPageReader = (() => {
   let previousIdentity = null,
     session = crypto.randomUUID(),
     lastCapture = null,
-    lastContract = null;
+    lastContract = null,
+    decodedCache = GeoPlacerCapture.createReadCache?.(),
+    decodedIdentity = null;
   const identity = () => (typeof userID === 'undefined' ? '' : String(userID));
   const filters = () =>
     typeof ghostActivePaletteColors === 'undefined' ? '' : [...ghostActivePaletteColors].sort().join('|');
@@ -97,7 +99,7 @@ const GeoPlacerPageReader = (() => {
       cacheInfo
     );
   }
-  async function observe(send, connected) {
+  async function observe(send, connected, region = null, cancelled = () => false) {
     const c = await contract();
     if (c.layer !== 'base')
       throw new Error(
@@ -115,7 +117,7 @@ const GeoPlacerPageReader = (() => {
     const data = ghostImageOriginalData,
       topLeft = { ...ghostImageTopLeft },
       palette = filters();
-    if (data.width > 2000 || data.height > 2000) throw new Error('Limite : 2000 × 2000');
+    if (data.width > 4096 || data.height > 4096) throw new Error('Limite : 4096 × 4096');
     const project = await GeoPlacerCapture.identity(data, topLeft, palette);
     const unchanged = () =>
       available() &&
@@ -129,16 +131,23 @@ const GeoPlacerPageReader = (() => {
       typeof Colors === 'undefined' ? null : Colors
     );
     const cacheStats = { known: 0, unknown: 0, transparent: 0 };
-    // Per-cycle only: never retain a decoded tile between captures or infer a source timestamp.
-    const decoded = new Map(), captureId = crypto.randomUUID();
-    const rowsPerBand = Math.max(1, Math.floor(16384 / project.width));
-    const bandCount = Math.ceil(project.height / rowsPerBand);
+    const area=region ?? {x:0,y:0,width:project.width,height:project.height};
+    if(![area.x,area.y,area.width,area.height].every(Number.isSafeInteger) || area.x<0 || area.y<0 || area.width<1 || area.height<1 || area.x+area.width>project.width || area.y+area.height>project.height)
+      throw new Error('Région hors du modèle');
+    const cacheIdentity=JSON.stringify([project,session,c.id]);
+    if(cacheIdentity!==decodedIdentity) { decodedCache?.clear(); decodedIdentity=cacheIdentity; }
+    decodedCache?.begin(tileImageCache);
+    // Only immutable native bitmaps may survive between captures; source time remains unknown.
+    const decoded = decodedCache ?? new Map(), captureId = crypto.randomUUID();
+    const rowsPerBand = Math.max(1, Math.floor(65536 / area.width));
+    const bandCount = Math.ceil(area.height / rowsPerBand);
     let bandIndex = 0;
-    for (let row = 0; row < project.height;) {
+    for (let row = 0; row < area.height;) {
+      if(cancelled()) { const error=new Error('Capture interrompue volontairement');error.name='AbortError';error.captureId=captureId;throw error; }
       if (!connected() || !unchanged() || (await contract()).id !== c.id || (await contract()).layer !== 'base')
         throw new Error('Modèle, position, palette, couche ou session modifié pendant la lecture');
-      const height = Math.min(project.height - row, rowsPerBand);
-      const rect = { x: project.gridX, y: project.gridY - row - height + 1, width: project.width, height };
+      const height = Math.min(area.height - row, rowsPerBand);
+      const rect = { x: project.gridX+area.x, y: project.gridY-area.y-row-height+1, width: area.width, height };
       const capturedAt = Date.now();
       const pixels = GeoPlacerCapture.readRegion(project, rect, tileImageCache, (w, h) => new OffscreenCanvas(w, h), () => {}, decoded);
       for (const value of pixels) {
@@ -153,7 +162,7 @@ const GeoPlacerPageReader = (() => {
         session,
         project,
         capturedAt,
-        capture: { id: captureId, index: bandIndex++, count: bandCount },
+        capture: { id: captureId, index: bandIndex++, count: bandCount, ...(region ? {region} : {}) },
         observedAt: null,
         rect,
         pixels,
@@ -172,6 +181,7 @@ const GeoPlacerPageReader = (() => {
     reset: () => {
       lastCapture = null;
       lastContract = null;
+      decodedCache?.clear(); decodedIdentity=null;
     },
     unchanged: async () =>
       lastCapture === null ||

@@ -3,7 +3,7 @@ const capture = (await readFile(new URL('../browser/geopixels-capture.js', impor
 const client = (await readFile(new URL('../browser/geopixels-client.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 const reader = (await readFile(new URL('../browser/geopixels-reader.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 const transport = (await readFile(new URL('../browser/geopixels-http-transport.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
-const version = '0.3.1';
+const version = '0.4.0';
 const header = `// ==UserScript==
 // @name         GeoPlacer experimental observer
 // @namespace    geoplacer.local
