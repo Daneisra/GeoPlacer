@@ -40,3 +40,6 @@ data.avant-restauration-*/
 
 # Release archives built by scripts/build-release-archive.mjs (Phase 1C.0)
 /release/
+
+# Public synthetic fixture for reproducible read-only connector validation
+!/public/fixtures/geoplacer-8x5.png

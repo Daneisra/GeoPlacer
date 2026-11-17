@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto';
+import { runHttpReaderRecipe } from './recette-http-reader.mjs';
 /** Local browser acceptance only. Every non-loopback request is aborted. */
 import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -15,6 +17,7 @@ const { PNG } = createRequire(path.join(repo, 'package.json'))('pngjs');
 const work = mkdtempSync(path.join(tmpdir(), 'geoplacer-phase2a-browser-'));
 const base = 'http://127.0.0.1:3919';
 const log = [];
+const approvalKey = randomBytes(32).toString('hex');
 const record = (message) => {
   log.push(message);
   console.log(message);
@@ -24,6 +27,7 @@ const server = spawn(process.execPath, [path.join(repo, 'dist/server.js')], {
   env: {
     ...process.env,
     PORT: '3919',
+    GEOPLACER_READER_APPROVAL_KEY: approvalKey,
     HOST: '127.0.0.1',
     GEOPLACER_ENGINE_DIR: path.join(work, 'engine'),
     GEOPLACER_BACKUP_DIR: path.join(work, 'backups'),
@@ -83,6 +87,7 @@ try {
   });
   const page = await context.newPage();
   await page.goto(base);
+  if (!process.argv.includes('--http-only')) {
   await page.getByLabel('Source de toile').selectOption('geopixels');
   await page.locator('#connectorDashboard').waitFor();
   await page.getByRole('button', { name: 'Coupler un navigateur factice' }).click();
@@ -207,6 +212,8 @@ try {
     assert.equal(stored, width * height);
     record(`OK browser fixture stores and reloads ${width} x ${height} without placement`);
   }
+  }
+  await runHttpReaderRecipe({ browser, page, api, base, approvalKey, repo, out, record });
   assert.equal(external.length, 0, JSON.stringify(external));
   assert.equal(errors.length, 0, JSON.stringify(errors));
   record(`OK ${engineName}, no page errors, no external requests`);
