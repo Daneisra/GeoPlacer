@@ -1,6 +1,6 @@
 import { Router, type Request } from 'express';
 import { z } from 'zod';
-import type { ConnectorHttpChannel } from '@geoplacer/engine-service';
+import { ConnectorError, type ConnectorHttpChannel } from '@geoplacer/engine-service';
 import { asRgb } from '@geoplacer/core';
 import type { EngineApi } from './engine-api.js';
 import { hostnameFromHostHeader } from '../../middleware/local-access.js';
@@ -79,6 +79,7 @@ export function createConnectorRouter(engine: EngineApi, httpChannel?: Connector
     '/pair',
     action((req) => {
       const body = z.strictObject({ mode: z.enum(['read-only', 'local-fake']), origin: z.string().max(200) }).parse(req.body);
+      if (body.mode === 'read-only') throw new ConnectorError('CONNECTOR_LEGACY_READER_DISABLED', 'Le lecteur réel exige le couplage HTTP approuvé.');
       return engine.pairing!.issue(body.mode, body.origin);
     })
   );

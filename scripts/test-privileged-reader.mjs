@@ -57,6 +57,11 @@ try {
       409
     );
   });
+  await check('legacy real-reader WebSocket issuance cannot bypass HTTP approval', async () => {
+    const response = await post('/api/v1/connector/pair', { mode: 'read-only', origin: 'https://geopixels.net' }, { Origin: base });
+    assert.equal(response.status, 409);
+    assert.equal(pairing.acceptsOrigin('https://geopixels.net'), false);
+  });
   const code = await (
     await post(control + '/pair', { origin: 'https://geopixels.net' }, { Origin: base, 'X-GeoPlacer-Approval': key })
   ).json();
