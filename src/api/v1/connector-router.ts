@@ -58,6 +58,15 @@ export function createConnectorRouter(engine: EngineApi, httpChannel?: Connector
     action(() => engine.connectorView!())
   );
   router.get('/http', action(() => httpChannel?.info() ?? { enabled: false, pending: null, active: false }));
+  router.post('/monitor', action(async (req) => {
+    const b = z.strictObject({ action: z.enum(['start', 'pause', 'resume', 'stop']), intervalMs: z.number().int().min(5000).max(60000) }).parse(req.body);
+    if (!httpChannel?.info().active) throw new ConnectorError('CONNECTOR_UNAVAILABLE', 'Coupler le lecteur HTTP avant la surveillance.');
+    httpChannel.control(req.header('X-GeoPlacer-Approval') ?? '');
+    const view = await engine.connectorView!() as { bound: boolean; source: string; connected: boolean };
+    if (b.action !== 'stop' && (!view.bound || !view.connected || view.source !== 'geopixels'))
+      throw new ConnectorError('CONNECTOR_BINDING_REQUIRED', 'Lier le modèle actif avant la surveillance.');
+    return engine.connector!.monitoring.command(b.action, b.intervalMs);
+  }));
   router.post('/http/pair', action((req) => {
     const b = z.strictObject({ origin: z.enum(['https://geopixels.net', 'https://www.geopixels.net']) }).parse(req.body);
     if (!httpChannel) throw new Error('reader unavailable');

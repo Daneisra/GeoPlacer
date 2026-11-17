@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { ObservationMonitor } from './monitor.js';
 import {
   UNKNOWN,
   createArraySnapshot,
@@ -53,6 +54,9 @@ export function nativeTile(x: number, y: number) {
 
 /** One bounded, immutable-per-read observation cache. Missing data always remains UNKNOWN. */
 export class GeoPixelsProvider implements ReadWriteCanvasProvider {
+  readonly monitoring: ObservationMonitor;
+  observationRevision = 0;
+  readValidUntil = 0;
   readonly id = 'geopixels-browser-v1';
   readonly mode = 'read-write' as const;
   readonly reader = { coordinateSystem: { yAxis: 'down' as const }, readRegion: (rect: CanvasRect) => this.readRegion(rect) };
@@ -82,7 +86,7 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
   constructor(
     private readonly now: () => number = Date.now,
     private readonly timeoutMs = 5_000
-  ) {}
+  ) { this.monitoring = new ObservationMonitor(now); }
 
   connect(mode: ConnectorMode, send: (command: BrowserCommand) => void): void {
     check(!this.closed, 'connector closed');
@@ -94,6 +98,8 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
   }
 
   disconnect(reason = 'browser disconnected'): void {
+    this.observationRevision++;
+    this.monitoring.stop(reason);
     this.channelEpoch++;
     this.dated = false;
     this.send = null;
@@ -134,6 +140,10 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
       layer: o.project.layer,
     };
     const changed = this.session !== o.session || JSON.stringify(this.project) !== JSON.stringify(project);
+    if (changed && this.project !== null) this.monitoring.stop('Identité du projet modifiée : relier le modèle avant de reprendre.');
+    const projectKey = JSON.stringify([o.session, project]);
+    // Validate cycle metadata before changing the active project or any pixels.
+    this.monitoring.prepare(o, projectKey);
     if (changed) {
       this.binding = null;
       this.uncertain();
@@ -147,12 +157,18 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
     this.lastCapture = o.capturedAt;
     this.dated ||= o.observedAt !== null;
     this.lastSeen = this.now();
+    const delta = { changedKnown: 0, newlyKnown: 0, becameUnknown: 0, unchanged: 0 };
     for (let y = 0; y < o.rect.height; y++) {
       const iy = o.project.gridY - (o.rect.y + y);
       for (let x = 0; x < o.rect.width; x++) {
         const dest = iy * o.project.width + o.rect.x + x - o.project.gridX;
         const date = o.observedAt ?? -o.capturedAt;
         if (Math.abs(date) < Math.abs(this.dates[dest]!)) continue; // A later envelope cannot overwrite a newer pixel.
+        const old = this.pixels[dest]!, next = o.pixels[y * o.rect.width + x]!;
+        if (old === next) delta.unchanged++;
+        else if (old === UNKNOWN) delta.newlyKnown++;
+        else if (next === UNKNOWN) delta.becameUnknown++;
+        else delta.changedKnown++;
         this.pixels[dest] = o.pixels[y * o.rect.width + x]!;
         this.dates[dest] = date;
       }
@@ -161,6 +177,8 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
       this.resourceValue = structuredClone(o.resources);
     }
     this.lastError = null;
+    this.observationRevision++;
+    this.monitoring.region(o, delta);
   }
 
   /** Explicit user binding: shape alone never silently selects another local model. */
@@ -179,6 +197,7 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
       y: template.placement.topLeft.y,
       key: this.key(),
     };
+    this.observationRevision++;
   }
 
   assertBinding(template: Template): void {
@@ -200,6 +219,7 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
     const out = new Int32Array(rect.width * rect.height).fill(UNKNOWN);
     let observedAt = this.now();
     let known = false;
+    this.readValidUntil = this.now() + CONNECTOR_MAX_AGE_MS;
     const p = this.project,
       b = this.binding;
     if (this.connected() && p !== null && b !== null && b.key === this.key()) {
@@ -211,6 +231,7 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
           const index = iy * p.width + ix;
           const date = this.dates[index]!;
           if (date !== 0 && this.now() - Math.abs(date) > CONNECTOR_MAX_AGE_MS) continue;
+          if (date !== 0) this.readValidUntil = Math.min(this.readValidUntil, Math.abs(date) + CONNECTOR_MAX_AGE_MS);
           const color = this.pixels[index]!;
           out[y * rect.width + x] = color;
           if (color !== UNKNOWN) {
@@ -380,6 +401,7 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
       project: this.project,
       bound: this.binding !== null,
       lastSync: this.lastCapture,
+      monitoring: this.monitoring.view(),
       captureAgeMs: this.lastCapture === null ? null : Math.max(0, this.now() - this.lastCapture),
       captureExpired: this.lastCapture !== null && this.now() - this.lastCapture > CONNECTOR_MAX_AGE_MS,
       freshness: this.dated ? 'dated' : 'unverified',

@@ -14,6 +14,7 @@ import { randomUUID } from 'node:crypto';
 import { rename, readFile, open } from 'node:fs/promises';
 import { GeoPixelsProvider } from './geopixels/provider.js';
 import { ConnectorPairing } from './geopixels/pairing.js';
+import { parseObservationHistory } from './geopixels/monitor.js';
 import { check } from './geopixels/protocol.js';
 import path from 'node:path';
 import type {
@@ -325,6 +326,9 @@ export class EngineService {
   private backingUp = false;
   /** Decoded templates by id (current revision only), a few at most. */
   private readonly templateCache = new Map<string, Template>();
+  private observationSave: Promise<void> = Promise.resolve();
+  private observationStoreHealthy = true;
+  private connectorProgressCache: { key: string; until: number; progress: ProgressSnapshot } | null = null;
 
   private constructor(root: string, lock: DataDirectoryLock, settings: EngineSettings, clock: MonotonicClock, options: EngineServiceOptions) {
     this.root = root;
@@ -346,6 +350,24 @@ export class EngineService {
     this.simulationHistory = new FileHistoryStore(lock);
     this.connectorJournal = new FileAttemptJournal(lock, { namespace: 'geopixels' });
     this.connectorHistory = new FileHistoryStore(lock, { namespace: 'geopixels' });
+    this.connector.monitoring.subscribe((kind) => {
+      this.hub.connector();
+      if (kind === 'capture') {
+        const capture = this.connector.monitoring.view().lastCapture;
+        const epoch = this.connector.channelEpoch;
+        if (capture) void this.connectorView().then(view => {
+          if (!this.closed && epoch === this.connector.channelEpoch)
+            this.connector.monitoring.annotate(capture.id, view.bound ? view.selection?.templateId ?? null : null, view.progress);
+        }).catch(() => this.hub.notice('warning', 'Progression de la capture indisponible.'));
+      }
+      if (kind === 'history' && this.observationStoreHealthy && !this.closed) {
+        const data = structuredClone(this.connector.monitoring.persisted());
+        this.observationSave = this.observationSave.then(() => this.durableConnectorJson('connector-observations.json', data)).catch(() => {
+          this.observationStoreHealthy = false;
+          this.hub.notice('warning', 'Historique des observations non sauvegardé ; vérifier le stockage local.');
+        });
+      }
+    });
   }
 
   /** Opens the engine on `dataDir`; throws DataDirectoryLockedError when another instance holds it. */
@@ -364,6 +386,17 @@ export class EngineService {
         service.source = source;
       } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
       await service.newManagers();
+      try {
+        const raw = await readFile(path.join(root, 'connector-observations.json'), 'utf8');
+        check(raw.length <= 1_000_000, 'observation history too large');
+        service.connector.monitoring.restore(parseObservationHistory(JSON.parse(raw)));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          service.observationStoreHealthy = false;
+          service.log('warn', 'observation history invalid; preserved without overwriting');
+          service.hub.notice('warning', 'Historique invalide conservé sur disque ; surveillance en mémoire seulement.');
+        }
+      }
       const selection = settings.selection;
       if (selection !== null) await service.currentTemplate(service.ref(selection.templateId)).catch(() => service.log('warn', `selected template ${selection.templateId} cannot be loaded`));
       return service;
@@ -663,6 +696,7 @@ export class EngineService {
     try {
       await this.durableConnectorJson('provider.json', source);
       this.source = source;
+      if (source !== 'geopixels') this.connector.monitoring.stop('Source de toile modifiée.');
       this.scheduler = null;
       this.schedulerEnded = true;
       this.lastProgress = null;
@@ -724,7 +758,18 @@ export class EngineService {
     const t = this.selectedTemplate;
     let bound = view.bound;
     if (t !== null && bound) { try { this.connector.assertBinding(t); } catch { bound = false; } }
-    const progress = bound && t !== null ? computeProgress(t, await this.connector.reader.readRegion({ minX: t.placement.topLeft.x, minY: t.placement.topLeft.y, width: t.image.width, height: t.image.height }), this.clock.now(), { freshness: { 'geopixels-observed': { maxAgeMs: 30_000 }, 'geopixels-fixture': { maxAgeMs: 30_000 } } }) : null;
+    if (!bound && this.connector.monitoring.control().state !== 'stopped')
+      this.connector.monitoring.stop('Liaison du modèle perdue : vérifier le modèle et recommencer le couplage.');
+    const key = `${this.connector.channelEpoch}/${this.connector.observationRevision}/${bound}/${t?.id}/${t?.revision}/${t?.placement.topLeft.x}/${t?.placement.topLeft.y}/${view.connected}`;
+    let progress: ProgressSnapshot | null = null;
+    if (bound && t !== null) {
+      if (this.connectorProgressCache?.key === key && Date.now() <= this.connectorProgressCache.until) progress = this.connectorProgressCache.progress;
+      else {
+        const snapshot = await this.connector.reader.readRegion({ minX: t.placement.topLeft.x, minY: t.placement.topLeft.y, width: t.image.width, height: t.image.height });
+        progress = computeProgress(t, snapshot, this.clock.now(), { freshness: { 'geopixels-observed': { maxAgeMs: 30_000 }, 'geopixels-fixture': { maxAgeMs: 30_000 } } });
+        this.connectorProgressCache = { key, until: this.connector.readValidUntil, progress };
+      }
+    }
     return { ...view, bound, source: this.source, selection: t === null ? null : this.templateInfo(t), progress, scheduler: this.source === 'geopixels' ? this.scheduler?.status() ?? null : null, rules: this.source === 'geopixels' && view.mode === 'local-fake' ? this.rules : null };
   }
 
@@ -881,6 +926,7 @@ export class EngineService {
     const info = await this.templateInfoOf(templateId);
     if (this.settingsValue.selection?.templateId === templateId) return { changed: false, status: this.status() };
     this.requireIdle('changing the template');
+    this.connector.monitoring.stop('Modèle local modifié : nouvelle liaison nécessaire.');
     if (this.source === 'simulation') this.assertInsideCanvas(info.width, info.height, info.placement?.x ?? 0, info.placement?.y ?? 0);
     await this.saveSettingsValue({ ...this.settingsValue, selection: { templateId } });
     await this.currentTemplate(this.ref(templateId));
@@ -1425,6 +1471,7 @@ export class EngineService {
     await this.simulationHistory.close();
     await this.connectorJournal.close();
     await this.connectorHistory.close();
+    await this.observationSave;
     await this.lock.release();
   }
 }

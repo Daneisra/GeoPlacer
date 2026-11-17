@@ -90,11 +90,16 @@ export class ConnectorHttpChannel {
     s.requests.push(this.now());
     return s;
   }
-  status(capability: string) {
+  status(capability: string, readerVersion?: 3, ack?: { revision: number; state: 'running' | 'paused' | 'stopped' }) {
     const s = this.authenticate(capability);
     s.lastSeen = this.now();
-    if (s.approved) this.provider.heartbeat();
-    return { approved: s.approved, expires: s.deadline, lastSequence: s.lastSequence, fingerprint: s.fingerprint };
+    if (s.approved) {
+      this.provider.heartbeat();
+      this.provider.monitoring.capabilities(readerVersion === 3);
+      if (ack) this.provider.monitoring.acknowledge(ack.revision, ack.state);
+    }
+    return { approved: s.approved, expires: s.deadline, lastSequence: s.lastSequence, fingerprint: s.fingerprint,
+      ...(readerVersion === 3 ? { monitoring: this.provider.monitoring.control() } : {}) };
   }
   batch(capability: string, values: readonly unknown[]) {
     const s = this.authenticate(capability);
@@ -102,6 +107,7 @@ export class ConnectorHttpChannel {
     check(values.length >= 1 && values.length <= 2, 'invalid observation batch');
     // Validate the entire batch before accepting anything. No partial acknowledgement.
     const observations: BrowserObservation[] = values.map((v) => parseObservation(v, this.now()));
+    check(observations.length === 1 || observations.every(o => o.capture === undefined), 'capture bands require individual acknowledgements');
     check(observations.reduce((sum, o) => sum + o.pixels.length, 0) <= 65_536, 'oversized HTTP batch');
     const digest = createHash('sha256').update(JSON.stringify(values)).digest('hex');
     const first = observations[0]!,

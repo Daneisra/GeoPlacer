@@ -33,6 +33,7 @@ export interface BrowserObservation {
   /** Native grid order: increasing X, then increasing Y. -2 unknown, -1 transparent. */
   readonly pixels: readonly number[];
   readonly resources: ObservedResources | null;
+  readonly capture?: { readonly id: string; readonly index: number; readonly count: number };
 }
 export class ConnectorError extends Error {
   readonly status = 409;
@@ -61,7 +62,12 @@ export const integer = (n: unknown, min: number, max: number): n is number =>
 const stamp = (n: unknown): boolean => n === null || integer(n, 0, 8_640_000_000_000_000);
 const label = (n: unknown): boolean => typeof n === 'string' && /^[a-zA-Z0-9._:-]{1,128}$/.test(n);
 export function parseObservation(value: unknown, now: number): BrowserObservation {
-  const v = object(value, ['type', 'sequence', 'session', 'project', 'capturedAt', 'observedAt', 'rect', 'pixels', 'resources']);
+  const hasCapture = typeof value === 'object' && value !== null && Object.hasOwn(value, 'capture');
+  const v = object(value, ['type', 'sequence', 'session', 'project', 'capturedAt', 'observedAt', 'rect', 'pixels', 'resources', ...(hasCapture ? ['capture'] : [])]);
+  if (hasCapture) {
+    const c = object(v.capture, ['id', 'index', 'count']);
+    check(label(c.id) && integer(c.count, 1, 2000) && integer(c.index, 0, c.count as number - 1), 'invalid capture identity');
+  }
   check(v.type === 'observation' && integer(v.sequence, 1, Number.MAX_SAFE_INTEGER) && label(v.session), 'invalid observation identity');
   check(
     integer(v.capturedAt, 0, now + 2_000) &&

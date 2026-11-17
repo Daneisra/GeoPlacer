@@ -64,8 +64,10 @@ export function createPrivilegedReaderRouter(channel: ConnectorHttpChannel): Rou
   });
   router.post('/status', small, (req, res) => {
     try {
-      z.strictObject({ protocol: z.literal(1) }).parse(req.body);
-      res.json(channel.status(res.locals.capability as string));
+      const b = z.strictObject({ protocol: z.literal(1), readerVersion: z.literal(3).optional(),
+        monitoring: z.strictObject({ revision: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER), state: z.enum(['running', 'paused', 'stopped']) }).optional() }).parse(req.body);
+      if (b.monitoring && b.readerVersion !== 3) throw new Error('reader version required');
+      res.json(channel.status(res.locals.capability as string, b.readerVersion, b.monitoring));
     } catch {
       fail(res);
     }

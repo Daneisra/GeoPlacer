@@ -87,6 +87,35 @@ function browser(s: EngineService, width: number, height: number, opts: { lost?:
 }
 
 describe('Existing scheduler through GeoPixels browser provider', () => {
+  it('records real-reader progress using core rules and restores history without restarting monitoring', async () => {
+    const {s,dir,t}=await prepare(8,5);
+    s.connector.connect('read-only',()=>{ throw new Error('must never execute'); });
+    const project={id:'real-reader-fixture',generation:'palette',width:8,height:5,gridX:999,gridY:1001,layer:'base'};
+    let sequence=0;
+    const observe=(pixels:number[])=>s.connector.observe({type:'observation',sequence:++sequence,session:'opaque',project,capturedAt:Date.now(),observedAt:null,resources:null,
+      rect:{x:999,y:997,width:8,height:5},pixels,capture:{id:`capture-${sequence}`,index:0,count:1}});
+    observe(new Array(40).fill(-1)); await s.bindConnector();
+    s.connector.monitoring.capabilities(true);s.connector.monitoring.command('start',5000);
+    observe(new Array(40).fill(0));
+    const correct=await s.connectorView();
+    expect(correct.progress).toMatchObject({incorrect:0,unknown:0});
+    expect(correct.progress!.correct).toBeGreaterThan(0);
+    observe(new Array(40).fill(0xffffff));
+    expect((await s.connectorView()).progress!.incorrect).toBe(correct.progress!.total);
+    observe(new Array(40).fill(-1));
+    expect((await s.connectorView()).progress!.missing).toBe(correct.progress!.total);
+    await Promise.resolve();
+    expect(s.connector.monitoring.view().lastCapture?.changedKnown).toBe(40);
+    expect(s.connector.canWrite()).toBe(false);
+    await s.close(); opened.splice(opened.indexOf(s),1);
+    const restored=await EngineService.open({dataDir:dir});opened.push(restored);
+    const history=restored.connector.monitoring.view();
+    expect(history.history).toHaveLength(4);
+    expect(history.history[3]!.templateId).toBe(t.templateId);
+    expect(history.state).toBe('stopped');expect(history.supported).toBe(false);
+    expect(restored.connector.status().connected).toBe(false);
+    expect(restored.status().journal.openAttempts).toBe(0);
+  });
   it('backs up and restores the provider domain without restoring a live pairing', async () => {
     const { s, dir } = await prepare(2, 2);
     const b = browser(s, 2, 2); await b.connect(); await s.bindConnector();

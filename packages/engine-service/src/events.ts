@@ -31,6 +31,7 @@ export type EngineEvent =
   | { readonly type: 'error'; readonly code: string; readonly message: string }
   | { readonly type: 'canvas'; readonly pixels: readonly number[] }
   | { readonly type: 'canvas-resync'; readonly reason: string }
+  | { readonly type: 'connector' }
   | { readonly type: 'notice'; readonly level: 'info' | 'warning'; readonly message: string };
 
 export interface AttemptEventSummary {
@@ -57,6 +58,7 @@ export class EngineEventHub {
   private readonly maxAttempts: number;
   private readonly now: () => number;
   private pendingStatus: unknown = undefined;
+  private pendingConnector = false;
   private pendingAttempts: AttemptEventSummary[] = [];
   private droppedAttempts = 0;
   private readonly pendingCanvas = new Map<number, number>();
@@ -108,6 +110,7 @@ export class EngineEventHub {
 
   /** Sends what is pending now (grouped attempts, canvas changes, latest status). */
   flush(): void {
+    if (this.pendingConnector) { this.pendingConnector = false; this.emit({ type: 'connector' }); }
     if (this.pendingAttempts.length > 0 || this.droppedAttempts > 0) {
       this.emit({ type: 'attempts', attempts: this.pendingAttempts, dropped: this.droppedAttempts });
       this.pendingAttempts = [];
@@ -143,6 +146,7 @@ export class EngineEventHub {
   notice(level: 'info' | 'warning', message: string): void {
     this.emit({ type: 'notice', level, message });
   }
+  connector(): void { this.pendingConnector = true; this.schedule(); }
 
   status(status: unknown): void {
     this.pendingStatus = status;
