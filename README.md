@@ -6,8 +6,9 @@ d’un modèle sur une toile locale avec un agent et des ressources simulés.
 Aucune connexion automatisée à GeoPixels ou Wplace, aucun compte réel,
 cookie, jeton ou proxy. Le dessin sur GeoPixels reste manuel.
 
-La version **6.0.0-rc.1** consolidée est locale, sur
-`integrate/6.0.0-rc.1-geopixels`, et attend une validation de publication.
+La branche **main** fournit la démonstration stable **6.0.0-rc.1**, issue de la RC
+consolidée `fe392266`. Les connecteurs expérimentaux 2A–2D restent sur leurs
+branches dédiées et ne font pas partie de cette version.
 
 **Origine** : GeoPlacer est un fork de wplacer (`Arknight38/wplacer-dev`,
 issu de `luluwaffless/wplacer`), œuvre de JinxTheCatto, luluwaffless,
@@ -23,16 +24,14 @@ dépôt), une connexion Internet pour l'installation. Aucun compilateur,
 aucun droit administrateur.
 
 ```powershell
-git clone --branch integrate/6.0.0-rc.1-geopixels https://github.com/Daneisra/GeoPlacer.git
+git clone --branch main https://github.com/Daneisra/GeoPlacer.git
 cd GeoPlacer
 npm run setup:windows      # ou double-clic sur setup.bat
 ```
 
-Cette branche n’est pas encore publiée : pour un test immédiat, utilisez
-l’archive candidate locale fournie et extrayez-la, puis lancez
-`npm run setup:windows` dans son dossier. La commande Git ci-dessus sera
-utilisable après publication autorisée de cette branche. `main` contient
-encore la base historique et ne doit pas être utilisée pour cette candidate.
+La commande ci-dessus installe la version de démonstration de main. Le projet
+reste local : préparation PNG, import manuel dans GeoPixels et simulation.
+Aucun tag ni aucune release GitHub ne sont créés par cette promotion.
 
 Une seule commande : dépendances exactes, binaire `canvas` précompilé (sans
 compilateur), compilation, configuration sans secret, démarrage de
