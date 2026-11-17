@@ -2,7 +2,6 @@
   'use strict';
   if (!['https://geopixels.net', 'https://www.geopixels.net'].includes(location.origin)) return;
   let transport = null,
-    heartbeat = null,
     generation = 0,
     observing = false,
     ticking = false,
@@ -37,8 +36,6 @@
   document.body.append(panel);
   async function close(message = 'Déconnecté') {
     generation++;
-    clearInterval(heartbeat);
-    heartbeat = null;
     const previous = transport;
     transport = null;
     observing = false;
@@ -79,14 +76,16 @@
       GeoPlacerPageReader.reset?.();
       status.textContent = 'Couplé par HTTP privilégié, en lecture seule';
       sync.disabled = false;
-      heartbeat = setInterval(async () => {
-        if (observing || ticking || current !== generation) return;
-        ticking = true;
+      async function pulse() {
+       while (current === generation && next.connected()) {
         try {
-          if (!(await GeoPlacerPageReader.unchanged()))
+          if (!observing && !(await GeoPlacerPageReader.unchanged()))
             throw new Error('Modèle, position, palette, couche ou session modifié : nouveau couplage nécessaire.');
-          const answer = await next.heartbeat(monitoring ? { revision: monitoring.revision, state: monitoring.state } : undefined);
+          const answer = await next.poll(monitoring ? { revision: monitoring.revision, state: monitoring.state } : undefined);
           if (current !== generation) return;
+          if (!observing && !(await GeoPlacerPageReader.unchanged()))
+            throw new Error('Modèle, position, palette, couche ou session modifié : nouveau couplage nécessaire.');
+          ticking = true;
           const m = answer?.monitoring;
           if (m) {
             if (!Number.isSafeInteger(m.revision) || !['running', 'paused', 'stopped'].includes(m.state) ||
@@ -99,7 +98,7 @@
           }
           watchStatus.textContent = `Surveillance : ${monitoring?.state === 'running' ? 'active' : monitoring?.state === 'paused' ? 'en pause' : 'arrêtée'}. Cache chargé uniquement ; fraîcheur source non vérifiée.`;
           sync.disabled = monitoring?.state === 'running';
-          if (monitoring?.state === 'running' && Date.now() >= nextDue) {
+          if (monitoring?.state === 'running' && !observing && Date.now() >= nextDue) {
             await observe(true);
             if (current === generation && monitoring)
               nextDue = Date.now() + monitoring.intervalMs; // Rest between captures; never overlap or catch up in a burst.
@@ -107,7 +106,9 @@
         } catch (error) {
           if (current === generation) await close(error.message);
         } finally { ticking = false; }
-      }, 1000);
+       }
+      }
+      void pulse();
     } catch (error) {
       code = null;
       if (current === generation) await close(error.message);

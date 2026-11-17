@@ -62,22 +62,34 @@ export function createPrivilegedReaderRouter(channel: ConnectorHttpChannel): Rou
       res.status(403).json({ error: 'reader capability refused' });
     }
   });
-  router.post('/status', small, (req, res) => {
+  const pace = (start: number) => new Promise(resolve => setTimeout(resolve, Math.max(0, 50 - (Date.now() - start))));
+  router.post('/status', small, async (req, res) => {
     try {
+      const start = Date.now();
       const b = z.strictObject({ protocol: z.literal(1), readerVersion: z.literal(3).optional(),
+        waitMs: z.literal(5000).optional(),
         monitoring: z.strictObject({ revision: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER), state: z.enum(['running', 'paused', 'stopped']) }).optional() }).parse(req.body);
-      if (b.monitoring && b.readerVersion !== 3) throw new Error('reader version required');
-      res.json(channel.status(res.locals.capability as string, b.readerVersion, b.monitoring));
+      if ((b.monitoring || b.waitMs) && b.readerVersion !== 3) throw new Error('reader version required');
+      const abort = new AbortController();
+      res.once('close', () => abort.abort());
+      const answer = b.waitMs ? await channel.poll(res.locals.capability as string, 3, b.monitoring, abort.signal) : channel.status(res.locals.capability as string, b.readerVersion, b.monitoring);
+      await pace(start);
+      channel.verify(res.locals.capability as string);
+      if (!res.destroyed) res.json(answer);
     } catch {
-      fail(res);
+      if (!res.destroyed) fail(res);
     }
   });
-  router.post('/observations', express.json({ limit: 768 * 1024, strict: true }), (req, res) => {
+  router.post('/observations', express.json({ limit: 768 * 1024, strict: true }), async (req, res) => {
     try {
+      const start = Date.now();
       const b = z
         .strictObject({ protocol: z.literal(1), observations: z.array(z.unknown()).min(1).max(2) })
         .parse(req.body);
-      res.json(channel.batch(res.locals.capability as string, b.observations));
+      const answer = channel.batch(res.locals.capability as string, b.observations);
+      await pace(start);
+      channel.verify(res.locals.capability as string);
+      if (!res.destroyed) res.json(answer);
     } catch {
       fail(res);
     }

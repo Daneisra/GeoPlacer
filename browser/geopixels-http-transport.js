@@ -19,17 +19,13 @@ const GeoPlacerHttpTransport = (address, request) => {
     active = false,
     sequence = 0,
     busy = false;
-  let latencyMs = null,
-    lastDispatch = -Infinity;
-  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  let latencyMs = null;
   async function post(operation, body, authenticated = true) {
     if (!['claim', 'status', 'observations', 'disconnect'].includes(operation)) throw new Error('Opération interdite');
     if (authenticated && !capability) throw new Error('Canal non couplé');
     const data = JSON.stringify(body);
     if (new TextEncoder().encode(data).length > 768 * 1024) throw new Error('Lot trop volumineux');
-    const delay = Math.max(0, lastDispatch + 50 - performance.now());
-    lastDispatch = performance.now() + delay;
-    if (delay) await pause(delay); // <= 20 requests/s, including heartbeats and exact retries.
+    // Server-paced replies: page timers may be throttled to one wake-up/minute in a hidden tab.
     return new Promise((resolve, reject) => {
       let completed = false,
         handle;
@@ -55,6 +51,7 @@ const GeoPlacerHttpTransport = (address, request) => {
           data,
           anonymous: true,
           redirect: 'error',
+          timeout: 8000,
           headers: {
             'Content-Type': 'application/json',
             ...(authenticated ? { Authorization: 'Bearer ' + capability } : {}),
@@ -95,13 +92,13 @@ const GeoPlacerHttpTransport = (address, request) => {
       capability = claimed.capability;
       pending(claimed.fingerprint);
       for (let i = 0; i < 60; i++) {
-        const state = await post('status', { protocol: 1, readerVersion: 3 });
+        const state = await post('status', { protocol: 1, readerVersion: 3, waitMs: 5000 });
         if (state.approved === true && state.lastSequence === 0) {
+          if (state.pacing !== 'server-50ms') throw new Error('Serveur incompatible : installer la Phase 2D et refaire le couplage.');
           active = true;
           return;
         }
         if (state.approved !== false) throw new Error('État de couplage invalide');
-        await pause(1000);
       }
       throw new Error('Confirmation du dashboard expirée');
     },
@@ -133,6 +130,16 @@ const GeoPlacerHttpTransport = (address, request) => {
       if (!active || busy) return;
       const answer = await post('status', { protocol: 1, readerVersion: 3, ...(monitoring ? { monitoring } : {}) });
       if (answer.approved !== true || answer.lastSequence !== sequence) {
+        active = false;
+        throw new Error('Canal expiré ou séquence incertaine');
+      }
+      return answer;
+    },
+    async poll(monitoring) {
+      if (!active) throw new Error('Canal non couplé');
+      const answer = await post('status', { protocol: 1, readerVersion: 3, waitMs: 5000, ...(monitoring ? { monitoring } : {}) });
+      // A manual observation may overlap a held status response. Old status is not an observation ACK.
+      if (answer.approved !== true || !Number.isSafeInteger(answer.lastSequence) || answer.lastSequence > sequence + (busy ? 1 : 0)) {
         active = false;
         throw new Error('Canal expiré ou séquence incertaine');
       }

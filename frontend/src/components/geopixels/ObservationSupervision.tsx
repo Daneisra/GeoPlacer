@@ -36,7 +36,7 @@ export function ObservationSupervision({ monitoring: m, progress, enabled, busy,
       <button disabled={busy || !enabled || m.state !== 'paused'} onClick={() => onCommand('resume')}>Reprendre la surveillance</button>
       <button disabled={busy || !m.supported || m.state === 'stopped'} onClick={() => onCommand('stop')}>Arrêter la surveillance</button>
     </div>
-    {!m.supported && <p>Installer le lecteur 0.3.0, le coupler et lier le modèle pour surveiller.</p>}
+    {!m.supported && <p>Installer le lecteur 0.3.1, le coupler et lier le modèle pour surveiller.</p>}
     {m.inFlight && <p role="status">Capture en cours. Une demande de pause ou d’arrêt prend effet après cette capture.</p>}
     {m.reason && <p role="status">{m.reason}</p>}
     <p className="source-freshness">Fraîcheur source : {c?.sourceObservedAt != null ? `date déclarée ${time(c.sourceObservedAt)} ; âge ${n(Math.max(0, Math.floor((m.at - c.sourceObservedAt) / 1000)))} s` : 'non vérifiée — relire le même cache ne prouve aucune actualisation de GeoPixels.'}</p>

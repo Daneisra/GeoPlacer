@@ -23,6 +23,24 @@ function setup() {
   return { provider, http, claim, project, send, advance: (ms: number) => { now += ms; }, now: () => now };
 }
 describe('Repeated cache observation, without service freshness claims', () => {
+  it('wakes a held response on control change and refuses concurrent polls', async () => {
+    const s=setup(), abort=new AbortController();
+    const pending=s.http.poll(s.claim.capability,3,undefined,abort.signal);
+    await expect(s.http.poll(s.claim.capability,3,undefined,new AbortController().signal)).rejects.toThrow(/concurrent/);
+    s.provider.monitoring.command('start',5000);
+    expect(await pending).toMatchObject({monitoring:{state:'running'},pacing:'server-50ms'});
+  });
+  it('cancels held requests on abort or revocation without extending authority', async () => {
+    const s=setup(), abort=new AbortController();
+    const pending=s.http.poll(s.claim.capability,3,undefined,abort.signal);
+    abort.abort(); await expect(pending).rejects.toThrow(/aborted/);
+    const next=s.http.poll(s.claim.capability,3,undefined,new AbortController().signal);
+    s.http.revoke();await expect(next).rejects.toThrow();
+  });
+  it('cannot keep a capability alive past its absolute deadline with a held request', async () => {
+    const s=setup();const pending=s.http.poll(s.claim.capability,3,undefined,new AbortController().signal);
+    s.advance(HTTP_LIFETIME_MS);s.http.tick();await expect(pending).rejects.toThrow();
+  });
   it('requires capability negotiation and enforces bounded, acknowledged controls', () => {
     const m = new ObservationMonitor();
     expect(() => m.command('start', 10000)).toThrow();

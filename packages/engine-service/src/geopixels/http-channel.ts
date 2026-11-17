@@ -20,6 +20,7 @@ type Session = {
   lastSequence: number;
   lastDigest: string | null;
   requests: number[];
+  releasePoll?: () => void;
 };
 
 /** Privileged HTTP is capability-authenticated. Its Origin is NOT page attestation. */
@@ -75,6 +76,7 @@ export class ConnectorHttpChannel {
     s.deadline = this.now() + HTTP_LIFETIME_MS;
     s.lastSeen = this.now();
     s.epoch = this.provider.channelEpoch;
+    s.releasePoll?.();
     return { approved: true };
   }
   verify(capability: string): void {
@@ -99,7 +101,32 @@ export class ConnectorHttpChannel {
       if (ack) this.provider.monitoring.acknowledge(ack.revision, ack.state);
     }
     return { approved: s.approved, expires: s.deadline, lastSequence: s.lastSequence, fingerprint: s.fingerprint,
-      ...(readerVersion === 3 ? { monitoring: this.provider.monitoring.control() } : {}) };
+      ...(readerVersion === 3 ? { monitoring: this.provider.monitoring.control(), pacing: 'server-50ms' } : {}) };
+  }
+  /** One bounded held HTTP response. No browser timer, no permission renewal beyond deadline. */
+  async poll(capability: string, readerVersion: 3, ack: { revision: number; state: 'running' | 'paused' | 'stopped' } | undefined, signal: AbortSignal) {
+    this.status(capability, readerVersion, ack);
+    const s = this.session!;
+    check(!s.releasePoll, 'concurrent reader poll');
+    await new Promise<void>(resolve => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        unsubscribe();
+        signal.removeEventListener('abort', finish);
+        delete s.releasePoll;
+        resolve();
+      };
+      const unsubscribe = this.provider.monitoring.subscribe(kind => { if (kind === 'state') finish(); });
+      const timer = setTimeout(finish, 5000);
+      s.releasePoll = finish;
+      signal.addEventListener('abort', finish, { once: true });
+      if (signal.aborted) finish();
+    });
+    check(!signal.aborted, 'reader poll aborted');
+    return this.status(capability, readerVersion);
   }
   batch(capability: string, values: readonly unknown[]) {
     const s = this.authenticate(capability);
@@ -143,6 +170,7 @@ export class ConnectorHttpChannel {
   revoke(reason = 'HTTP reader revoked'): void {
     const s = this.session;
     this.session = null;
+    s?.releasePoll?.();
     if (s?.approved && s.epoch === this.provider.channelEpoch) this.provider.disconnect(reason);
   }
   tick(): void {

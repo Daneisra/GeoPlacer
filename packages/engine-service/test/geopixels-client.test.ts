@@ -13,7 +13,7 @@ async function setup(origin = 'https://geopixels.net') {
     requests: unknown[] = [];
   let connected = false;
   let now = 100000;
-  let interval: (() => Promise<void>) | undefined;
+  const polls: ((value: { monitoring: { revision: number; state: string; intervalMs: number } }) => void)[] = [];
   let control: { revision: number; state: string; intervalMs: number } | undefined;
   const channel = {
     pair: async (_code: string, _origin: string, pending: (s: string) => void) => {
@@ -23,7 +23,7 @@ async function setup(origin = 'https://geopixels.net') {
     send: async (value: unknown) => {
       requests.push(value);
     },
-    heartbeat: async () => control ? { monitoring: control } : undefined,
+    poll: () => new Promise<{ monitoring: { revision: number; state: string; intervalMs: number } }>(resolve => polls.push(resolve)),
     disconnect: async () => {
       connected = false;
     },
@@ -57,15 +57,16 @@ async function setup(origin = 'https://geopixels.net') {
     GeoPlacerHttpTransport: () => channel,
     GeoPlacerPageReader: reader,
     Date: { now: () => now },
-    setInterval: (fn: () => Promise<void>) => { interval = fn; return 1; },
-    clearInterval: () => {},
+    setInterval: () => { throw new Error('Page cadence timers are forbidden by this fixture'); },
     WebSocket: () => {
       throw new Error('page WebSocket forbidden');
     },
   });
   vm.runInContext(await readFile(new URL('../../../browser/geopixels-client.js', import.meta.url), 'utf8'), context);
   const button = (text: string) => elements.find((e) => e.textContent === text)!;
-  return { context, elements, channel, reader, button, requests, tick: () => interval!(), advance: (ms: number) => { now += ms; }, setControl: (value: typeof control) => { control = value; } };
+  const flush=async()=>{for(let i=0;i<20;i++)await Promise.resolve();};
+  const tick=async()=>{await flush();polls.shift()?.({monitoring:control ?? {revision:0,state:'stopped',intervalMs:5000}});await flush();};
+  return { context, elements, channel, reader, button, requests, tick, advance: (ms: number) => { now += ms; }, setControl: (value: typeof control) => { control = value; } };
 }
 describe('Passive HTTP reader panel in a local DOM fixture', () => {
   it('captures repeatedly only when requested, then pauses, resumes and stops without catching up', async () => {
@@ -83,9 +84,8 @@ describe('Passive HTTP reader panel in a local DOM fixture', () => {
   });
   it('never overlaps captures or applies a late control response after disconnect', async () => {
     const s = await setup(); await s.button('Coupler').onclick!();
-    let finish: (() => void) | undefined;
-    s.channel.heartbeat = () => new Promise(resolve => { finish = () => resolve({ monitoring:{ revision:1, state:'running', intervalMs:5000 } }); });
-    const running=s.tick(); await s.tick(); await s.button('Déconnecter').onclick!(); finish!(); await running;
+    s.setControl({revision:1,state:'running',intervalMs:5000});
+    await s.button('Déconnecter').onclick!(); await s.tick();
     expect(s.requests).toHaveLength(0); expect(s.channel.connected()).toBe(false);
   });
   it('stops after a changed model and does not auto-pair again', async () => {

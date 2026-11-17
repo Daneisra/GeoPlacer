@@ -69,6 +69,10 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     return { status: response.status, finalUrl: response.url, responseText };
   });
   await context.addInitScript(() => {
+    // Reproduce hidden-tab cadence restrictions without changing browser protections or test deadlines.
+    const nativeTimeout = globalThis.setTimeout.bind(globalThis), nativeInterval = globalThis.setInterval.bind(globalThis);
+    globalThis.setInterval = (fn, ms, ...args) => nativeInterval(fn, Math.max(60000, ms), ...args);
+    globalThis.setTimeout = (fn, ms, ...args) => nativeTimeout(fn, ms < 5000 ? 60000 : ms, ...args);
     globalThis.GM_xmlhttpRequest = (o) => {
       let aborted = false;
       globalThis
@@ -193,7 +197,7 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
       pageJsHeapBytes:metric(afterProfile,'JSHeapUsedSize'), measurement: 'CDP page task time/JS heap on Edge; not total browser CPU/RSS; unavailable on Firefox',
       dashboardHistoryCount:finalView.monitoring.history.length
     },null,2));
-    record('OK continuous read-only monitoring: repeated captures, changed pixel, pause/resume/stop, source remains undated');
+    record('OK continuous read-only monitoring with page cadence timers clamped to 60 s: repeated captures, changed pixel, pause/resume/stop, source remains undated');
     await reader.screenshot({ path: path.join(out, 'http-reader-local-fixture.png'), fullPage: true });
     await page.screenshot({ path: path.join(out, 'http-dashboard-local-fixture.png'), fullPage: true });
     await reader.getByRole('button', { name: 'Déconnecter', exact: true }).click();
