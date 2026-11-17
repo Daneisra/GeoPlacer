@@ -7,7 +7,7 @@ globalThis.GeoPlacerCapture = (() => {
       tileY = Math.floor(y / TILE) * TILE;
     return { tileX, tileY, localX: x - tileX, localY: y - tileY };
   }
-  function readRegion(project, rect, cache, createCanvas) {
+  function readRegion(project, rect, cache, createCanvas, report = () => {}) {
     const pixels = new Array(rect.width * rect.height).fill(-2);
     const decoded = new Map();
     for (let y = 0; y < rect.height; y++)
@@ -27,10 +27,13 @@ globalThis.GeoPlacerCapture = (() => {
                 ctx = canvas.getContext('2d', { willReadFrequently: true, colorSpace: 'srgb' });
               ctx.drawImage(bitmap, 0, 0);
               data = ctx.getImageData(0, 0, TILE, TILE).data;
-            } catch {
+            } catch (error) {
+              report(`decode-error:${error.name}`);
               /* Merging, closed or tainted bitmap is unknown, never an empty tile. */
             }
           }
+          if (!bitmap) report('missing-bitmap');
+          else if (bitmap.width !== TILE || bitmap.height !== TILE) report('invalid-bitmap-size');
           decoded.set(key, data);
         }
         const data = decoded.get(key);

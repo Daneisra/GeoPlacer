@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 
 type Capture = {
-  readRegion: (p: unknown, r: unknown, c: Map<string, unknown>, f: () => unknown) => number[];
+  readRegion: (p: unknown, r: unknown, c: Map<string, unknown>, f: () => unknown, report?: (reason: string) => void) => number[];
   resources: (s: unknown, c: unknown) => Record<string, unknown>;
   tileAt: (x: number, y: number) => unknown;
 };
@@ -45,6 +45,19 @@ describe('Browser contract fixture: current GeoPixelsFront cache, no service cal
       capture.readRegion({ gridX: 1000, gridY: 0, width: 1, height: 1 }, { x: 1000, y: 0, width: 1, height: 1 }, cache, canvas)
     ).toEqual([-2]);
   });
+  it('reports a closed or unreadable bitmap while keeping its pixels unknown', async () => {
+    const capture = await library(), issues: string[] = [];
+    const bitmap = { width: 1000, height: 1000 };
+    const canvas = () => ({ getContext: () => ({ drawImage: () => { const e = new Error(); e.name = 'InvalidStateError'; throw e; } }) });
+    const p = { gridX: 0, gridY: 0, width: 1, height: 1 }, r = { x: 0, y: 0, width: 1, height: 1 };
+    expect(capture.readRegion(p, r, new Map([['0,0', { colorBitmap: bitmap }]]), canvas, (v) => issues.push(v))).toEqual([-2]);
+    expect(issues).toContain('decode-error:InvalidStateError');
+  });
+  it('refuses an incompatible bitmap size without guessing its scale', async () => {
+    const capture = await library(), issues: string[] = [];
+    expect(capture.readRegion({ gridX: 0, gridY: 0, width: 1, height: 1 }, { x: 0, y: 0, width: 1, height: 1 }, new Map([['0,0', {colorBitmap: {width: 2000, height: 2000}}]]), () => { throw new Error('must not decode'); }, (v) => issues.push(v))).toEqual([-2]);
+    expect(issues).toContain('invalid-bitmap-size');
+  });
   it('whitelists numeric resource fields and never copies authentication or profile fields', async () => {
     const capture = await library();
     const resources = capture.resources(
@@ -63,13 +76,16 @@ describe('Browser contract fixture: current GeoPixelsFront cache, no service cal
     expect(capture.resources(null, [])).toBeNull();
   });
   it('keeps generated reader bundle deterministic and has no service writer or network interception', async () => {
-    const [capture, client, bundle] = await Promise.all(
-      ['../../../browser/geopixels-capture.js', '../../../browser/geopixels-client.js', '../../../public/geopixels-connector.user.js'].map(
-        (p) => readFile(new URL(p, import.meta.url), 'utf8')
-      )
-    );
-    expect(bundle!.replace(/\r\n/g, '\n').endsWith(capture!.replace(/\r\n/g, '\n') + '\n' + client!.replace(/\r\n/g, '\n'))).toBe(true);
-    expect(capture! + client!).not.toMatch(/tokenUser|document\.cookie|PlacePixels|MakePurchase|window\.fetch|localStorage/);
+    const paths = ['geopixels-capture.js', 'geopixels-reader.js', 'geopixels-http-transport.js', 'geopixels-client.js'];
+    const sources = await Promise.all(paths.map((p) => readFile(new URL('../../../browser/' + p, import.meta.url), 'utf8')));
+    const bundle = await readFile(new URL('../../../public/geopixels-connector.user.js', import.meta.url), 'utf8');
+    const version = bundle.match(/@version\s+([^\s]+)/)![1]!;
+    const expected = '(() => {\nconst GeoPlacerReaderVersion = ' + JSON.stringify(version) + ';\n' + sources.map((s) => s.replace(/\r\n/g, '\n')).join('\n') + '\n})();\n';
+    expect(bundle.replace(/\r\n/g, '\n').endsWith(expected)).toBe(true);
+    expect(sources.join('\n')).not.toMatch(/tokenUser|document\.cookie|PlacePixels|MakePurchase|window\.fetch|localStorage/);
+    expect(bundle).toContain('// @grant        GM_xmlhttpRequest');
+    expect(bundle).toContain('// @connect      127.0.0.1');
+    expect(bundle).not.toMatch(/@connect\s+(?:\*|self|geopixels)/);
     new vm.Script(bundle!);
   });
 });
