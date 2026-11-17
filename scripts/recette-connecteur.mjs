@@ -11,6 +11,20 @@ import assert from 'node:assert/strict';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.resolve(process.argv[2] ?? 'test-logs/phase2a/browser');
 mkdirSync(out, { recursive: true });
+// Independent acceptance scenarios: do not exhaust the production 300/min management
+// budget with the preceding simulator stress workflow, or weaken that protection.
+if (!process.argv.includes('--fake-only') && !process.argv.includes('--http-only')) {
+  for (const part of ['fake', 'http']) {
+    const code = await new Promise(resolve => {
+      const child=spawn(process.execPath,[fileURLToPath(import.meta.url),path.join(out,part),`--${part}-only`],{
+        env:process.env,stdio:'inherit',windowsHide:true
+      });
+      child.once('error',()=>resolve(1));child.once('exit',code=>resolve(code??1));
+    });
+    if (code !== 0) process.exit(code);
+  }
+  process.exit(0);
+}
 const require = createRequire(import.meta.url);
 const pw = require(process.env.GEOPLACER_PLAYWRIGHT_CORE);
 const { PNG } = createRequire(path.join(repo, 'package.json'))('pngjs');
@@ -213,7 +227,8 @@ try {
     record(`OK browser fixture stores and reloads ${width} x ${height} without placement`);
   }
   }
-  await runHttpReaderRecipe({ browser, page, api, base, approvalKey, repo, out, record });
+  if (!process.argv.includes('--fake-only'))
+    await runHttpReaderRecipe({ browser, page, api, base, approvalKey, repo, out, record });
   assert.equal(external.length, 0, JSON.stringify(external));
   assert.equal(errors.length, 0, JSON.stringify(errors));
   record(`OK ${engineName}, no page errors, no external requests`);

@@ -5,6 +5,9 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 
 export async function runHttpReaderRecipe({ browser, page, api, base, approvalKey, repo, out, record }) {
+  const managementResponses = [];
+  const trace = response => { const u=new URL(response.url()); if(u.origin === base && u.pathname.startsWith('/api/v1/')) managementResponses.push({path:u.pathname,status:response.status(),at:Date.now()}); };
+  page.on('response',trace);
   const { PNG } = createRequire(path.join(repo, 'package.json'))('pngjs');
   const png = PNG.sync.read(readFileSync(path.join(repo, 'public/fixtures/geoplacer-8x5.png')));
   assert.equal(png.width, 8); assert.equal(png.height, 5);
@@ -16,6 +19,7 @@ export async function runHttpReaderRecipe({ browser, page, api, base, approvalKe
     strategy: 'top-to-bottom',
   });
   await api('engine/selection', { templateId: imported.templateId }, 'PUT');
+  await api('connector/source', { source: 'geopixels' });
   await page.reload();
   await page.getByLabel('Source de toile').selectOption('geopixels');
   await page.getByLabel('Clé locale d’approbation', { exact: true }).fill(approvalKey);
@@ -182,6 +186,7 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     assert.equal((await api('connector/status', undefined, 'GET')).monitoring.history.length, paused);
     await page.getByRole('button', { name: 'Reprendre la surveillance', exact: true }).click();
     await page.locator('#observedCorrect').filter({ hasText: /^38$/ }).waitFor();
+    await page.waitForFunction(() => document.querySelector('#monitorState').dataset.state === 'running' && !document.querySelector('#monitorState').textContent.includes('attendue'));
     await page.getByRole('button', { name: 'Arrêter la surveillance', exact: true }).click();
     await page.waitForFunction(() => document.querySelector('#monitorState').dataset.state === 'stopped' && !document.querySelector('#monitorState').textContent.includes('attendue'));
     const stopped = (await api('connector/status', undefined, 'GET')).monitoring.history.length;
@@ -230,7 +235,15 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
         2
       )
     );
+  } catch (error) {
+    writeFileSync(path.join(out, 'http-failure-diagnostic.json'), JSON.stringify({
+      fixture: true, error: String(error), state: await api('connector/status', undefined, 'GET').catch(()=>null),
+      reader: await reader.locator('aside').textContent().catch(()=>null),
+      dashboardAlerts: await page.getByRole('alert').allTextContents().catch(()=>[]), managementResponses, pageErrors: errors
+    },null,2));
+    throw error;
   } finally {
+    page.off('response',trace);
     await context.close();
   }
 }
