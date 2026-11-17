@@ -208,6 +208,13 @@ describe('Regional observations: one project, independent pixel expiration', () 
         expect(v.progress).toMatchObject({total:1,correct:1});
         expect(v.regions.map(r=>r.progress.total)).toEqual([1,0]);
     });
+    it('keeps clock-skewed future readings unknown and re-evaluates them without a new envelope',async()=>{
+        const s=setup();const project=s.p.status().project!;
+        s.p.observe({type:'observation',sequence:2,session:'session',project,capturedAt:s.now()+1000,observedAt:s.now()+500,
+          rect:{x:project.gridX,y:project.gridY-1,width:4,height:2},pixels:new Array(8).fill(0),resources:null});
+        expect((await s.view()).progress.unknown).toBe(8);
+        s.advance(1000);expect((await s.view()).progress).toMatchObject({correct:8,unknown:0});
+    });
     it('keeps interrupted bands dated, but never adds a completed history point', async () => {
         const s = setup(),
             r = region();

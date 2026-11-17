@@ -267,7 +267,9 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
             'invalid read region'
         );
         const out = new Int32Array(rect.width * rect.height).fill(UNKNOWN);
-        let observedAt = this.now();
+        // This copy is synchronous: use one clock reading for the immutable window.
+        const readAt = this.now();
+        let observedAt = readAt;
         let known = false;
         this.readValidUntil = Number.MAX_SAFE_INTEGER;
         let capturedMin = Infinity,
@@ -286,7 +288,12 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
                     const index = iy * p.width + ix;
                     const date = this.dates[index]!;
                     const sampled = this.captures[index] !== 0 || this.pixels[index] !== UNKNOWN;
-                    if (sampled && this.now() - Math.abs(date) > CONNECTOR_MAX_AGE_MS) continue;
+                    if (sampled && readAt - Math.abs(date) > CONNECTOR_MAX_AGE_MS) continue;
+                    const availableAt = Math.max(Math.abs(date), this.captures[index]!);
+                    if (sampled && availableAt > readAt) {
+                        this.readValidUntil = Math.min(this.readValidUntil, availableAt - 1);
+                        continue; // Tolerated clock skew is not evidence of a future observation.
+                    }
                     if (sampled)
                         this.readValidUntil = Math.min(this.readValidUntil, Math.abs(date) + CONNECTOR_MAX_AGE_MS);
                     const color = this.pixels[index]!;
@@ -295,7 +302,7 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
                         known = true;
                         capturedMin = Math.min(capturedMin, this.captures[index]!);
                         capturedMax = Math.max(capturedMax, this.captures[index]!);
-                        if (date < 0) undated = true;
+                        if (date < 0 || Object.is(date, -0)) undated = true;
                         else {
                             sourceMin = Math.min(sourceMin, date);
                             sourceMax = Math.max(sourceMax, date);
@@ -314,8 +321,8 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
         return {
             snapshot,
             validUntil: this.readValidUntil,
-            captureRange: capturedMax ? { oldest: capturedMin, newest: capturedMax } : null,
-            sourceRange: known && !undated && sourceMax ? { oldest: sourceMin, newest: sourceMax } : null,
+            captureRange: capturedMin !== Infinity ? { oldest: capturedMin, newest: capturedMax } : null,
+            sourceRange: known && !undated && sourceMin !== Infinity ? { oldest: sourceMin, newest: sourceMax } : null,
             sourceUndated: undated,
         };
     }
