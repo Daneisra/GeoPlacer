@@ -187,8 +187,7 @@ try {
         '\nglobalThis.factory = GeoPlacerHttpTransport;',
       context
     );
-    const code = channel.issue(key, 'https://geopixels.net');
-    const transport = context.factory(base, (o) => {
+    const makeTransport = () => context.factory(base, (o) => {
       let aborted = false;
       fetch(o.url, { method: o.method, headers: o.headers, body: o.data, redirect: 'error' })
         .then(async (r) => {
@@ -205,19 +204,19 @@ try {
         },
       };
     });
-    await transport.pair(code.token, 'https://geopixels.net', () =>
-      channel.approve(key, channel.info().pending.requestId)
-    );
     for (const [width, height] of [
       [64, 64],
       [595, 894],
       [2000, 2000],
     ]) {
+      // Different model identity requires a fresh explicit capability; never reuse a live project channel.
+      const transport = makeTransport(), code = channel.issue(key, 'https://geopixels.net');
+      await transport.pair(code.token, 'https://geopixels.net', () => channel.approve(key, channel.info().pending.requestId));
       const before = performance.now();
       let batches = 0,
         bytes = 0;
       for (let row = 0; row < height;) {
-        const rows = Math.min(height - row, Math.max(1, Math.floor(16384 / width)));
+        const rows = Math.min(height - row, Math.max(1, Math.floor(65536 / width)));
         const o = {
           type: 'observation',
           session: 'large-fixture',
@@ -250,8 +249,8 @@ try {
         elapsedMs: performance.now() - before,
         synthetic: true,
       });
+      await transport.disconnect();
     }
-    await transport.disconnect();
   });
   console.log(
     JSON.stringify({
