@@ -844,6 +844,7 @@ export class EngineService {
         let progress: ProgressSnapshot | null = null;
         let regionViews: Awaited<ReturnType<RegionalProgressCache['compute']>>['regions'] = [];
         let recomputedCells = 0;
+        let calculationError: string | null = null;
         if (bound && t !== null) {
             try {
                 const calculated = await this.regionalProgress.compute(t, this.connector, Date.now());
@@ -853,11 +854,14 @@ export class EngineService {
                 regionViews = calculated.regions;
                 recomputedCells = calculated.recomputedCells;
             } catch {
-                bound = false;
+                try { this.connector.assertBinding(t); bound = this.selectedTemplate === t; }
+                catch { bound = false; }
+                calculationError = 'Progression indisponible pendant le recalcul ; nouvelle lecture du cache attendue.';
             }
         }
         return {
-            ...view,
+            ...this.connector.status(),
+            error: this.connector.status().error ?? calculationError,
             bound,
             source: this.source,
             selection: t === null ? null : this.templateInfo(t),

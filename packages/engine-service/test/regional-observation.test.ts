@@ -187,6 +187,27 @@ describe('Regional observations: one project, independent pixel expiration', () 
         expect((await s.view()).regions[0]!.progress).toMatchObject({correct:2,unknown:2});
         expect(s.p.monitoring.view().lastCapture!.capturedAt).toBe(s.now()-30001);
     });
+    it('yields to control I/O between calculation cells',async()=>{
+        const s=setup(512,1);s.send({x:0,y:0,width:512,height:1});let served=false;
+        setImmediate(()=>{served=true;});await s.view();expect(served).toBe(true);
+    });
+    it('revisits expiry reached during a cooperative calculation',async()=>{
+        const s=setup();s.send();setImmediate(()=>s.advance(30001));
+        expect((await s.view()).progress).toMatchObject({correct:0,unknown:8});
+    });
+    it('revisits dirty cells for a status request queued behind an older computation',async()=>{
+        const s=setup();s.send();setImmediate(()=>s.send(undefined,new Array(8).fill(1)));
+        const first=s.view(),second=s.view();await first;
+        expect((await second).progress).toMatchObject({correct:0,incorrect:8});
+    });
+    it('preserves original template bounds for global and regional counts',async()=>{
+        const s=setup(),left=region(),outside=region('outside',{x:2});s.send();
+        const t={...s.t,coordinateSystem:{yAxis:'down' as const,bounds:{minX:10,minY:20,width:1,height:1}}};s.p.bind(t);
+        s.p.monitoring.configureRegions([left,outside],4,2);
+        const v=await new RegionalProgressCache().compute(t,s.p,s.now());
+        expect(v.progress).toMatchObject({total:1,correct:1});
+        expect(v.regions.map(r=>r.progress.total)).toEqual([1,0]);
+    });
     it('keeps interrupted bands dated, but never adds a completed history point', async () => {
         const s = setup(),
             r = region();
