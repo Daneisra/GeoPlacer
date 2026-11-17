@@ -116,6 +116,20 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
         : 'OK page WebSocket rejected synchronously; exact CSP event not emitted by this browser'
     );
     await reader.addScriptTag({ content: readFileSync(path.join(repo, 'public/geopixels-connector.user.js'), 'utf8') });
+    const nativeCache=await reader.evaluate(async()=>{
+      const bitmapCanvas=new OffscreenCanvas(1000,1000),ctx=bitmapCanvas.getContext('2d');ctx.fillStyle='#000000';ctx.fillRect(0,0,1000,1000);
+      const source=new Map([['0,0',{colorBitmap:await createImageBitmap(bitmapCanvas)}]]),decoded=GeoPlacerCapture.createReadCache(4_000_000);
+      let decodes=0;
+      const factory=(w,h)=>{const c=new OffscreenCanvas(w,h),context=c.getContext('2d');return{getContext:()=>({drawImage:(...args)=>context.drawImage(...args),getImageData:(...args)=>{decodes++;return context.getImageData(...args);}})};};
+      const p={gridX:0,gridY:0,width:1,height:1},r={x:0,y:0,width:1,height:1};
+      const read=()=>GeoPlacerCapture.readRegion(p,r,source,factory,undefined,decoded)[0];
+      const first=read(),second=read();ctx.fillStyle='#ff0000';ctx.fillRect(0,0,1,1);const immutable=read(),reusedDecodes=decodes;
+      source.set('0,0',{colorBitmap:await createImageBitmap(bitmapCanvas)});const replaced=read();source.get('0,0').colorBitmap.close();const closed=read();source.clear();read();
+      return{first,second,immutable,replaced,closed,reusedDecodes,totalDecodes:decodes,remainingBytes:decoded.bytes()};
+    });
+    assert.deepEqual(nativeCache,{first:0,second:0,immutable:0,replaced:0xff0000,closed:-2,reusedDecodes:1,totalDecodes:2,remainingBytes:0});
+    writeFileSync(path.join(out,'native-bitmap-cache.json'),JSON.stringify(nativeCache,null,2));
+    record('OK native ImageBitmap cache: one decode reused, mutable source cannot alter it, replacement and close invalidate, memory released');
     async function pair() {
       await page.getByRole('button', { name: 'Coupler le lecteur GeoPixels', exact: true }).click();
       const code = await page.getByLabel('Code de couplage', { exact: true }).inputValue();
@@ -203,6 +217,40 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
       dashboardHistoryCount:finalView.monitoring.history.length
     },null,2));
     record('OK continuous read-only monitoring with page cadence timers clamped to 60 s: repeated captures, changed pixel, pause/resume/stop, source remains undated');
+    // Phase 2E: actual regional form and privileged reader, still a strictly local fixture.
+    await reader.evaluate(() => tileImageCache.clear());
+    await reader.getByRole('button',{name:'Observer le modèle',exact:true}).click();
+    await page.locator('#observedUnknown').filter({hasText:/^38$/}).waitFor();
+    await page.getByRole('button',{name:'Ajouter une région',exact:true}).click();
+    await page.getByLabel('Nom région 1',{exact:true}).fill('Gauche');
+    await page.getByLabel('width région 1',{exact:true}).fill('4');
+    await page.getByLabel('height région 1',{exact:true}).fill('5');
+    await page.getByLabel('Priorité région 1',{exact:true}).selectOption('primary');
+    await page.getByRole('button',{name:'Ajouter une région',exact:true}).click();
+    await page.getByLabel('Nom région 2',{exact:true}).fill('Droite');
+    await page.getByLabel('x région 2',{exact:true}).fill('4');
+    await page.getByLabel('width région 2',{exact:true}).fill('4');
+    await page.getByLabel('height région 2',{exact:true}).fill('5');
+    await page.getByRole('button',{name:'Enregistrer les régions',exact:true}).click();
+    await page.waitForFunction(()=>document.querySelectorAll('[data-region-id]').length===2);
+    await reader.evaluate(()=>loadFixtureTiles());
+    await page.locator('[data-region-id]').nth(0).getByRole('button',{name:'Observer cette région',exact:true}).click();
+    await page.waitForFunction(()=>Number(document.querySelector('#observedCorrect').textContent)>0 && Number(document.querySelector('#observedUnknown').textContent)>0);
+    let regional=await api('connector/status',undefined,'GET');
+    assert.equal(regional.monitoring.lastCapture.total,20);assert.equal(regional.monitoring.lastCapture.regionId,regional.monitoring.configuredRegions[0].id);
+    assert.equal(regional.regionViews[0].progress.unknown,0);assert.ok(regional.regionViews[1].progress.unknown>0);
+    await page.getByRole('button',{name:'Démarrer la surveillance',exact:true}).click();
+    await page.locator('#observedCorrect').filter({hasText:/^38$/}).waitFor();
+    regional=await api('connector/status',undefined,'GET');
+    const ids=regional.monitoring.configuredRegions.map(r=>r.id);
+    assert.ok(regional.monitoring.history.some(p=>p.regionId===ids[0]));assert.ok(regional.monitoring.history.some(p=>p.regionId===ids[1]));
+    await page.getByRole('button',{name:'Mettre la surveillance en pause',exact:true}).click();
+    await page.waitForFunction(()=>document.querySelector('#monitorState').dataset.state==='paused' && !document.querySelector('#monitorState').textContent.includes('attendue'));
+    await page.getByRole('button',{name:'Arrêter la surveillance',exact:true}).click();
+    await page.waitForFunction(()=>document.querySelector('#monitorState').dataset.state==='stopped' && !document.querySelector('#monitorState').textContent.includes('attendue'));
+    const regionalEnd=await api('connector/status',undefined,'GET');
+    writeFileSync(path.join(out,'regional-metrics.json'),JSON.stringify({fixture:true,realExtension:false,regions:regionalEnd.monitoring.configuredRegions,progress:regionalEnd.progress,regionViews:regionalEnd.regionViews,usage:regionalEnd.monitoring.usage},null,2));
+    record('OK regional UI: two image rectangles, one-shot partial coverage, weighted monitoring covers both, pause and stop; no service requests');
     await reader.screenshot({ path: path.join(out, 'http-reader-local-fixture.png'), fullPage: true });
     await page.screenshot({ path: path.join(out, 'http-dashboard-local-fixture.png'), fullPage: true });
     await reader.getByRole('button', { name: 'Déconnecter', exact: true }).click();
