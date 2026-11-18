@@ -1,6 +1,6 @@
 # Lecteur GeoPixels HTTP — observations et petits lots contrôlés
 
-Version du lecteur : **0.7.0**, serveur Phase 2H local. Les observations restent passives par défaut. Le port écrivain séparé propose un envoi **groupé natif** (une requête) ou **séquentiel** (repli), avec un lot explicitement autorisé de **1 à 5 pixels** et son coût affiché avant accord. Aucun achat. La session du site reste dans le navigateur. Le lot réel séquentiel 2G est validé visuellement après rechargement ; le premier envoi groupé réel reste à autoriser et valider. Le lecteur 0.6.0 conserve les observations et les lots séquentiels ; les plus anciens gardent leurs fonctions de lecture compatibles. Le groupé exige 0.7.0.
+Version du lecteur : **0.7.0**, serveur Phase 2H local. Les observations restent passives par défaut. Le port écrivain séparé propose un envoi **groupé natif** (une requête) ou **séquentiel** (repli), avec un lot explicitement autorisé de **1 à 5 pixels** et son coût affiché avant accord. Aucun achat. La session du site reste dans le navigateur. Le lot réel séquentiel 2G est validé visuellement après rechargement ; le premier envoi groupé réel de cinq pixels est également validé par l’utilisateur (18 novembre 2026 : une requête acceptée, cinq couleurs conformes observées). Chaque nouveau lot exige son accord. Le lecteur 0.6.0 conserve les observations et les lots séquentiels ; les plus anciens gardent leurs fonctions de lecture compatibles. Le groupé exige 0.7.0.
 
 ## Installation et lancement
 
@@ -139,3 +139,6 @@ Un résultat manquant ou ambigu arrête le lot et conserve la réservation incer
 Après installation du lecteur 0.7.0 et liaison du modèle, choisir **Groupé natif — une requête**, fixer **5**, puis **Préparer le lot**. Vérifier destinations, couleurs et coût maximal de cinq points d’énergie. **Attendre l’accord explicite de l’utilisateur sur ces cinq cibles avant de cliquer « Autoriser et démarrer le lot ».** Un seul appel `/PlacePixels` porte le tableau complet ; une réponse `Ok` accepte cette requête, sans prouver la couleur finale de chaque cible. Réobserver pour comparer chaque ligne, en conservant l’indication de fraîcheur source.
 
 Le séquentiel reste sélectionnable pour un nouveau lot. Un groupe incertain ne peut pas être renvoyé automatiquement dans ce mode. Après départ d’une requête groupée, pause/arrêt ne peut pas annuler son application sur le service. La borne de cinq est une limite locale conservatrice, pas une limite officielle du serveur. Voir [le rapport 2H](RAPPORT-PHASE2H.md).
+
+
+Validation réelle 2H du 18 novembre 2026 : l’utilisateur confirme le succès d’un lot groupé de cinq cibles, avec une requête acceptée et cinq couleurs conformes dans l’observation. La fraîcheur source du cache reste non vérifiée. Détails : [rapport 2H](RAPPORT-PHASE2H.md#validation-utilisateur-réelle--18-novembre-2026).

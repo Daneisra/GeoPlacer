@@ -40,11 +40,23 @@ Résultats :
 - Le site est une fixture locale ; les appels de placement sont des stubs et l’API GM est simulée par Node. Aucun test Tampermonkey sur le vrai site n’est revendiqué.
 - Build de clôture réussi après le contrôle complet : `test-logs/2026-11-18T13-32-52-553Z-build.log`. `git diff --check` vérifié avant commit ; aucune dépendance ni attribution modifiée.
 
-## Premier essai réel — à autoriser séparément
+## Recette réelle — chaque nouveau lot exige un accord
 
 1. Redémarrer GeoPlacer, installer **0.7.0**, coupler puis observer et lier le modèle souhaité. Garder les autres bots arrêtés et la file native vide.
 2. Choisir **Groupé natif**, limite **5**, puis **Préparer le lot**. Vérifier ses cinq destinations, couleurs et coût maximal **5 énergie**. **S’arrêter ici jusqu’à l’accord explicite de l’utilisateur sur ce lot précis.**
 3. Après cet accord seulement : **Autoriser et démarrer le lot**. Attendu : **1 requête acceptée / 5 cibles couvertes**, puis contrôle par une nouvelle observation. Un délai d’actualisation est possible, comme lors de la validation 2G ; une couleur absente du cache ne justifie pas de renvoi automatique.
 4. Arrêter et révoquer le canal. Tout résultat ambigu bloque le groupe ; ne pas le renvoyer via le mode de repli.
 
-**Le lot groupé réel n’est pas encore validé par l’utilisateur.** Aucun push, modification de main, tag, release, achat, nettoyage ou création de compte.
+**Le premier lot groupé réel de cinq pixels est validé par l’utilisateur**, selon les éléments ci-dessous. Chaque nouveau lot reste soumis à son accord. Aucun push, modification de main, tag, release, achat, nettoyage ou création de compte.
+
+
+## Validation utilisateur réelle — 18 novembre 2026
+
+L’utilisateur confirme « c’est tout bon » et fournit les captures de GeoPixels et du dashboard après l’essai :
+
+- Mode **Groupé natif — une requête**, cinq cibles sur la couche de base : trois blanches (`#ffffff`) et deux noires (`#000000`).
+- Dashboard : **1 requête acceptée**, **5 / 5 cibles couvertes par un accusé**.
+- Comparaison du cache après envoi : **5 conformes, 0 différente, 0 à observer de nouveau** ; chacune des cinq lignes indique une couleur conforme.
+- Progression globale du modèle : **11 corrects, 27 incorrects, 0 inconnu**, sur ses 38 cibles opaques.
+
+Cela valide le parcours réel de ce lot de cinq cibles, exécuté volontairement **par l’utilisateur**. Aucun placement n’a été déclenché par l’agent pour consigner ce résultat. La fraîcheur source reste **non vérifiée**, comme indiqué sur la capture : l’acceptation de la requête et les couleurs observées restent distinctes. Les interruptions, pertes de réponse et reprises restent validées localement sur fournisseurs factices ; cet essai ne certifie pas des groupes plus grands ni tous les cas d’erreur réels.
