@@ -876,7 +876,7 @@ export class EngineService {
         return {
             ...this.connector.status(),
             singlePixel: this.singlePixelWriter.view(),
-            batch: this.singlePixelWriter.batch.view(),
+            batch: await this.singlePixelWriter.batch.observedView(),
             error: this.connector.status().error ?? calculationError,
             bound,
             source: this.source,

@@ -321,14 +321,27 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     assert.equal(await reader.evaluate(()=>globalThis.fixtureSiteCalls),6);
     assert.equal(batchStatus.progress.correct,0); // An ACK never changes the observed bitmap.
     await reader.evaluate(()=>{
-      for(const w of globalThis.fixtureWrites){
+      for(const w of globalThis.fixtureWrites.slice(0,4)){
         const tx=Math.floor(w.GridX/1000)*1000,ty=Math.floor(w.GridY/1000)*1000;
         const ctx=tileImageCache.get(tx+','+ty).colorBitmap.getContext('2d');
         ctx.fillStyle='#'+w.Color.toString(16).padStart(6,'0');ctx.fillRect(w.GridX-tx,w.GridY-ty,1,1);
       }
     });
     await reader.getByRole('button',{name:'Observer le modèle',exact:true}).click();
+    await page.locator('#observedCorrect').filter({hasText:/^4$/}).waitFor();
+    await batchPanel.getByRole('cell',{name:/Couleur différente/}).waitFor();
+    const partial=await api('connector/status',undefined,'GET');
+    assert.equal(partial.batch.confirmed,5);assert.equal(partial.batch.verification.correct,4);assert.equal(partial.batch.verification.different,1);
+    assert.equal(await reader.evaluate(()=>globalThis.fixtureSiteCalls),6);
+    await reader.evaluate(()=>{
+      const w=globalThis.fixtureWrites[4],tx=Math.floor(w.GridX/1000)*1000,ty=Math.floor(w.GridY/1000)*1000;
+      const ctx=tileImageCache.get(tx+','+ty).colorBitmap.getContext('2d');
+      ctx.fillStyle='#'+w.Color.toString(16).padStart(6,'0');ctx.fillRect(w.GridX-tx,w.GridY-ty,1,1);
+    });
+    await reader.getByRole('button',{name:'Observer le modèle',exact:true}).click();
     await page.locator('#observedCorrect').filter({hasText:/^5$/}).waitFor();
+    assert.equal((await api('connector/status',undefined,'GET')).batch.verification.correct,5);
+    record('OK five ACKs with only four observed matches: per-target discrepancy displayed, no retry; subsequent read-only observation sees the fifth');
     record('OK one dashboard authorization, five sequential native-stub sends, no per-pixel dialog, five durable confirmations, independent recapture measures progress');
     await reader.screenshot({ path: path.join(out, 'http-reader-local-fixture.png'), fullPage: true });
     await page.screenshot({ path: path.join(out, 'http-dashboard-local-fixture.png'), fullPage: true });

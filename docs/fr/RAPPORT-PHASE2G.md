@@ -28,7 +28,7 @@ Le navigateur garde ses identifiants de session ; aucune donnée d’authentific
 - Parcours HTTP avec API réelle locale : clé/capacité obligatoires, empreinte exacte, champs inconnus refusés, livraison unique, résultat durable et accusé idempotent.
 - Recettes **Edge et Firefox locales** : cinq envois séquentiels après un clic, zéro dialogue individuel, progression inchangée jusqu’à recapture, déconnexion et révocation. Les appels `/PlacePixels` sont remplacés par un stub ; les autres requêtes externes sont bloquées. L’API GM est simulée par Node, pas un Tampermonkey réel.
 
-**Contrôle complet réussi : 990 tests, un facultatif ignoré** (Jest 172 ; Vitest : adapters-node 66, core 388 + 1 ignoré, engine-service 313, simulator 51). `npm.cmd run check:logged` inclut types et lints, sans erreur ; les 47 avertissements backend historiques restent présents. Les deux correctifs de fin de revue (séparation factice/réel et migration 2F) sont couverts. Les 13 tests ciblés du lot passent aussi après le dernier garde-fou de capacité ; les composants du panneau ont été relintés après la distinction des confirmations factices.
+**Contrôle complet initial réussi : 990 tests, un facultatif ignoré** (Jest 172 ; Vitest : adapters-node 66, core 388 + 1 ignoré, engine-service 313, simulator 51). `npm.cmd run check:logged` inclut types et lints, sans erreur ; les 47 avertissements backend historiques restent présents. Les deux correctifs de fin de revue (séparation factice/réel et migration 2F) sont couverts. Les 13 tests ciblés du lot passent aussi après le dernier garde-fou de capacité ; les composants du panneau ont été relintés après la distinction des confirmations factices.
 
 Journaux conservés localement (ignorés par Git) :
 
@@ -41,7 +41,7 @@ Aucun clone ou benchmark supplémentaire : installation, dépendances et packagi
 
 ## Limites et premier essai utilisateur
 
-**Aucun lot réel n’a été envoyé ou validé pendant cette phase.** La validation réelle unitaire 2F reste acquise ; elle ne prouve pas le fonctionnement d’un lot réel.
+**L’agent n’a déclenché aucun placement réel.** L’utilisateur a ensuite exécuté un premier lot : sa validation est **partielle**, détaillée ci-dessous. La validation réelle unitaire 2F reste acquise ; elle ne prouve pas le fonctionnement complet d’un lot.
 
 Le cache réel actuel n’est pas daté par sa source : il ne peut pas lever une incertitude d’exécution. La réconciliation exige une observation source datée postérieure à l’interruption. Les confirmations restent exclues pour cette identité ; leur remise en jeu après une modification externe relève d’une future maintenance fondée sur des observations fiables. L’archive est bornée à 4 096 références ; un registre plein bloque les nouveaux lots sans purge automatique. Le budget navigateur est conservateur et ne crédite pas la régénération pendant l’essai ; recharger si nécessaire avant un nouveau lot.
 
@@ -54,6 +54,23 @@ Recette courte :
 
 Procédure et limites : [guide du lecteur](phase2c-lecteur-http.md#premier-lot-réel--cinq-pixels-maximum-phase-2g).
 
-Revue des 21 fichiers : aucun fichier de configuration privée, donnée applicative, archive ou secret détecté dans les fichiers inclus ; licence et attributions inchangées. `git diff --check` réussi avec la configuration de fins de ligne du dépôt.
+Revue initiale des 21 fichiers : aucun fichier de configuration privée, donnée applicative, archive ou secret détecté dans les fichiers inclus ; licence et attributions inchangées. `git diff --check` réussi avec la configuration de fins de ligne du dépôt.
 
-Aucun push, changement de main, tag, release, nettoyage, achat ou création de compte. Prochain essai : le lot de cinq destinations approuvé ci-dessus, réalisé volontairement par l’utilisateur.
+Aucun push, changement de main, tag, release, nettoyage, achat ou création de compte. Toute nouvelle écriture exige un nouveau lot et un accord explicite. La priorité après le retour ci-dessous est de comparer les cinq destinations observées, sans renvoi automatique.
+
+
+## Retour utilisateur — validation réelle partielle (18 novembre 2026)
+
+L’utilisateur confirme que le lot s’est exécuté, mais signale **un pixel blanc manquant**. Les captures montrent cinq réponses acceptées par le parcours d’envoi. Après une nouvelle observation demandée sans placement supplémentaire, l’utilisateur confirme **5 corrects, 33 incorrects, 0 inconnu**, dont le pixel noir déjà posé en 2F : cela correspond à **quatre nouvelles cibles conformes**, et ne valide donc pas cinq placements effectifs. La fraîcheur source reste non vérifiée. La cause (application côté service, cache, modification concurrente ou autre) n’est pas déterminée ; aucun renvoi correctif n’est déclenché.
+
+Le correctif sépare la réponse d’envoi de l’observation pour chacune des cinq destinations. Le panneau affiche « Envois terminés — résultat à observer », les réponses `Ok`, puis une colonne « Observation du cache » : conforme, différente, inconnue/expirée ou à réobserver après envoi. Une capture antérieure à l’accusé ne valide pas le résultat. Les confirmations et les exclusions durables restent intactes : une différence observée ne déclenche aucun nouvel envoi.
+
+L’utilisateur précise également le fonctionnement natif : on peut préparer plusieurs pixels puis cliquer une fois sur **Paint**. Vérification ciblée du [frontend public historique, `placePixels`, lignes 1703–1780](https://github.com/AntCDev/GeoPixelsFront/blob/83673896886c016a3d23bd46a2309570194a19da/wwwroot/js/index.js#L1703) : il construit `pixelsToSend` depuis la file et transmet tout le tableau `Pixels` dans une requête `/PlacePixels`. La réponse testée est globale (`Ok`), sans résultat individuel. Ce contrat confirme l’envoi groupé, sans établir un nombre illimité ni une atomicité serveur. La Phase 2G reste séquentielle ; passer à une seule requête groupée nécessitera de traiter l’incertitude du groupe entier et de conserver la vérification des cibles. Aucun changement du transport d’écriture n’est inclus dans ce correctif.
+
+
+### Vérification du correctif de lecture
+
+- 58 tests ciblés réussis (lots, écrivain unitaire, intégration moteur, canal HTTP), dont le cas cinq accusés/quatre conformités, capture antérieure à l’accusé, expiration et déconnexion : `test-logs/phase2g-observation-regression.log`.
+- Packages compilés, lints des fichiers concernés et frontend sans erreur ; build réussi : `test-logs/2026-11-18T12-39-28-858Z-build.log`.
+- Le lecteur **0.6.0** et le transport de placement sont inchangés. Redémarrer GeoPlacer puis coupler/réobserver le même modèle pour renseigner les nouvelles colonnes ; aucun placement n’est nécessaire.
+- Recette Edge locale réussie avec cinq accusés/quatre cibles conformes, puis une cinquième conformité après une nouvelle lecture, **sans nouvel envoi** : `test-logs/phase2g/observed-discrepancy-edge/recipe.log`. Aucun accès au service réel ; API GM simulée et placements factices.

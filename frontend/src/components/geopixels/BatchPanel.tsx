@@ -6,7 +6,18 @@ export type BatchView = {
     digest: string | null;
     state: string;
     mode: 'fake' | 'real' | null;
-    targets: { x: number; y: number; color: number; state: string; confirmed: boolean }[];
+    targets: {
+        x: number;
+        y: number;
+        color: number;
+        state: string;
+        confirmed: boolean;
+        observation?: 'unknown' | 'pending' | 'correct' | 'different';
+        observedColor?: number | null;
+        capturedAt?: number | null;
+        sourceAt?: number | null;
+    }[];
+    verification?: { correct: number; different: number; unknown: number; pending: number; sourceUnverified: boolean };
     confirmed: number;
     total: number;
     uncertain: number;
@@ -21,7 +32,7 @@ const labels: Record<string, string> = {
     paused: 'En pause',
     interrupted: 'Interrompu — nouvelle autorisation nécessaire',
     blocked: 'Bloqué',
-    completed: 'Lot terminé',
+    completed: 'Envois terminés — résultat à observer',
     stopped: 'Arrêté',
     waiting: 'En attente',
     started: 'Résultat attendu',
@@ -77,9 +88,22 @@ export function BatchPanel({
                     {labels[view.state] ?? view.state}
                 </strong>{' '}
                 · {view.confirmed} / {view.total}{' '}
-                {view.mode === 'fake' ? 'envois factices confirmés' : 'envois confirmés'}
+                {view.mode === 'fake' ? 'envois factices confirmés' : 'réponses « Ok » reçues'}
                 {view.uncertain > 0 ? ` · ${view.uncertain} incertain` : ''}.
             </p>
+            {view.confirmed > 0 && (
+                <p id="batchObservedResult" role="status">
+                    Cache après envoi : {view.verification?.correct ?? 0} conforme(s) ·{' '}
+                    {view.verification?.different ?? 0} différent(s) ·{' '}
+                    {(view.verification?.unknown ?? view.confirmed) + (view.verification?.pending ?? 0)} à observer de
+                    nouveau.{' '}
+                    {view.verification?.sourceUnverified
+                        ? 'Fraîcheur source non vérifiée.'
+                        : 'Ces observations restent distinctes des accusés.'}
+                    {(view.verification?.different ?? 0) > 0 &&
+                        ' Un accusé ne prouve pas la couleur finale. Aucun renvoi automatique.'}
+                </p>
+            )}
             {!ready && <p>Connectez le lecteur 0.6.0, observez puis liez le modèle dans les étapes 1 et 2.</p>}
             {!approvalKey && <p>Saisissez la clé locale dans les réglages de connexion.</p>}
             <label>
@@ -121,7 +145,8 @@ export function BatchPanel({
                                     <th>X</th>
                                     <th>Y</th>
                                     <th>Couleur</th>
-                                    <th>État</th>
+                                    <th>Envoi</th>
+                                    <th>Observation du cache</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -134,8 +159,26 @@ export function BatchPanel({
                                             {t.confirmed
                                                 ? view.mode === 'fake'
                                                     ? 'Simulation confirmée'
-                                                    : 'Envoi confirmé'
+                                                    : 'Accusé reçu'
                                                 : (labels[t.state] ?? t.state)}
+                                        </td>
+                                        <td>
+                                            {t.observation === 'correct'
+                                                ? 'Couleur conforme'
+                                                : t.observation === 'different'
+                                                  ? 'Couleur différente'
+                                                  : t.observation === 'pending'
+                                                    ? 'À réobserver après envoi'
+                                                    : 'Inconnue ou expirée'}
+                                            {t.observedColor != null && (
+                                                <>
+                                                    {' '}
+                                                    ·{' '}
+                                                    {t.observedColor === -1
+                                                        ? 'transparent'
+                                                        : '#' + t.observedColor.toString(16).padStart(6, '0')}
+                                                </>
+                                            )}
                                         </td>
                                     </tr>
                                 ))}

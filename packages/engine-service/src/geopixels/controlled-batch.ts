@@ -739,6 +739,73 @@ export class ControlledBatch {
         this.emit();
         return this.view();
     }
+    /** Read-only comparison: a transport ACK is never evidence of the resulting canvas. */
+    async observedView() {
+        const view = this.view(),
+            batch = this.saved.batch;
+        const targets = view.targets.map((t) => ({
+            ...t,
+            observation: 'unknown' as 'unknown' | 'pending' | 'correct' | 'different',
+            observedColor: null as number | null,
+            capturedAt: null as number | null,
+            sourceAt: null as number | null,
+        }));
+        if (batch)
+            try {
+                this.context(true);
+                const epoch = this.d.provider.channelEpoch;
+                const windows = await Promise.all(
+                    batch.writes.map((w) =>
+                        this.d.provider.readWindow({
+                            minX: w.point.x,
+                            minY: w.point.y,
+                            width: 1,
+                            height: 1,
+                        })
+                    )
+                );
+                this.context(true);
+                check(
+                    this.saved.batch === batch && epoch === this.d.provider.channelEpoch,
+                    'batch context changed during comparison'
+                );
+                windows.forEach((window, i) => {
+                    const target = targets[i]!,
+                        w = batch.writes[i]!;
+                    const color = window.snapshot.get(w.point);
+                    if (color === -2 || window.validUntil < Date.now()) return;
+                    target.observedColor = color;
+                    target.capturedAt = window.captureRange?.oldest ?? null;
+                    target.sourceAt = window.sourceRange?.oldest ?? null;
+                    const record = this.saved.records.filter((r) => r.batchId === batch.id && same(r.write, w)).at(-1);
+                    const attempt = record ? this.d.attempts.get(record.attemptId) : null;
+                    // A pre-ACK capture cannot verify that acknowledged operation, even if its color matches.
+                    target.observation =
+                        target.confirmed &&
+                        (!attempt?.closedAt || !target.capturedAt || target.capturedAt <= attempt.closedAt)
+                            ? 'pending'
+                            : color === w.color
+                              ? 'correct'
+                              : 'different';
+                });
+            } catch {
+                /* Wrong model, position, provider, expired channel: keep every result unknown. */
+            }
+        const sent = targets.filter((t) => t.confirmed);
+        const count = (value: (typeof targets)[number]['observation']) =>
+            sent.filter((t) => t.observation === value).length;
+        return {
+            ...view,
+            targets,
+            verification: {
+                correct: count('correct'),
+                different: count('different'),
+                unknown: count('unknown'),
+                pending: count('pending'),
+                sourceUnverified: sent.some((t) => t.observation !== 'unknown' && t.sourceAt === null),
+            },
+        };
+    }
     view() {
         const b = this.saved.batch;
         const targets =

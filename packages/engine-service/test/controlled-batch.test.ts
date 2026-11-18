@@ -15,7 +15,7 @@ const wait = async (fn: () => boolean) => {
         await new Promise((r) => setTimeout(r, 10));
     }
 };
-async function fixture(opts: { real?: boolean; lost?: boolean; refuse?: boolean } = {}) {
+async function fixture(opts: { real?: boolean; lost?: boolean; refuse?: boolean; omit?: number } = {}) {
     const dir = await tempDir(),
         { service: s } = await openFast(dir);
     opened.push(s);
@@ -62,7 +62,8 @@ async function fixture(opts: { real?: boolean; lost?: boolean; refuse?: boolean 
                 });
                 return;
             }
-            for (const w of c.writes) pixels[(project.gridY - w.gridY) * 8 + w.gridX - project.gridX] = w.color;
+            if (calls !== opts.omit)
+                for (const w of c.writes) pixels[(project.gridY - w.gridY) * 8 + w.gridX - project.gridX] = w.color;
             if (!opts.lost)
                 service.connector.result({
                     type: 'result',
@@ -298,5 +299,51 @@ describe('Bounded work through the existing TaskScheduler', () => {
         const next = await restored.singlePixelWriter.batch.prepare('fake', 1);
         expect(next.targets[0]!.x).toBe(c.gridX + 10);
         expect(next.confirmed).toBe(0);
+    });
+    it('reports four observed matches despite five ACKs, without retrying the missing target', async () => {
+        const f = await fixture({ omit: 3 }),
+            b = f.s.singlePixelWriter.batch,
+            p = await b.prepare('fake', 5);
+        await b.approve(p.id!, p.digest!);
+        await wait(() => b.view().state === 'completed');
+        const before = (await f.s.connectorView()).batch;
+        expect(before.confirmed).toBe(5);
+        expect(before.verification).toMatchObject({ correct: 0, different: 0, pending: 5 });
+        await new Promise((r) => setTimeout(r, 2));
+        f.observe(false);
+        const after = (await f.s.connectorView()).batch;
+        expect(after.confirmed).toBe(5);
+        expect(after.verification).toEqual({
+            correct: 4,
+            different: 1,
+            pending: 0,
+            unknown: 0,
+            sourceUnverified: true,
+        });
+        expect(after.targets.filter((t) => t.observation === 'different')).toHaveLength(1);
+        expect(after.targets.find((t) => t.observation === 'different')!.observedColor).toBe(-1);
+        expect((await f.s.connectorView()).progress!.correct).toBe(4);
+        expect(f.calls()).toBe(5);
+        const next = await b.prepare('fake', 5);
+        expect(next.targets.some((n) => p.targets.some((old) => old.x === n.x && old.y === n.y))).toBe(false);
+        expect(f.calls()).toBe(5);
+    });
+    it('leaves per-target verification unknown on expired captures or a disconnected channel', async () => {
+        const f = await fixture(),
+            b = f.s.singlePixelWriter.batch,
+            p = await b.prepare('fake', 1);
+        await b.approve(p.id!, p.digest!);
+        await wait(() => b.view().state === 'completed');
+        await new Promise((r) => setTimeout(r, 2));
+        f.observe();
+        expect((await b.observedView()).verification.correct).toBe(1);
+        const future = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 31000);
+        try {
+            expect((await b.observedView()).verification).toMatchObject({ correct: 0, unknown: 1 });
+        } finally {
+            future.mockRestore();
+        }
+        f.s.connector.disconnect('test');
+        expect((await b.observedView()).verification).toMatchObject({ correct: 0, unknown: 1 });
     });
 });
