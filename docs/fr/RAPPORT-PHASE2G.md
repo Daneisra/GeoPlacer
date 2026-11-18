@@ -41,7 +41,7 @@ Aucun clone ou benchmark supplémentaire : installation, dépendances et packagi
 
 ## Limites et premier essai utilisateur
 
-**L’agent n’a déclenché aucun placement réel.** L’utilisateur a ensuite exécuté un premier lot : sa validation est **partielle**, détaillée ci-dessous. La validation réelle unitaire 2F reste acquise ; elle ne prouve pas le fonctionnement complet d’un lot.
+**L’agent n’a déclenché aucun placement réel.** L’utilisateur a ensuite exécuté un premier lot : les **cinq cibles sont confirmées visuellement après rechargement de GeoPixels**, comme détaillé ci-dessous. La validation réelle unitaire 2F reste acquise.
 
 Le cache réel actuel n’est pas daté par sa source : il ne peut pas lever une incertitude d’exécution. La réconciliation exige une observation source datée postérieure à l’interruption. Les confirmations restent exclues pour cette identité ; leur remise en jeu après une modification externe relève d’une future maintenance fondée sur des observations fiables. L’archive est bornée à 4 096 références ; un registre plein bloque les nouveaux lots sans purge automatique. Le budget navigateur est conservateur et ne crédite pas la régénération pendant l’essai ; recharger si nécessaire avant un nouveau lot.
 
@@ -56,12 +56,14 @@ Procédure et limites : [guide du lecteur](phase2c-lecteur-http.md#premier-lot-r
 
 Revue initiale des 21 fichiers : aucun fichier de configuration privée, donnée applicative, archive ou secret détecté dans les fichiers inclus ; licence et attributions inchangées. `git diff --check` réussi avec la configuration de fins de ligne du dépôt.
 
-Aucun push, changement de main, tag, release, nettoyage, achat ou création de compte. Toute nouvelle écriture exige un nouveau lot et un accord explicite. La priorité après le retour ci-dessous est de comparer les cinq destinations observées, sans renvoi automatique.
+Aucun push, changement de main, tag, release, nettoyage, achat ou création de compte. Toute nouvelle écriture exige un nouveau lot et un accord explicite. Le décalage d’affichage observé ci-dessous ne justifie aucun renvoi automatique.
 
 
-## Retour utilisateur — validation réelle partielle (18 novembre 2026)
+## Retour utilisateur — cinq cibles visibles après rechargement (18 novembre 2026)
 
-L’utilisateur confirme que le lot s’est exécuté, mais signale **un pixel blanc manquant**. Les captures montrent cinq réponses acceptées par le parcours d’envoi. Après une nouvelle observation demandée sans placement supplémentaire, l’utilisateur confirme **5 corrects, 33 incorrects, 0 inconnu**, dont le pixel noir déjà posé en 2F : cela correspond à **quatre nouvelles cibles conformes**, et ne valide donc pas cinq placements effectifs. La fraîcheur source reste non vérifiée. La cause (application côté service, cache, modification concurrente ou autre) n’est pas déterminée ; aucun renvoi correctif n’est déclenché.
+Lors du premier contrôle, l’utilisateur confirme que le lot s’est exécuté, mais signale **un pixel blanc manquant à l’affichage**. Les captures montrent cinq réponses acceptées par le parcours d’envoi. Après une nouvelle observation demandée sans placement supplémentaire, l’utilisateur confirme **5 corrects, 33 incorrects, 0 inconnu**, dont le pixel noir déjà posé en 2F : cela correspond alors à **quatre nouvelles cibles conformes dans le cache observé**, et ne suffit pas à valider les cinq placements.
+
+L’utilisateur confirme ensuite : « après avoir refresh geopixel le pixel manquant est apparue ». Les **cinq cibles du lot sont donc validées visuellement par l’utilisateur après rechargement**. L’écart initial était temporaire, cohérent avec un cache client pas encore actualisé ; le mécanisme exact de ce décalage n’est pas déterminé. Aucun nouveau compteur après rechargement n’a été fourni. Aucun renvoi correctif n’a été déclenché par l’agent et aucun renvoi automatique n’est ajouté. Cette confirmation ne change pas les limites de fraîcheur des observations sans rechargement.
 
 Le correctif sépare la réponse d’envoi de l’observation pour chacune des cinq destinations. Le panneau affiche « Envois terminés — résultat à observer », les réponses `Ok`, puis une colonne « Observation du cache » : conforme, différente, inconnue/expirée ou à réobserver après envoi. Une capture antérieure à l’accusé ne valide pas le résultat. Les confirmations et les exclusions durables restent intactes : une différence observée ne déclenche aucun nouvel envoi.
 
