@@ -1,6 +1,6 @@
 # Phase 2F — essai unique de placement
 
-Base : `6792de96dc66220af9686fa88c1f3a007875dbbf`. Branche locale : `feat/phase2f-single-pixel-writer`. GeoPlacer conserve la version `6.0.0-rc.1` ; le userscript passe à **0.5.2** pour identifier explicitement son nouveau port écrivain. Aucun placement ni achat réel exécuté pendant ce développement.
+Base : `6792de96dc66220af9686fa88c1f3a007875dbbf`. Branche locale : `feat/phase2f-single-pixel-writer`. GeoPlacer conserve la version `6.0.0-rc.1` ; le userscript passe à **0.5.2** pour identifier explicitement son nouveau port écrivain. Aucun placement déclenché par l'agent pendant le développement. L'utilisateur a ensuite confirmé le premier placement réel avec le lecteur 0.5.2 ; voir la validation interactive ci-dessous. Aucun achat testé.
 
 ## Contrats examinés
 
@@ -37,7 +37,7 @@ Le port navigateur est séparé du lecteur : `fetch` de même origine, sans redi
 
 **Arrêt immédiat** retire une préparation ou conserve un envoi commencé en état incertain. Il ne peut pas annuler rétroactivement une requête déjà reçue par GeoPixels. Déconnecter le lecteur interrompt aussi son appel navigateur. Le dialogue de confirmation et le contrôle local final réduisent la fenêtre entre autorisation et envoi sans promettre d'annulation atomique à travers le réseau.
 
-Le lecteur passif 0.4.0 reste compatible avec les observations, mais ne sait pas exécuter cet essai. Le lecteur 0.5.1 et les variables de session du port écrivain restent **à valider dans Tampermonkey sur le vrai site**. L'estimation locale `currentEnergy` peut être ancienne ; aucun refus ou résultat ambigu du service n'est traité comme un succès. Aucun dessin autonome, achat, multi-agent ou file de placements réels n'est ajouté. Pendant une intention ouverte, les changements de source, de modèle et de position restent bloqués ; une incertitude réelle non résolue impose de conserver ce profil pour diagnostic. La simulation reste utilisable dans un profil distinct.
+Le lecteur passif 0.4.0 reste compatible avec les observations, mais ne sait pas exécuter cet essai. Le port écrivain du lecteur **0.5.2** a été validé par l'utilisateur sur le vrai site pour un essai unique d'un pixel ; cela ne valide pas une boucle de dessin ni tous les cas d'erreur réels. L'estimation locale `currentEnergy` peut être ancienne ; aucun refus ou résultat ambigu du service n'est traité comme un succès. Aucun dessin autonome, achat, multi-agent ou file de placements réels n'est ajouté. Pendant une intention ouverte, les changements de source, de modèle et de position restent bloqués ; une incertitude réelle non résolue impose de conserver ce profil pour diagnostic. La simulation reste utilisable dans un profil distinct.
 
 ## Validation locale
 
@@ -72,7 +72,7 @@ Le profil utilisé lors du premier essai ne contenait que le paysage 96 × 64. L
 
 Le panneau local indique maintenant l'étape suivante et les tailles incompatibles ; les réglages de connexion se replient une fois connecté. Les détails techniques sont repliés et la case redondante d'autorisation est remplacée par le bouton explicite **Autoriser ce pixel**. La confirmation native du pixel et toutes les protections du serveur sont conservées.
 
-Le userscript utilise des styles limités à son panneau et l'API privilégiée [GM_addElement](https://www.tampermonkey.net/documentation.php?q=GM_addElement) pour les insérer ; seul ce droit DOM est ajouté, sans permission réseau supplémentaire ni modification de la CSP du site. Les captures utilisateur suivantes confirment le rendu lisible du lecteur 0.5.1 et la liaison du modèle 8 × 5. Elles montrent un refus avant envoi ; aucun placement réel n'est encore validé.
+Le userscript utilise des styles limités à son panneau et l'API privilégiée [GM_addElement](https://www.tampermonkey.net/documentation.php?q=GM_addElement) pour les insérer ; seul ce droit DOM est ajouté, sans permission réseau supplémentaire ni modification de la CSP du site. Les captures utilisateur suivantes confirment le rendu lisible du lecteur 0.5.1 et la liaison du modèle 8 × 5. Elles montraient un refus avant envoi ; aucun placement réel n'était alors validé.
 
 Validation du correctif : 38 tests ciblés du lecteur/écrivain/bundle, lint frontend et build verts. Recettes HTTP locales Edge et Firefox vertes : création/sélection/réutilisation du modèle manquant, styles du panneau sous CSP restrictive, refus du WebSocket de page, observations, commande factice d'un pixel et révocation. Firefox ajoute une feuille de style de page hostile aux boutons. L'API GM est simulée dans ces recettes ; aucune requête réelle de placement.
 
@@ -88,4 +88,17 @@ Chaque refus avant `fetch` dispose maintenant d'un motif fixe affiché dans le p
 
 Validation : 52 tests ciblés verts, types du paquet verts, build vert et recette HTTP Edge locale verte avec `userData.colors` en CSV. Sont aussi testés les tableaux de connexion, la synchronisation changeant le format pendant la confirmation, les palettes invalides et l'affichage du motif. L'appel `/PlacePixels` reste simulé dans ces tests ; Firefox n'est pas réexécuté pour ce correctif ciblé. Journaux : `test-logs/phase2f-writer-csv-tests.log`, `test-logs/phase2f-writer-csv-types.log`, `test-logs/2026-11-18T00-46-07-049Z-build.log`, `test-logs/phase2f-csv-edge.log`.
 
-Suite prioritaire après cet essai : disposer d'une preuve de fraîcheur exploitable pour réconcilier les résultats réels ambigus, avant d'envisager une boucle d'écriture. Ce rapport ne valide aucun placement réel.
+## Validation utilisateur réelle — 18 novembre 2026
+
+L'utilisateur confirme « ça fonctionne ! » avec le lecteur **GeoPlacer HTTP 0.5.2** et fournit les captures du site et du dashboard :
+
+- Modèle de test **8 × 5** lié, couche de base ; pixel cible **noir `#000000`**.
+- Lecteur : **« Envoi unique confirmé par GeoPixels »**.
+- Dashboard : opération **Confirmée**.
+- Après nouvelle observation : **1 pixel correct, 37 incorrects, 0 inconnu**, sur les 38 cibles opaques du modèle ; ses 2 pixels transparents ne sont pas des cibles.
+
+Cette validation est réalisée **par l'utilisateur**, pas par une action autonome de l'agent. Elle confirme le parcours réel de cet essai : préparation, autorisation volontaire, exécution navigateur, résultat reçu et progression observée. La fraîcheur source du cache reste affichée **non vérifiée**, comme dans les captures ; la confirmation de l'envoi et la date des données observées restent distinctes.
+
+Le placement continu, les lots, les achats, la perte d'une réponse sur le service réel et sa réconciliation ne sont pas validés par cet essai. Les garanties d'interruption et de reprise restent couvertes par les tests locaux factices. Aucun nouvel envoi n'est déclenché lors de l'enregistrement de cette validation.
+
+Suite prioritaire : disposer d'une preuve de fraîcheur exploitable pour réconcilier les résultats réels ambigus, avant d'envisager une boucle d'écriture.

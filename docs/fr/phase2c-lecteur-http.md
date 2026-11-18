@@ -1,6 +1,6 @@
-# Lecteur GeoPixels HTTP, surveillance et régions — Phase 2E
+# Lecteur GeoPixels HTTP — observations et essai d’un pixel
 
-Version du lecteur : **0.5.2**, serveur Phase 2F local. Le lecteur reste passif par défaut et conserve les observations régionales du protocole 1 ; les lecteurs 0.3.1/0.4.0 restent compatibles pour leurs observations respectives. Le port écrivain séparé prépare seulement un essai d'un pixel soumis à confirmation explicite dans le dashboard **et** dans le navigateur. Aucun achat ; aucun placement réel validé en Phase 2F. Voir la [recette et les limites de cet essai](RAPPORT-PHASE2F.md). Main fournit toujours la RC de démonstration sans connecteur expérimental.
+Version du lecteur : **0.5.2**, serveur Phase 2F local. Le lecteur reste passif par défaut et conserve les observations régionales du protocole 1 ; les lecteurs 0.3.1/0.4.0 restent compatibles pour leurs observations respectives. Le port écrivain séparé prépare seulement un essai d'un pixel soumis à confirmation explicite dans le dashboard **et** dans le navigateur. Un placement réel unique a été confirmé par l'utilisateur le **18 novembre 2026**, puis relu avec **1 pixel correct, 37 incorrects et 0 inconnu**. Cette validation ne couvre pas un dessin continu ni la réconciliation réelle après perte de réponse. Aucun achat testé. Voir la [recette et les limites de cet essai](RAPPORT-PHASE2F.md). Main fournit toujours la RC de démonstration sans connecteur expérimental.
 
 ## Installation et lancement
 
