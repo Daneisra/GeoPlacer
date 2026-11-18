@@ -64,25 +64,70 @@ export function createPrivilegedReaderRouter(channel: ConnectorHttpChannel): Rou
     });
     const pace = (start: number) =>
         new Promise((resolve) => setTimeout(resolve, Math.max(0, 50 - (Date.now() - start))));
-    router.post('/pixel-claim', small, async (req,res) => {
+    router.post('/pixel-claim', small, async (req, res) => {
         try {
-            z.strictObject({protocol:z.literal(1)}).parse(req.body);
-            res.json({command:await channel.claimPixel(res.locals.capability as string)});
-        } catch { fail(res); }
+            z.strictObject({ protocol: z.literal(1) }).parse(req.body);
+            res.json({ command: await channel.claimPixel(res.locals.capability as string) });
+        } catch {
+            fail(res);
+        }
     });
-    router.post('/pixel-check', small, (req,res) => {
+    router.post('/pixel-check', small, (req, res) => {
         try {
-            const b=z.strictObject({protocol:z.literal(1),attemptId:z.string().uuid()}).parse(req.body);
-            res.json(channel.pixelAllowed(res.locals.capability as string,b.attemptId));
-        } catch { fail(res); }
+            const b = z.strictObject({ protocol: z.literal(1), attemptId: z.string().uuid() }).parse(req.body);
+            res.json(channel.pixelAllowed(res.locals.capability as string, b.attemptId));
+        } catch {
+            fail(res);
+        }
     });
-    router.post('/pixel-result', small, async (req,res) => {
+    router.post('/pixel-result', small, async (req, res) => {
         try {
-            const b=z.strictObject({protocol:z.literal(1),attemptId:z.string().uuid(),
-                result:z.enum(['confirmed','not-sent','uncertain'])}).parse(req.body);
-            const view = await channel.pixelResult(res.locals.capability as string,b.attemptId,b.result);
-            res.json({accepted:true,state:view.state});
-        } catch { fail(res); }
+            const b = z
+                .strictObject({
+                    protocol: z.literal(1),
+                    attemptId: z.string().uuid(),
+                    result: z.enum(['confirmed', 'not-sent', 'uncertain']),
+                })
+                .parse(req.body);
+            const view = await channel.pixelResult(res.locals.capability as string, b.attemptId, b.result);
+            res.json({ accepted: true, state: view.state });
+        } catch {
+            fail(res);
+        }
+    });
+    router.post('/batch-claim', small, async (req, res) => {
+        try {
+            z.strictObject({ protocol: z.literal(1) }).parse(req.body);
+            res.json({ command: channel.claimBatch(res.locals.capability as string) });
+        } catch {
+            fail(res);
+        }
+    });
+    router.post('/batch-check', small, (req, res) => {
+        try {
+            const b = z
+                .strictObject({ protocol: z.literal(1), batchId: z.string().uuid(), attemptId: z.string().uuid() })
+                .parse(req.body);
+            res.json(channel.batchAllowed(res.locals.capability as string, b.batchId, b.attemptId));
+        } catch {
+            fail(res);
+        }
+    });
+    router.post('/batch-result', small, async (req, res) => {
+        try {
+            const b = z
+                .strictObject({
+                    protocol: z.literal(1),
+                    batchId: z.string().uuid(),
+                    attemptId: z.string().uuid(),
+                    result: z.enum(['confirmed', 'not-sent', 'uncertain']),
+                })
+                .parse(req.body);
+            const view = await channel.batchResult(res.locals.capability as string, b.batchId, b.attemptId, b.result);
+            res.json({ accepted: true, state: view.state, confirmed: view.confirmed });
+        } catch {
+            fail(res);
+        }
     });
     router.post('/status', small, async (req, res) => {
         try {
@@ -90,7 +135,7 @@ export function createPrivilegedReaderRouter(channel: ConnectorHttpChannel): Rou
             const b = z
                 .strictObject({
                     protocol: z.literal(1),
-                    readerVersion: z.union([z.literal(3), z.literal(4)]).optional(),
+                    readerVersion: z.union([z.literal(3), z.literal(4), z.literal(5)]).optional(),
                     waitMs: z.literal(5000).optional(),
                     abortedCapture: z
                         .string()
@@ -104,7 +149,7 @@ export function createPrivilegedReaderRouter(channel: ConnectorHttpChannel): Rou
                         .optional(),
                 })
                 .parse(req.body);
-            if ((b.monitoring || b.waitMs || b.abortedCapture) && ![3, 4].includes(b.readerVersion ?? 0))
+            if ((b.monitoring || b.waitMs || b.abortedCapture) && ![3, 4, 5].includes(b.readerVersion ?? 0))
                 throw new Error('reader version required');
             const abort = new AbortController();
             res.once('close', () => abort.abort());

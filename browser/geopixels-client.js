@@ -52,20 +52,33 @@
   pixel.textContent = 'Placer le pixel préparé';
   pixel.onclick = async (event) => {
     if (!event.isTrusted || !transport?.connected()) return;
-    const channel = transport, current = generation;
+    const channel = transport,
+      current = generation;
     pixel.disabled = true;
     try {
       const command = await channel.claimPixel();
-      if (!command) { status.textContent = 'Aucun pixel autorisé dans le dashboard.'; return; }
-      const result = await GeoPlacerPageWriter.execute(command,
-        id => current === generation && channel.connected() ? channel.pixelAllowed(id) : false, true);
-      const ack = await channel.pixelResult(command.attemptId,result);
-      status.textContent = result === 'confirmed' && ack.state === 'finished'
-        ? 'Envoi unique confirmé par GeoPixels. Observer à nouveau pour mesurer la progression ; recharger avant un nouvel essai.'
-        : result === 'not-sent' && ack.state === 'failed' ? 'Pixel non envoyé : ' + (GeoPlacerPageWriter.reason?.() ?? 'vérification locale refusée.') : 'Résultat incertain. Aucun renvoi ; réconciliation nécessaire.';
+      if (!command) {
+        status.textContent = 'Aucun pixel autorisé dans le dashboard.';
+        return;
+      }
+      const result = await GeoPlacerPageWriter.execute(
+        command,
+        (id) => (current === generation && channel.connected() ? channel.pixelAllowed(id) : false),
+        true
+      );
+      const ack = await channel.pixelResult(command.attemptId, result);
+      status.textContent =
+        result === 'confirmed' && ack.state === 'finished'
+          ? 'Envoi unique confirmé par GeoPixels. Observer à nouveau pour mesurer la progression ; recharger avant un nouvel essai.'
+          : result === 'not-sent' && ack.state === 'failed'
+            ? 'Pixel non envoyé : ' + (GeoPlacerPageWriter.reason?.() ?? 'vérification locale refusée.')
+            : 'Résultat incertain. Aucun renvoi ; réconciliation nécessaire.';
     } catch {
-      status.textContent = 'Réponse absente : résultat potentiellement incertain. Consulter le dashboard ; aucun renvoi.';
-    } finally { pixel.disabled = false; }
+      status.textContent =
+        'Réponse absente : résultat potentiellement incertain. Consulter le dashboard ; aucun renvoi.';
+    } finally {
+      pixel.disabled = false;
+    }
   };
   diagnose.onclick = async () => {
     try {
@@ -77,8 +90,8 @@
   const options = document.createElement('details');
   const summary = document.createElement('summary');
   summary.textContent = 'Options du lecteur';
-  options.append(summary, disconnect, diagnose);
-  panel.append(title, status, watchStatus, connect, sync, pixel, options);
+  options.append(summary, pixel, disconnect, diagnose);
+  panel.append(title, status, watchStatus, connect, sync, options);
   document.body.append(panel);
   async function close(message = 'Déconnecté') {
     GeoPlacerPageWriter.stop();
@@ -121,46 +134,82 @@
         return;
       }
       GeoPlacerPageReader.reset?.();
-      lastOnce=0; abortedCapture=null;
+      lastOnce = 0;
+      abortedCapture = null;
       status.textContent = 'Couplé par HTTP privilégié, en lecture seule';
       sync.disabled = false;
       async function pulse() {
-       while (current === generation && next.connected()) {
-        try {
-          if (!observing && !(await GeoPlacerPageReader.unchanged()))
-            throw new Error('Modèle, position, palette, couche ou session modifié : nouveau couplage nécessaire.');
-          const answer = await next.poll(monitoring ? { revision: monitoring.revision, state: monitoring.state } : undefined, abortedCapture);
-          abortedCapture = null;
-          if (current !== generation) return;
-          if (!observing && !(await GeoPlacerPageReader.unchanged()))
-            throw new Error('Modèle, position, palette, couche ou session modifié : nouveau couplage nécessaire.');
-          ticking = true;
-          const m = answer?.monitoring;
-          if (m) {
-            if (!Number.isSafeInteger(m.revision) || !['running', 'paused', 'stopped'].includes(m.state) ||
-                !Number.isSafeInteger(m.intervalMs) || m.intervalMs < 5000 || m.intervalMs > 60000)
-              throw new Error('Commande de surveillance invalide');
-            if(m.region && (!/^[a-z][a-z0-9_-]{0,31}$/.test(m.region.id) || !['x','y','width','height','revision'].every(k=>Number.isSafeInteger(m.region[k]))))
-              throw new Error('Région reçue invalide');
-            if (!monitoring || m.revision >= monitoring.revision) {
-              if (!monitoring || m.revision > monitoring.revision) nextDue = 0;
-              monitoring = m;
+        while (current === generation && next.connected()) {
+          try {
+            if (!observing && !(await GeoPlacerPageReader.unchanged()))
+              throw new Error('Modèle, position, palette, couche ou session modifié : nouveau couplage nécessaire.');
+            const answer = await next.poll(
+              monitoring ? { revision: monitoring.revision, state: monitoring.state } : undefined,
+              abortedCapture
+            );
+            abortedCapture = null;
+            if (current !== generation) return;
+            if (!observing && !(await GeoPlacerPageReader.unchanged()))
+              throw new Error('Modèle, position, palette, couche ou session modifié : nouveau couplage nécessaire.');
+            const batch = answer?.batch;
+            if (!observing && batch?.commandReady && batch.grant) {
+              const command = await next.claimBatch();
+              if (command) {
+                const result = await GeoPlacerPageWriter.executeBatch(
+                  command,
+                  (id) => (current === generation && next.connected() ? next.batchAllowed(command.batchId, id) : false),
+                  batch.grant
+                );
+                const ack = await next.batchResult(command.batchId, command.attemptId, result);
+                status.textContent =
+                  result === 'confirmed' && !['stopped', 'blocked'].includes(ack.state)
+                    ? `Lot : ${ack.confirmed} envoi(s) confirmé(s). Progression mesurée séparément.`
+                    : result === 'not-sent'
+                      ? 'Lot en pause : ' + (GeoPlacerPageWriter.reason?.() ?? 'pixel refusé avant envoi.')
+                      : 'Lot interrompu, résultat incertain. Aucun renvoi.';
+              }
             }
+            ticking = true;
+            const m = answer?.monitoring;
+            if (m) {
+              if (
+                !Number.isSafeInteger(m.revision) ||
+                !['running', 'paused', 'stopped'].includes(m.state) ||
+                !Number.isSafeInteger(m.intervalMs) ||
+                m.intervalMs < 5000 ||
+                m.intervalMs > 60000
+              )
+                throw new Error('Commande de surveillance invalide');
+              if (
+                m.region &&
+                (!/^[a-z][a-z0-9_-]{0,31}$/.test(m.region.id) ||
+                  !['x', 'y', 'width', 'height', 'revision'].every((k) => Number.isSafeInteger(m.region[k])))
+              )
+                throw new Error('Région reçue invalide');
+              if (!monitoring || m.revision >= monitoring.revision) {
+                if (!monitoring || m.revision > monitoring.revision) nextDue = 0;
+                monitoring = m;
+              }
+            }
+            watchStatus.textContent = `Surveillance : ${monitoring?.state === 'running' ? 'active' : monitoring?.state === 'paused' ? 'en pause' : 'arrêtée'}. Fraîcheur du cache non vérifiée.`;
+            sync.disabled = observing || monitoring?.state === 'running';
+            const once = monitoring?.once;
+            if (
+              !observing &&
+              ((monitoring?.state === 'running' && Date.now() >= nextDue) || (once && once.serial > lastOnce))
+            ) {
+              if (once) lastOnce = once.serial;
+              // Held control polling stays active during large captures; two captures never overlap.
+              void observe(true, monitoring?.region ?? null).finally(() => {
+                if (current === generation && monitoring) nextDue = Date.now() + monitoring.intervalMs;
+              });
+            }
+          } catch (error) {
+            if (current === generation) await close(error.message);
+          } finally {
+            ticking = false;
           }
-          watchStatus.textContent = `Surveillance : ${monitoring?.state === 'running' ? 'active' : monitoring?.state === 'paused' ? 'en pause' : 'arrêtée'}. Fraîcheur du cache non vérifiée.`;
-          sync.disabled = observing || monitoring?.state === 'running';
-          const once=monitoring?.once;
-          if (!observing && ((monitoring?.state === 'running' && Date.now() >= nextDue) || (once && once.serial > lastOnce))) {
-            if(once)lastOnce=once.serial;
-            // Held control polling stays active during large captures; two captures never overlap.
-            void observe(true, monitoring?.region ?? null).finally(() => {
-              if(current===generation && monitoring)nextDue=Date.now()+monitoring.intervalMs;
-            });
-          }
-        } catch (error) {
-          if (current === generation) await close(error.message);
-        } finally { ticking = false; }
-       }
+        }
       }
       void pulse();
     } catch (error) {
@@ -186,8 +235,10 @@
         status.textContent = `Observation confirmée${result.cacheStats ? ` : ${result.cacheStats.known} pixels connus, ${result.cacheStats.unknown} inconnus.` : '.'}`;
     } catch (error) {
       if (current === generation) {
-        if(error.name==='AbortError') { abortedCapture=error.captureId;status.textContent='Capture interrompue ; bandes partielles conservées avec leurs dates.'; }
-        else await close(error.message);
+        if (error.name === 'AbortError') {
+          abortedCapture = error.captureId;
+          status.textContent = 'Capture interrompue ; bandes partielles conservées avec leurs dates.';
+        } else await close(error.message);
       }
     } finally {
       if (current === generation) {

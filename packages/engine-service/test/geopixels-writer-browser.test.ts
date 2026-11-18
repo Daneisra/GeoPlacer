@@ -64,6 +64,11 @@ async function setup(
     const source = await readFile(new URL('../../..//browser/geopixels-writer.js', import.meta.url), 'utf8');
     vm.runInContext(source + '\nglobalThis.writer=GeoPlacerPageWriter;', context);
     const writer = context.writer as {
+        executeBatch: (
+            c: Command & { batchId: string },
+            allowed: (id: string) => Promise<boolean>,
+            grant: object
+        ) => Promise<string>;
         execute: (c: Command, allowed: (id: string) => Promise<boolean>, trusted: boolean) => Promise<string>;
         stop: () => void;
         reason: () => string | null;
@@ -194,5 +199,82 @@ describe('Browser-only single pixel writer; all fetches are local mocks', () => 
         };
         expect(await s.writer.execute(s.command, s.allowed, true)).toBe('not-sent');
         expect(s.fetch).not.toHaveBeenCalled();
+    });
+});
+
+function lot(s: Awaited<ReturnType<typeof setup>>) {
+    const id = '8c555673-b6ee-4c25-8a33-84b90e84d6c4';
+    const commands = Array.from({ length: 5 }, (_, i) => ({
+        ...s.command,
+        batchId: id,
+        attemptId: `64de9aa7-8259-4f7d-98b5-5a861ca8b3f${i}`,
+        gridX: 999 + (i % 3),
+        gridY: 1001 - Math.floor(i / 3),
+    }));
+    const grant = {
+        id,
+        digest: 'a'.repeat(64),
+        project: s.command.project,
+        expires: Date.now() + 110000,
+        writes: commands.map((c) => ({ gridX: c.gridX, gridY: c.gridY, color: c.color })),
+    };
+    return { commands, grant };
+}
+describe('Browser writer with one explicit bounded batch approval', () => {
+    it('sends five unique single-pixel requests without per-pixel confirmation; refuses duplicate target even with a new attempt', async () => {
+        const s = await setup(),
+            b = lot(s);
+        for (const c of b.commands) expect(await s.writer.executeBatch(c, s.allowed, b.grant)).toBe('confirmed');
+        expect(s.fetch).toHaveBeenCalledTimes(5);
+        expect(s.context.confirm).not.toHaveBeenCalled();
+        expect(s.sent.every((x) => (x.body.Pixels as unknown[]).length === 1)).toBe(true);
+        expect(
+            await s.writer.executeBatch(
+                { ...b.commands[0]!, attemptId: '74de9aa7-8259-4f7d-98b5-5a861ca8b3fe' },
+                s.allowed,
+                b.grant
+            )
+        ).toBe('not-sent');
+        expect(s.fetch).toHaveBeenCalledTimes(5);
+    });
+    it('uses a conservative energy budget even when the site counter is not updated', async () => {
+        const s = await setup({ energy: 1 }),
+            b = lot(s);
+        expect(await s.writer.executeBatch(b.commands[0]!, s.allowed, b.grant)).toBe('confirmed');
+        expect(await s.writer.executeBatch(b.commands[1]!, s.allowed, b.grant)).toBe('not-sent');
+        expect(s.fetch).toHaveBeenCalledTimes(1);
+    });
+    it('rechecks owned colors, session, queue and channel before each request', async () => {
+        const s = await setup(),
+            b = lot(s);
+        expect(await s.writer.executeBatch(b.commands[0]!, s.allowed, b.grant)).toBe('confirmed');
+        s.context.userData = { colors: [] };
+        expect(await s.writer.executeBatch(b.commands[1]!, s.allowed, b.grant)).toBe('not-sent');
+        s.context.userData = { colors: [s.command.color] };
+        expect(await s.writer.executeBatch(b.commands[1]!, async () => false, b.grant)).toBe('not-sent');
+        s.context.userID = 124;
+        expect(await s.writer.executeBatch(b.commands[1]!, s.allowed, b.grant)).toBe('not-sent');
+        expect(s.fetch).toHaveBeenCalledTimes(1);
+    });
+    it.each(['too-many', 'outside-scope', 'expired', 'unknown-field'])(
+        'rejects invalid batch scope: %s',
+        async (kind) => {
+            const s = await setup(),
+                b = lot(s);
+            let grant: object = b.grant;
+            if (kind === 'too-many') grant = { ...b.grant, writes: [...b.grant.writes, b.grant.writes[0]] };
+            if (kind === 'outside-scope') grant = { ...b.grant, writes: [b.grant.writes[1]] };
+            if (kind === 'expired') grant = { ...b.grant, expires: Date.now() - 1 };
+            if (kind === 'unknown-field') grant = { ...b.grant, url: 'https://example.invalid' };
+            expect(await s.writer.executeBatch(b.commands[0]!, s.allowed, grant)).toBe('not-sent');
+            expect(s.fetch).not.toHaveBeenCalled();
+        }
+    );
+    it('never repeats an ambiguous native send', async () => {
+        const s = await setup({ lost: true }),
+            b = lot(s);
+        expect(await s.writer.executeBatch(b.commands[0]!, s.allowed, b.grant)).toBe('uncertain');
+        expect(await s.writer.executeBatch(b.commands[0]!, s.allowed, b.grant)).toBe('not-sent');
+        expect(s.fetch).toHaveBeenCalledTimes(1);
     });
 });

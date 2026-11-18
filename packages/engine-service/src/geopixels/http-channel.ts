@@ -37,6 +37,7 @@ export class ConnectorHttpChannel {
   ) {
     check(approvalKey === undefined || /^[a-f0-9]{64}$/.test(approvalKey), 'invalid local approval key');
     this.controlKey = approvalKey ?? null;
+    this.writer?.batch.subscribe(()=>this.session?.releasePoll?.());
   }
   control(key: string): void {
     check(this.controlKey !== null && equal(key, this.controlKey), 'local approval key required');
@@ -92,6 +93,11 @@ export class ConnectorHttpChannel {
     s.lastSeen = this.now();
     return this.writer;
   }
+  claimBatch(capability:string){return this.writerAccess(capability).batch.claim();}
+  batchAllowed(capability:string,batchId:string,attemptId:string){const b=this.writerAccess(capability).batch;return {allowed:b.view().id===batchId && b.allowed(attemptId)};}
+  batchResult(capability:string,batchId:string,attemptId:string,result:'confirmed'|'not-sent'|'uncertain'){
+    const b=this.writerAccess(capability).batch;check(b.view().id===batchId,'batch result mismatch');return b.result(attemptId,result);
+  }
   claimPixel(capability: string) { return this.writerAccess(capability).claim(); }
   pixelAllowed(capability: string, attemptId: string) {
     const view = this.writerAccess(capability).view();
@@ -112,7 +118,7 @@ export class ConnectorHttpChannel {
   }
     status(
         capability: string,
-        readerVersion?: 3 | 4,
+        readerVersion?: 3 | 4 | 5,
         ack?: { revision: number; state: 'running' | 'paused' | 'stopped' },
         abortedCapture?: string
     ) {
@@ -120,9 +126,9 @@ export class ConnectorHttpChannel {
         s.lastSeen = this.now();
         if (s.approved) {
             this.provider.heartbeat();
-            this.provider.monitoring.capabilities(readerVersion === 3 || readerVersion === 4, readerVersion === 4);
+            this.provider.monitoring.capabilities(readerVersion === 3 || readerVersion === 4 || readerVersion === 5, readerVersion === 4 || readerVersion === 5);
             if (abortedCapture) {
-                check(readerVersion === 4, 'regional reader required');
+                check(readerVersion === 4 || readerVersion === 5, 'regional reader required');
                 this.provider.monitoring.abortCapture(abortedCapture);
             }
             if (ack) this.provider.monitoring.acknowledge(ack.revision, ack.state);
@@ -132,8 +138,9 @@ export class ConnectorHttpChannel {
             expires: s.deadline,
             lastSequence: s.lastSequence,
             fingerprint: s.fingerprint,
-            ...(readerVersion === 4 ? { regionalProtocol: 1 } : {}),
-            ...(readerVersion === 3 || readerVersion === 4
+            ...([4,5].includes(readerVersion??0) ? { regionalProtocol: 1 } : {}),
+            ...(readerVersion===5?{batchProtocol:1,batch:this.writer?{...this.writer.batch.view(),grant:this.writer.batch.grant()}:null}:{}),
+            ...(readerVersion === 3 || readerVersion === 4 || readerVersion === 5
                 ? { monitoring: this.provider.monitoring.control(), pacing: 'server-50ms' }
                 : {}),
         };
@@ -141,12 +148,13 @@ export class ConnectorHttpChannel {
     /** One bounded held HTTP response. No browser timer, no permission renewal beyond deadline. */
     async poll(
         capability: string,
-        readerVersion: 3 | 4,
+        readerVersion: 3 | 4 | 5,
         ack: { revision: number; state: 'running' | 'paused' | 'stopped' } | undefined,
         signal: AbortSignal,
         abortedCapture?: string
     ) {
-        this.status(capability, readerVersion, ack, abortedCapture);
+        const initial=this.status(capability, readerVersion, ack, abortedCapture);
+        if(initial.batch?.commandReady)return initial;
         const s = this.session!;
         check(!s.releasePoll, 'concurrent reader poll');
         await new Promise<void>((resolve) => {

@@ -1,6 +1,6 @@
-# Lecteur GeoPixels HTTP — observations et essai d’un pixel
+# Lecteur GeoPixels HTTP — observations et petits lots contrôlés
 
-Version du lecteur : **0.5.2**, serveur Phase 2F local. Le lecteur reste passif par défaut et conserve les observations régionales du protocole 1 ; les lecteurs 0.3.1/0.4.0 restent compatibles pour leurs observations respectives. Le port écrivain séparé prépare seulement un essai d'un pixel soumis à confirmation explicite dans le dashboard **et** dans le navigateur. Un placement réel unique a été confirmé par l'utilisateur le **18 novembre 2026**, puis relu avec **1 pixel correct, 37 incorrects et 0 inconnu**. Cette validation ne couvre pas un dessin continu ni la réconciliation réelle après perte de réponse. Aucun achat testé. Voir la [recette et les limites de cet essai](RAPPORT-PHASE2F.md). Main fournit toujours la RC de démonstration sans connecteur expérimental.
+Version du lecteur : **0.6.0**, serveur Phase 2G local. Les observations restent passives par défaut et les anciens lecteurs restent compatibles en lecture. Un port écrivain séparé permet un lot explicitement autorisé de **1 à 5 pixels**, ou l’ancien essai unitaire dans les options. Aucun achat. La session du site reste dans le navigateur. Le lot réel de cinq pixels reste à valider par l’utilisateur ; seul l’essai réel unitaire 2F a été confirmé.
 
 ## Installation et lancement
 
@@ -120,3 +120,15 @@ Pour Firefox, définir aussi `GEOPLACER_BROWSER_ENGINE=firefox` et `PLAYWRIGHT_B
 Le **17 novembre 2026**, l'utilisateur confirme le lecteur **0.4.0** sur le véritable GeoPixels : deux régions 4×5 du fantôme asymétrique 8×5, captures automatiques, bonne position relative et absence d'inversion. Sur le code final `03dfa09`, il confirme la pause avec expiration des 38 cibles après au moins 35 s, la reprise vers 0 correct / 38 incorrects / 0 inconnu dans la zone vide, puis l'arrêt et la révocation. La source reste explicitement non datée. La restauration des régions après redémarrage est volontaire ; aucune capacité n'est restaurée.
 
 Cette validation ne certifie ni une actualisation côté service, ni les grandes dimensions, ni une modification extérieure réelle de pixels. Ces variantes disposent de tests locaux distincts. Le compteur d'octets JSON du panneau porte sur les observations uniques acceptées, hors renvois identiques et en-têtes HTTP.
+
+
+## Premier lot réel — cinq pixels maximum (Phase 2G)
+
+1. Installer le lecteur **0.6.0**, coupler le navigateur, observer le fantôme puis lier le bon modèle. Le bouton « Utiliser le modèle de test 8 × 5 » restaure la fixture si nécessaire. Arrêter les autres bots et vider la file native de placement.
+2. Dans « Dessiner un petit lot », garder **5** puis cliquer **Préparer le lot**. Vérifier chaque coordonnée native et code couleur du tableau, ainsi que le modèle, la position et la couche de base.
+3. **S’arrêter ici jusqu’à l’accord explicite de l’utilisateur sur ce lot et sa destination.** Après cet accord seulement : cliquer **Autoriser et démarrer le lot**. Les pixels s’enchaînent sans autre confirmation ; garder le lecteur ouvert. Ne pas utiliser le bouton d’essai unitaire.
+4. Vérifier le nombre d’**envois confirmés**, puis **Observer le modèle** pour mesurer séparément la progression. Pause, reprise du même lot et arrêt immédiat sont disponibles. Révoquer ensuite le canal.
+
+L’autorisation dure deux minutes maximum ; le couplage conserve sa limite absolue de dix minutes. Un délai minimal d’une seconde sépare deux envois terminés. Chaque envoi exige une observation non expirée de sa cible et les vérifications navigateur (énergie, couleur possédée, file native vide, session, modèle, position et couche inchangés). Le budget de ressources côté moteur est une autorisation locale, **pas l’énergie du compte**. Le navigateur ne crédite aucune régénération pendant ces essais ; recharger avant un nouveau lot si son budget conservateur est épuisé.
+
+Un résultat manquant ou ambigu arrête le lot et conserve la réservation incertaine. Aucun renvoi aveugle, même après redémarrage. Une réponse `Ok` confirme l’envoi, sans modifier le cache ni la progression observée. Les confirmations durables excluent ces cibles d’un nouveau lot si un ancien cache est relu. La réconciliation exige une source datée postérieure à l’interruption ; le cache réel actuellement non daté ne suffit pas. Un redémarrage ne restaure aucune autorisation : les cibles confirmées sont conservées et les restantes demandent un nouvel accord. L’arrêt ne peut pas annuler une requête déjà partie.

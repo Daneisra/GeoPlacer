@@ -384,7 +384,8 @@ export class EngineService {
         this.connectorHistory = new FileHistoryStore(lock, { namespace: 'geopixels' });
         this.singlePixelWriter = new SinglePixelWriter(lock, this.connector,
             () => !this.closed && this.source === 'geopixels' && !this.active && !this.stopping && !this.connectorControl && !this.backingUp && this.attempts?.open().length === 0 ? this.selectedTemplate : null,
-            value => this.durableConnectorJson('connector-writer-intent.json', value));
+            value => this.durableConnectorJson('connector-writer-intent.json', value), Date.now,
+            value => this.durableConnectorJson('connector-batch.json', value));
         this.connector.monitoring.subscribe((kind) => {
             this.hub.connector();
             if (kind === 'capture') {
@@ -482,7 +483,10 @@ export class EngineService {
             let writerIntent: unknown = null;
             try { writerIntent = JSON.parse(await readFile(path.join(root, 'connector-writer-intent.json'), 'utf8')); }
             catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-            await service.singlePixelWriter.open(writerIntent);
+            let batch: unknown = null;
+            try {batch=JSON.parse(await readFile(path.join(root,'connector-batch.json'),'utf8'));}
+            catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
+            await service.singlePixelWriter.open(writerIntent,batch);
             return service;
         } catch (error) {
             await lock.release();
@@ -775,7 +779,7 @@ export class EngineService {
     check(source === 'simulation' || source === 'geopixels', 'invalid source');
     if (source === this.source) return { changed: false, status: this.status() };
     this.requireIdle('changing the canvas provider');
-    check(this.singlePixelWriter.view().open === 0, 'reconcile or cancel the single pixel before changing source');
+    check(!this.singlePixelWriter.view().locked, 'reconcile or cancel the single pixel before changing source');
     check(this.attempts.open().length === 0, 'reconcile open attempts before changing source');
     this.connectorControl = true;
     try {
@@ -872,6 +876,7 @@ export class EngineService {
         return {
             ...this.connector.status(),
             singlePixel: this.singlePixelWriter.view(),
+            batch: this.singlePixelWriter.batch.view(),
             error: this.connector.status().error ?? calculationError,
             bound,
             source: this.source,
@@ -927,7 +932,7 @@ export class EngineService {
     }
 
   private async startNow(): Promise<CommandResult> {
-    check(this.singlePixelWriter.view().open === 0, 'reconcile or cancel the single pixel before starting the scheduler');
+    check(!this.singlePixelWriter.view().locked, 'reconcile or cancel the single pixel before starting the scheduler');
     check(!this.connectorControl, 'provider control in progress');
     if (this.stopping !== null) throw new EngineServiceError('ENGINE_BUSY', 409, 'a stop is in progress');
     if (this.active) {
@@ -1080,7 +1085,7 @@ export class EngineService {
     const info = await this.templateInfoOf(templateId);
     if (this.settingsValue.selection?.templateId === templateId) return { changed: false, status: this.status() };
     this.requireIdle('changing the template');
-    check(this.singlePixelWriter.view().open === 0, 'reconcile or cancel the single pixel before changing model');
+    check(!this.singlePixelWriter.view().locked, 'reconcile or cancel the single pixel before changing model');
     this.connector.monitoring.stop('Modèle local modifié : nouvelle liaison nécessaire.');
     if (this.source === 'simulation') this.assertInsideCanvas(info.width, info.height, info.placement?.x ?? 0, info.placement?.y ?? 0);
     await this.saveSettingsValue({ ...this.settingsValue, selection: { templateId } });
@@ -1099,7 +1104,7 @@ export class EngineService {
    */
   async moveTemplate(templateId: string, x: number, y: number): Promise<TemplateInfo> {
     this.guard();
-    check(this.singlePixelWriter.view().open === 0, 'reconcile or cancel the single pixel before moving the model');
+    check(!this.singlePixelWriter.view().locked, 'reconcile or cancel the single pixel before moving the model');
     const info = await this.templateInfoOf(templateId);
     this.assertInsideCanvas(info.width, info.height, x, y);
     await this.templates.revise(this.ref(templateId), { placement: { topLeft: { x, y } } });
@@ -1585,7 +1590,7 @@ export class EngineService {
     if (this.backingUp || this.compacting) throw new EngineServiceError('ENGINE_BUSY', 409, 'a backup or a compaction is already in progress');
     this.backingUp = true;
     try {
-      if (this.singlePixelWriter.view().open > 0) await this.singlePixelWriter.stop('Sauvegarde : autorisation retirée, envoi commencé à réconcilier.');
+      if (this.singlePixelWriter.view().locked) await this.singlePixelWriter.stop('Sauvegarde : autorisation retirée, envoi commencé à réconcilier.');
       await this.checkpointing;
       let result: { dir: string; manifest: BackupManifest };
       try {

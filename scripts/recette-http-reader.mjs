@@ -10,6 +10,7 @@ export async function runHttpReaderRecipe({ browser, page, api, base, approvalKe
   page.on('response',trace);
   const { PNG } = createRequire(path.join(repo, 'package.json'))('pngjs');
   const png = PNG.sync.read(readFileSync(path.join(repo, 'public/fixtures/geoplacer-8x5.png')));
+  const owned=[...new Set(Array.from({length:40},(_,i)=>png.data[i*4+3]===255 ? (png.data[i*4]<<16)|(png.data[i*4+1]<<8)|png.data[i*4+2] : 0))];
   assert.equal(png.width, 8); assert.equal(png.height, 5);
   await api('connector/source', { source: 'geopixels' });
   await page.reload();
@@ -31,7 +32,7 @@ export async function runHttpReaderRecipe({ browser, page, api, base, approvalKe
   const html = `<!doctype html><html><head><style nonce="geoplacer-fixture-style">aside,button,p { all:unset!important; }</style></head><body><h1>LOCAL CSP FIXTURE — no GeoPixels connection</h1><script>
 let ghostImageOriginalData = new ImageData(new Uint8ClampedArray(${JSON.stringify([...png.data])}),8,5);
 let ghostImageTopLeft = {gridX:999,gridY:1001}; let ghostActivePaletteColors = new Set();
-let tileImageCache = new Map(); let userID=7; let userData={colors:'0,16777215'}; let Colors=['#000000','#ffffff'];
+let tileImageCache = new Map(); let userID=7; let userData={colors:'${owned.join(',')}'}; let Colors=['#000000','#ffffff'];
 let tokenUser='synthetic-browser-fixture-only', subject='synthetic-browser-subject';
 let currentEnergy=10, queuedPixelsObjects=new Map(), isPlacingRequestInProgress=false;
 function getSelectedEventId(){return null;}
@@ -270,30 +271,65 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     await reader.evaluate(()=>{
       const entry=tileImageCache.get('0,1000');
       entry.colorBitmap.getContext('2d').clearRect(999,1,1,1);
-      globalThis.fixtureSiteCalls=0;
+      globalThis.fixtureSiteCalls=0;globalThis.fixtureWrites=[];
       globalThis.fetch=async(url,options)=>{
         if(url!==location.origin+'/PlacePixels' || JSON.parse(options.body).Pixels.length!==1)
           throw new Error('Unexpected fixture site operation');
-        globalThis.fixtureSiteCalls++;
+        globalThis.fixtureSiteCalls++;globalThis.fixtureWrites.push(JSON.parse(options.body).Pixels[0]);
         return new Response('Ok',{status:200});
       };
     });
     await reader.getByRole('button',{name:'Observer le modèle',exact:true}).click();
     await page.locator('#observedIncorrect').filter({hasText:/^1$/}).waitFor();
+    await page.getByText('Essai unitaire (ancien parcours)',{exact:true}).click();
     const pixelPanel=page.getByRole('group',{name:/3. Tester un pixel/});
     await pixelPanel.getByRole('button',{name:'Préparer un pixel',exact:true}).click();
     await pixelPanel.getByText('Préparée — réservation durable',{exact:true}).waitFor();
     await pixelPanel.getByRole('button',{name:'Autoriser ce pixel',exact:true}).click();
+    await reader.getByText('Options du lecteur',{exact:true}).click();
     reader.once('dialog',dialog=>dialog.accept());
     await reader.getByRole('button',{name:'Placer le pixel préparé',exact:true}).click();
     await pixelPanel.getByText('Confirmée',{exact:true}).waitFor();
     assert.equal(await reader.evaluate(()=>globalThis.fixtureSiteCalls),1);
+    await reader.getByText('Options du lecteur',{exact:true}).click();
     assert.equal((await api('connector/status',undefined,'GET')).progress.incorrect,1);
     await reader.evaluate(()=>loadFixtureTiles());
     await reader.getByRole('button',{name:'Observer le modèle',exact:true}).click();
     await page.locator('#observedCorrect').filter({hasText:/^38$/}).waitFor();
     await pixelPanel.getByRole('button',{name:'Arrêter l’essai',exact:true}).click();
     record('OK single-pixel dashboard and trusted browser confirmation; site fetch STUB ONLY, independent reader progress, stop available');
+    // Approved five-pixel batch: actual HTTP routes and generated userscript, native fetch STUB ONLY.
+    await page.getByText('Essai unitaire (ancien parcours)',{exact:true}).click();
+    await reader.evaluate(()=>{
+      for(const entry of tileImageCache.values())entry.colorBitmap.getContext('2d').clearRect(0,0,1000,1000);
+      globalThis.fixtureWrites=[];
+    });
+    await reader.getByRole('button',{name:'Observer le modèle',exact:true}).click();
+    await page.locator('#observedIncorrect').filter({hasText:/^38$/}).waitFor();
+    const batchPanel=page.getByRole('group',{name:/3. Dessiner un petit lot/});
+    await batchPanel.getByRole('button',{name:'Préparer le lot',exact:true}).click();
+    await page.locator('[data-batch-state="prepared"]').waitFor();
+    assert.equal(await batchPanel.locator('tbody tr').count(),5);
+    let unexpectedDialogs=0;
+    const rejectDialog=dialog=>{unexpectedDialogs++;void dialog.dismiss();};
+    reader.on('dialog',rejectDialog);
+    await batchPanel.getByRole('button',{name:'Autoriser et démarrer le lot',exact:true}).click();
+    await page.locator('[data-batch-state="completed"]').waitFor();
+    reader.off('dialog',rejectDialog);assert.equal(unexpectedDialogs,0);
+    const batchStatus=await api('connector/status',undefined,'GET');
+    assert.equal(batchStatus.batch.confirmed,5);
+    assert.equal(await reader.evaluate(()=>globalThis.fixtureSiteCalls),6);
+    assert.equal(batchStatus.progress.correct,0); // An ACK never changes the observed bitmap.
+    await reader.evaluate(()=>{
+      for(const w of globalThis.fixtureWrites){
+        const tx=Math.floor(w.GridX/1000)*1000,ty=Math.floor(w.GridY/1000)*1000;
+        const ctx=tileImageCache.get(tx+','+ty).colorBitmap.getContext('2d');
+        ctx.fillStyle='#'+w.Color.toString(16).padStart(6,'0');ctx.fillRect(w.GridX-tx,w.GridY-ty,1,1);
+      }
+    });
+    await reader.getByRole('button',{name:'Observer le modèle',exact:true}).click();
+    await page.locator('#observedCorrect').filter({hasText:/^5$/}).waitFor();
+    record('OK one dashboard authorization, five sequential native-stub sends, no per-pixel dialog, five durable confirmations, independent recapture measures progress');
     await reader.screenshot({ path: path.join(out, 'http-reader-local-fixture.png'), fullPage: true });
     await page.screenshot({ path: path.join(out, 'http-dashboard-local-fixture.png'), fullPage: true });
     await reader.getByText('Options du lecteur',{exact:true}).click();

@@ -3,7 +3,11 @@ const GeoPlacerPageWriter = (() => {
     let busy = false,
         dispatched = false,
         controller = null,
-        lastReason = null;
+        lastReason = null,
+        energyCeiling = null,
+        energySpent = 0,
+        executionSession = null;
+    const batchTargets = new Set();
     const refuse = (reason) => {
         lastReason = reason;
         return 'not-sent';
@@ -29,9 +33,18 @@ const GeoPlacerPageWriter = (() => {
         !Array.isArray(o) &&
         Object.keys(o).length === keys.length &&
         keys.every((k) => Object.hasOwn(o, k));
-    function valid(c) {
+    function valid(c, batch = false) {
         if (
-            !exact(c, ['protocol', 'attemptId', 'project', 'gridX', 'gridY', 'color', 'deadline']) ||
+            !exact(c, [
+                'protocol',
+                'attemptId',
+                'project',
+                'gridX',
+                'gridY',
+                'color',
+                'deadline',
+                ...(batch ? ['batchId'] : []),
+            ]) ||
             c.protocol !== 1 ||
             !/^[a-f0-9-]{36}$/.test(c.attemptId) ||
             ![c.gridX, c.gridY, c.color, c.deadline].every(Number.isSafeInteger) ||
@@ -53,6 +66,35 @@ const GeoPlacerPageWriter = (() => {
             c.gridY > p.gridY - p.height
         );
     }
+    function validGrant(c, grant) {
+        return (
+            exact(grant, ['id', 'digest', 'expires', 'project', 'writes']) &&
+            /^[a-f0-9-]{36}$/.test(grant.id) &&
+            grant.id === c.batchId &&
+            /^[a-f0-9]{64}$/.test(grant.digest) &&
+            Number.isSafeInteger(grant.expires) &&
+            grant.expires > Date.now() &&
+            grant.expires <= Date.now() + 120000 &&
+            exact(grant.project, ['id', 'generation', 'width', 'height', 'gridX', 'gridY', 'layer']) &&
+            Object.keys(grant.project).every((k) => grant.project[k] === c.project[k]) &&
+            Array.isArray(grant.writes) &&
+            grant.writes.length >= 1 &&
+            grant.writes.length <= 5 &&
+            grant.writes.every(
+                (w) =>
+                    exact(w, ['gridX', 'gridY', 'color']) &&
+                    [w.gridX, w.gridY, w.color].every(Number.isSafeInteger) &&
+                    w.color >= 0 &&
+                    w.color <= 0xffffff &&
+                    w.gridX >= c.project.gridX &&
+                    w.gridX < c.project.gridX + c.project.width &&
+                    w.gridY <= c.project.gridY &&
+                    w.gridY > c.project.gridY - c.project.height
+            ) &&
+            new Set(grant.writes.map((w) => w.gridX + ',' + w.gridY)).size === grant.writes.length &&
+            grant.writes.some((w) => w.gridX === c.gridX && w.gridY === c.gridY && w.color === c.color)
+        );
+    }
     function readinessReason() {
         if (
             typeof tokenUser !== 'string' ||
@@ -64,9 +106,17 @@ const GeoPlacerPageWriter = (() => {
             userID <= 0
         )
             return 'Session de la page indisponible pour le placement. Aucun identifiant à transmettre.';
+        if (
+            executionSession &&
+            (executionSession.user !== userID ||
+                executionSession.token !== tokenUser ||
+                executionSession.subject !== subject)
+        )
+            return 'Session de la page modifiée : recharger et refaire le couplage.';
         if (typeof currentEnergy !== 'number' || !Number.isFinite(currentEnergy))
             return 'Énergie de la page indisponible.';
-        if (currentEnergy < 1) return 'Énergie insuffisante pour un pixel.';
+        if (currentEnergy < 1 || (energyCeiling !== null && Math.min(currentEnergy, energyCeiling - energySpent) < 1))
+            return 'Énergie insuffisante pour poursuivre ce lot.';
         if (ownedColors() === null) return 'Format des couleurs du compte non reconnu.';
         if (typeof queuedPixelsObjects === 'undefined' || typeof queuedPixelsObjects.size !== 'number')
             return 'File native GeoPixels indisponible.';
@@ -76,7 +126,8 @@ const GeoPlacerPageWriter = (() => {
         if (isPlacingRequestInProgress) return 'Un placement GeoPixels est déjà en cours.';
         return null;
     }
-    return {
+    const api = {
+        executeBatch: (c, allowed, grant) => api.execute(c, allowed, false, grant),
         stop: () => controller?.abort(),
         reason: () => lastReason,
         inspect: () => {
@@ -94,19 +145,25 @@ const GeoPlacerPageWriter = (() => {
                 return 'Placement : vérification locale indisponible ; aucun envoi lancé.';
             }
         },
-        async execute(c, allowed, trusted) {
+        async execute(c, allowed, trusted, grant) {
+            const batch = grant !== undefined;
             lastReason = null;
             if (!['https://geopixels.net', 'https://www.geopixels.net'].includes(location.origin))
                 return refuse('Origine de page refusée.');
-            if (!trusted) return refuse('Cliquez vous-même sur le bouton de placement.');
+            if (!batch && !trusted) return refuse('Cliquez vous-même sur le bouton de placement.');
             if (busy) return refuse('Un essai est déjà en cours.');
-            if (dispatched) return refuse('Un essai a déjà été envoyé dans cette page. Aucun second envoi.');
-            if (!valid(c))
+            if (!batch && dispatched) return refuse('Un essai a déjà été envoyé dans cette page. Aucun second envoi.');
+            if (!valid(c, batch))
                 return refuse(
                     c?.deadline <= Date.now()
                         ? 'Autorisation expirée : préparez un nouveau pixel.'
                         : 'Commande ou modèle différent de la page observée. Refaites une observation.'
                 );
+            if (
+                batch &&
+                (!validGrant(c, grant) || batchTargets.has(c.batchId + '/' + c.gridX + ',' + c.gridY + ':' + c.color))
+            )
+                return refuse('Pixel hors du lot autorisé ou déjà envoyé.');
             busy = true;
             let sent = false,
                 timer;
@@ -126,6 +183,7 @@ const GeoPlacerPageWriter = (() => {
                     return refuse('Cette couleur ne figure pas dans les couleurs du compte.');
                 const color = '#' + c.color.toString(16).padStart(6, '0');
                 if (
+                    !batch &&
                     !confirm(
                         `ESSAI RÉEL UNIQUE — GeoPixels\nCouche : base\nPixel (${c.gridX}, ${c.gridY})\nCouleur : ${color}\nCoût : 1 énergie\nConfirmer uniquement après accord sur cette destination. Aucun achat.`
                     )
@@ -134,7 +192,7 @@ const GeoPlacerPageWriter = (() => {
                 // Re-check after the dialog and the local authorization request. A stop revokes this check.
                 if (!(await allowed(c.attemptId)))
                     return refuse('Autorisation locale retirée ou expirée : préparez un nouveau pixel.');
-                if (!(await GeoPlacerPageReader.unchanged()) || !valid(c))
+                if (!(await GeoPlacerPageReader.unchanged()) || !valid(c, batch) || (batch && !validGrant(c, grant)))
                     return refuse('Modèle modifié ou autorisation expirée pendant la confirmation.');
                 const finalReason = readinessReason();
                 if (finalReason) return refuse(finalReason);
@@ -147,7 +205,11 @@ const GeoPlacerPageWriter = (() => {
                 sessionStorage.setItem(key, JSON.stringify([...ids, c.attemptId]));
                 controller = new AbortController();
                 timer = setTimeout(() => controller?.abort(), 10000);
-                dispatched = true;
+                if (!batch) dispatched = true;
+                if (energyCeiling === null) energyCeiling = currentEnergy;
+                if (executionSession === null) executionSession = { user: userID, token: tokenUser, subject };
+                energySpent++;
+                if (batch) batchTargets.add(c.batchId + '/' + c.gridX + ',' + c.gridY + ':' + c.color);
                 sent = true;
                 // Fixed same-origin endpoint, single pixel, no redirects, no retry. No queue or bitmap mutation.
                 const response = await fetch(location.origin + '/PlacePixels', {
@@ -176,4 +238,5 @@ const GeoPlacerPageWriter = (() => {
             }
         },
     };
+    return api;
 })();

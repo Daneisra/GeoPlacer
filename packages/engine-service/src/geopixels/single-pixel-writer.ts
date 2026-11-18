@@ -9,6 +9,7 @@ import {
     type ResourceRules,
     type ResourceManager,
     type Template,
+    taskIdOf,
 } from '@geoplacer/core';
 import {
     FileAttemptJournal,
@@ -16,6 +17,7 @@ import {
     nodeSha256Hasher,
     type DataDirectoryLock,
 } from '@geoplacer/adapters-node';
+import { ControlledBatch } from './controlled-batch.js';
 import { check, type BrowserProject } from './protocol.js';
 import { nativePoint, type GeoPixelsProvider } from './provider.js';
 
@@ -38,14 +40,14 @@ type Intent = {
 const AGENT = 'single-pixel-authorization' as AgentId;
 // Local execution allowance, NOT a report or prediction of GeoPixels account resources.
 // Real energy, availability and owned color are checked again inside the browser.
-function allowance(template: Template): ResourceRules {
+function allowance(template: Template, capacity = 1): ResourceRules {
     return {
         schemaVersion: 1,
         id: 'single-pixel-local-allowance',
         version: 1,
         energy: {
             costPerPixel: 1,
-            baseCapacity: 1,
+            baseCapacity: capacity,
             regenAmount: 1,
             regenIntervalMs: Number.MAX_SAFE_INTEGER,
             aboveCapacity: 'cap',
@@ -73,6 +75,7 @@ const INITIAL: ResourceRules = {
 
 /** One-shot coordinator over the shared core planner/journal. No paint loop or retry queue. */
 export class SinglePixelWriter {
+    readonly batch: ControlledBatch;
     private readonly journal: FileAttemptJournal;
     private readonly history: FileHistoryStore;
     private resources = createResourceManager(INITIAL);
@@ -95,7 +98,10 @@ export class SinglePixelWriter {
         private readonly provider: GeoPixelsProvider,
         private readonly template: () => Template | null,
         private readonly save: (value: Intent) => Promise<void>,
-        private readonly now = Date.now
+        private readonly now = Date.now,
+        saveBatch: (value: unknown) => Promise<void> = async () => {
+            throw new Error('batch storage unavailable');
+        }
     ) {
         this.journal = new FileAttemptJournal(lock, { namespace: 'geopixels-writer' });
         this.history = new FileHistoryStore(lock, { namespace: 'geopixels-writer' });
@@ -105,13 +111,60 @@ export class SinglePixelWriter {
             resources: this.resourcePort,
             newAttemptId: () => randomUUID() as AttemptId,
         });
+        this.batch = new ControlledBatch({
+            provider,
+            attempts: this.attempts,
+            resources: this.resourcePort,
+            agent: AGENT,
+            template,
+            save: saveBatch,
+            initialize: (t, n) => {
+                this.resources = createResourceManager(allowance(t, n));
+            },
+            legacy: () => {
+                const i = this.intent,
+                    a = i ? this.attempts.get(i.attemptId as AttemptId) : null;
+                if (!i || a?.state !== 'finished' || !('applied' in a) || a.applied !== 1 || a.reconciled) return null;
+                // Import the confirmed 2F intent under its ORIGINAL model, placement and provider mode.
+                const identity = JSON.parse(i.identity) as unknown[];
+                const placement = identity[3] as Template['placement'];
+                check(
+                    Array.isArray(identity) &&
+                        identity.length === 5 &&
+                        identity[0] === a.templateId &&
+                        identity[1] === a.revision &&
+                        Number.isSafeInteger(placement?.topLeft?.x) &&
+                        Number.isSafeInteger(placement?.topLeft?.y),
+                    'invalid legacy confirmation identity'
+                );
+                const p = i.command.project,
+                    point = {
+                        x: placement.topLeft.x + i.command.gridX - p.gridX,
+                        y: placement.topLeft.y + p.gridY - i.command.gridY,
+                    };
+                return {
+                    attemptId: i.attemptId as AttemptId,
+                    identity: JSON.stringify([...identity, i.mode === 'real' ? 'read-only' : 'local-fake']),
+                    write: {
+                        point,
+                        color: i.command.color as import('@geoplacer/core').Rgb,
+                        taskId: taskIdOf(
+                            { projectId: a.projectId, id: a.templateId, revision: a.revision },
+                            point.x,
+                            point.y,
+                            i.command.color
+                        ),
+                    },
+                };
+            },
+        });
     }
     private serial<T>(fn: () => Promise<T>): Promise<T> {
         const task = this.queue.then(fn);
         this.queue = task.catch(() => undefined);
         return task;
     }
-    async open(saved: unknown): Promise<void> {
+    async open(saved: unknown, savedBatch: unknown = null): Promise<void> {
         await this.attempts.recover(this.now());
         if (saved !== null) {
             const s = saved as Intent;
@@ -125,10 +178,17 @@ export class SinglePixelWriter {
             );
             this.intent = s;
         }
-        check(this.attempts.open().length === 0 || this.intent !== null, 'missing writer identity; journal preserved');
+        await this.batch.open(savedBatch);
+        check(
+            this.attempts.open().length === 0 || this.intent !== null || savedBatch !== null,
+            'missing writer identity; journal preserved'
+        );
         // Permission is deliberately not restored. Recovered starts stay uncertain.
         this.timer = setInterval(() => {
-            void this.serial(() => this.expire()).catch(() => {
+            void this.serial(async () => {
+                await this.batch.tick();
+                if (!this.batch.busy()) await this.expire();
+            }).catch(() => {
                 this.error = 'Journal du placement indisponible ; redémarrer avant toute nouvelle opération.';
             });
         }, 1000);
@@ -167,12 +227,13 @@ export class SinglePixelWriter {
     prepare(mode: 'fake' | 'real') {
         return this.serial(async () => {
             check(
-                !this.closed && this.attempts.open().length === 0,
+                !this.closed && !this.batch.busy() && this.attempts.open().length === 0,
                 'one operation at a time; reconcile the pending pixel first'
             );
             const t = this.template();
             check(t !== null, 'select GeoPixels and stop the engine first');
             this.provider.assertBinding(t);
+            await this.batch.rememberLegacy();
             check(
                 this.provider.status().mode === (mode === 'fake' ? 'local-fake' : 'read-only'),
                 'wrong provider mode'
@@ -206,7 +267,7 @@ export class SinglePixelWriter {
                 resources: state,
                 rules,
                 maxBatch: 1,
-                inFlight: this.attempts.inFlight(),
+                inFlight: new Set([...this.attempts.inFlight(), ...this.batch.excludedFor(t)]),
                 committedEnergy: this.attempts.committedEnergy(AGENT),
                 unknownPixels: 'skip',
                 damageFloor: this.attempts.damage()?.at ?? null,
@@ -328,11 +389,13 @@ export class SinglePixelWriter {
                     [{ taskId: a.writes[0]!.taskId, status: 'applied' }],
                     this.now()
                 );
+            if (status === 'confirmed') await this.batch.rememberLegacy();
             return this.view();
         });
     }
     stop(reason = 'Arrêt immédiat demandé.') {
         return this.serial(async () => {
+            if (this.batch.busy()) await this.batch.stop(reason);
             await this.stopNow(reason);
             return this.view();
         });
@@ -360,6 +423,7 @@ export class SinglePixelWriter {
                 'source freshness unverified: cached colors cannot reconcile a real placement'
             );
             this.provider.assertBinding(t);
+            await this.batch.rememberLegacy();
             check(this.identity(t) === this.intent!.identity, 'changed reconciliation identity');
             await this.attempts.reconcile(a.attemptId, w.snapshot, this.now());
             this.error = null;
@@ -379,11 +443,13 @@ export class SinglePixelWriter {
                 false,
             reservationUnits: 'local authorization only; not account energy',
             open: this.attempts.open().length,
+            locked: this.attempts.open().length > 0 || this.batch.busy(),
         };
     }
     async close() {
         if (this.timer) clearInterval(this.timer);
         this.closed = true;
+        await this.batch.close();
         await this.stop('Arrêt du serveur : toute exécution commencée reste à réconcilier.');
         await this.journal.close();
         await this.history.close();

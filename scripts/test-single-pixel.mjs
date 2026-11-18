@@ -26,7 +26,8 @@ await once(server, 'listening');
 const base = `http://127.0.0.1:${server.address().port}/api/v1/connector`;
 const sent = [];
 let capability;
-const post = (route, body, headers = {}) => {
+const post = async (route, body, headers = {}) => {
+    await new Promise(resolve=>setTimeout(resolve,100)); // Stay within production channel rate limits.
     sent.push(JSON.stringify(body));
     return fetch(base + route, {
         method: 'POST',
@@ -185,6 +186,32 @@ try {
     passed.push('browser-only mock execution, durable result and independently observed progress');
     assert.equal(sent.join('').includes('synthetic-site-'), false);
     passed.push('site credentials never sent to local server');
+    // Same writer domain and HTTP authority; no real site request is made.
+    assert.equal((await post('/batch/prepare',{mode:'real',limit:5})).status,409);
+    assert.equal((await post('/batch/prepare',{mode:'real',limit:6},management)).status,400);
+    assert.equal((await post('/batch/prepare',{mode:'real',limit:2,url:'https://example.invalid'},management)).status,400);
+    const batch=await (await post('/batch/prepare',{mode:'real',limit:2},management)).json();
+    assert.equal(batch.total,2);assert.equal(batch.confirmed,0);
+    assert.equal((await post('/batch/approve',{batchId:batch.id,digest:'0'.repeat(64),approved:true},management)).status,409);
+    const beforeApproval=await post('/privileged/batch-claim',{protocol:1},ingress());
+    assert.ok(beforeApproval.status===409 || (await beforeApproval.json()).command===null);
+    assert.equal((await post('/batch/approve',{batchId:batch.id,digest:batch.digest,approved:true},management)).status,200);
+    for(let i=0;i<2;i++){
+        const until=Date.now()+5000;
+        while(!s.singlePixelWriter.batch.view().commandReady){assert.ok(Date.now()<until);await new Promise(r=>setTimeout(r,10));}
+        const cmd=(await (await post('/privileged/batch-claim',{protocol:1},ingress())).json()).command;
+        assert.ok(cmd && cmd.batchId===batch.id);
+        assert.equal((await post('/privileged/batch-check',{protocol:1,batchId:batch.id,attemptId:cmd.attemptId},{Authorization:'Bearer '+'0'.repeat(64)})).status,403);
+        assert.equal((await post('/privileged/batch-result',{protocol:1,batchId:batch.id,attemptId:cmd.attemptId,result:'confirmed',Token:'forbidden-field'},ingress())).status,409);
+        assert.equal((await (await post('/privileged/batch-claim',{protocol:1},ingress())).json()).command,null);
+        const body={protocol:1,batchId:batch.id,attemptId:cmd.attemptId,result:'confirmed'};
+        const ack=await (await post('/privileged/batch-result',body,ingress())).json();
+        assert.equal(ack.confirmed,i+1);
+        const replay=await (await post('/privileged/batch-result',body,ingress())).json();assert.equal(replay.confirmed,i+1);
+    }
+    assert.equal(s.singlePixelWriter.batch.view().confirmed,2);
+    assert.equal((await s.connectorView()).progress.correct,1);
+    passed.push('bounded HTTP batch, one approval, strict scope/fields, private key/capability, at-most-once claim, durable idempotent ACK and independent progress');
     const second = (await (await post('/pixel/prepare', { mode: 'real' }, management)).json()).destination;
     await post(
         '/pixel/confirm',

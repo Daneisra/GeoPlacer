@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import './ConnectorDashboard.css';
+import { BatchPanel, type BatchView } from './BatchPanel';
 import { SinglePixelPanel, type SinglePixelView } from './SinglePixelPanel';
 import { STATE_LABELS } from '../../lib/engine';
 import { translateReason } from '../../lib/i18n';
@@ -20,6 +21,7 @@ type View = {
     captureExpired: boolean;
     monitoring: Monitoring;
     singlePixel: SinglePixelView;
+    batch: BatchView;
     regionViews: RegionView[];
     savedRegionConfiguration: { available: boolean; matching: boolean; count: number };
     freshness: string;
@@ -153,7 +155,7 @@ export function ConnectorDashboard() {
                 <p>
                     {view?.mode === 'local-fake'
                         ? 'Fournisseur factice local : écritures synthétiques uniquement.'
-                        : 'Lecture du cache ; essai d’un pixel réel séparé, soumis à confirmation. Achats indisponibles.'}
+                        : 'Lecture du cache ; lots réels de cinq pixels maximum, après autorisation explicite. Achats indisponibles.'}
                 </p>
                 <p>
                     Connexion : <strong id="connectorConnection">{view?.connected ? 'Connecté' : 'Déconnecté'}</strong>{' '}
@@ -366,25 +368,37 @@ export function ConnectorDashboard() {
                     </p>
                 </details>
             </div>
-            {view?.singlePixel && (
-                <SinglePixelPanel
-                    view={view.singlePixel}
+            {view?.batch && (
+                <BatchPanel
+                    view={view.batch}
                     approvalKey={approvalKey}
                     fake={view.mode === 'local-fake'}
                     ready={view.connected && view.bound && !active}
-                    blockedReason={
-                        !view.connected
-                            ? 'Connectez le navigateur dans l’étape 1.'
-                            : !view.bound
-                              ? 'Liez le bon modèle dans l’étape 2.'
-                              : !approvalKey
-                                ? 'Saisissez la clé locale dans les réglages de connexion.'
-                                : null
-                    }
-                    refresh={async () => {
-                        setView((await engineHttp.get<View>('/connector/status')).data);
-                    }}
+                    refresh={async () => setView((await engineHttp.get<View>('/connector/status')).data)}
                 />
+            )}
+            {view?.singlePixel && (
+                <details>
+                    <summary>Essai unitaire (ancien parcours)</summary>
+                    <SinglePixelPanel
+                        view={view.singlePixel}
+                        approvalKey={approvalKey}
+                        fake={view.mode === 'local-fake'}
+                        ready={view.connected && view.bound && !active}
+                        blockedReason={
+                            !view.connected
+                                ? 'Connectez le navigateur dans l’étape 1.'
+                                : !view.bound
+                                  ? 'Liez le bon modèle dans l’étape 2.'
+                                  : !approvalKey
+                                    ? 'Saisissez la clé locale dans les réglages de connexion.'
+                                    : null
+                        }
+                        refresh={async () => {
+                            setView((await engineHttp.get<View>('/connector/status')).data);
+                        }}
+                    />
+                </details>
             )}
             <div className="grid gap-4 md:grid-cols-2">
                 <div className="rounded border p-4">
