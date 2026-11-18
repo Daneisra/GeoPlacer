@@ -35,6 +35,10 @@ type HttpReaderInfo = {
     batchProtocol?: number | null;
     enabled: boolean;
     active: boolean;
+    approvedAt?: number | null;
+    expires?: number | null;
+    remainingMs?: number | null;
+    lastTermination?: { code: string; at: number; reason: string } | null;
     pending: { requestId: string; fingerprint: string; originClaim: string; expires: number } | null;
 };
 type Proposal = {
@@ -165,6 +169,19 @@ export function ConnectorDashboard() {
                         ? 'Contexte reçu (session non authentifiée par GeoPlacer)'
                         : 'Indisponible'}
                 </p>
+                {httpReader?.active && httpReader.expires != null && (
+                    <p id="connectorCouplingTime">
+                        Couplage navigateur : {Math.ceil((httpReader.remainingMs ?? 0) / 1000)} s
+                        restantes, expiration à {new Date(httpReader.expires).toLocaleTimeString('fr-FR')}. Dix minutes
+                        depuis l’approbation du couplage ; démarrer un dessin ne renouvelle pas ce délai.
+                    </p>
+                )}
+                {!httpReader?.active && httpReader?.lastTermination && (
+                    <p id="connectorTermination" role="status">
+                        {httpReader.lastTermination.reason} (
+                        {new Date(httpReader.lastTermination.at).toLocaleTimeString('fr-FR')})
+                    </p>
+                )}
             </div>
             {error && (
                 <p role="alert" className="text-red-300">

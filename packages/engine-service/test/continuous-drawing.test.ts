@@ -10,10 +10,14 @@ afterEach(async () => {
 async function wait(fn: () => boolean, progress: () => unknown = () => null) {
     // Same 10 s stall bound; the project's 30 s test limit still bounds total time.
     // A hundred fsynced groups must be judged by forward progress, not a five-pixel smoke deadline.
-    let until = Date.now() + 10000, previous = progress();
+    let until = Date.now() + 10000,
+        previous = progress();
     while (!fn()) {
         const current = progress();
-        if (current !== previous) { previous = current; until = Date.now()+10000; }
+        if (current !== previous) {
+            previous = current;
+            until = Date.now() + 10000;
+        }
         if (Date.now() > until) throw new Error('continuous session did not settle');
         await new Promise((r) => setTimeout(r, 10));
     }
@@ -119,7 +123,10 @@ describe('Continuous scope through the existing scheduler and durable attempt jo
         expect(p.targets).toHaveLength(0);
         expect(f.calls()).toBe(0);
         await b.approve(p.id!, p.digest!);
-        await wait(() => b.view().state === 'completed', () => b.view().confirmed);
+        await wait(
+            () => b.view().state === 'completed',
+            () => b.view().confirmed
+        );
         expect(b.view()).toMatchObject({ confirmed: 300, total: 300, spent: 300, acceptedRequests: 60, uncertain: 0 });
         expect(f.writes).toHaveLength(300);
         expect(new Set(f.writes.map((w) => `${w.x},${w.y}`)).size).toBe(300);
@@ -131,7 +138,10 @@ describe('Continuous scope through the existing scheduler and durable attempt jo
         await b.stop();
         const next = await f.prepare(100);
         await b.approve(next.id!, next.digest!);
-        await wait(() => b.view().state === 'completed', () => b.view().confirmed);
+        await wait(
+            () => b.view().state === 'completed',
+            () => b.view().confirmed
+        );
         expect(new Set(f.writes.map((w) => `${w.x},${w.y}`)).size).toBe(400);
     });
     it('waits after exhausting observed energy; only a new post-write native response can replenish it', async () => {
@@ -150,7 +160,10 @@ describe('Continuous scope through the existing scheduler and durable attempt jo
         expect(b.view().resources?.available).toBe(0); // delayed pre-write request
         await new Promise((r) => setTimeout(r, 2));
         f.energy(10);
-        await wait(() => b.view().state === 'completed', () => b.view().confirmed);
+        await wait(
+            () => b.view().state === 'completed',
+            () => b.view().confirmed
+        );
         expect(b.view().confirmed).toBe(15);
         expect(f.calls()).toBe(3);
     });
@@ -175,7 +188,10 @@ describe('Continuous scope through the existing scheduler and durable attempt jo
         f.pixels[4 * 20 + 4] = -1;
         f.pixels[5 * 20 + 3] = -1;
         f.observe();
-        await wait(() => b.view().state === 'completed', () => b.view().confirmed);
+        await wait(
+            () => b.view().state === 'completed',
+            () => b.view().confirmed
+        );
         expect(b.view().confirmed).toBe(3);
         expect(f.writes.filter((w) => w.x === 1003 && w.y === 996)).toHaveLength(1);
         expect(f.writes.some((w) => w.x === 1000 && w.y === 1000)).toBe(false);
@@ -195,7 +211,10 @@ describe('Continuous scope through the existing scheduler and durable attempt jo
         expect(f.calls()).toBe(1);
         b.resume(p.id!, p.digest!);
         expect(b.view().expires).toBe(expires);
-        await wait(() => b.view().state === 'completed', () => b.view().confirmed);
+        await wait(
+            () => b.view().state === 'completed',
+            () => b.view().confirmed
+        );
         await b.stop();
         await f.s.close();
         opened.splice(opened.indexOf(f.s), 1);
@@ -340,6 +359,51 @@ describe('Continuous scope through the existing scheduler and durable attempt jo
         const targets = resumed.view().targets;
         expect(targets).toHaveLength(10);
         expect(new Set(targets.map((w) => `${w.x},${w.y}`)).size).toBe(10);
+    });
+    it('preserves 55 durable confirmations after channel expiry and resumes only after recoupling and explicit new authorization', async () => {
+        const f = await fixture(),
+            b = f.s.singlePixelWriter.batch;
+        f.energy(55);
+        const p = await f.prepare(100, 100, undefined, 600000);
+        await b.approve(p.id!, p.digest!);
+        await wait(
+            () => b.view().confirmed === 55 && b.view().scheduler === 'waiting-resources',
+            () => b.view().confirmed
+        );
+        f.s.connector.disconnect(
+            'Couplage navigateur expiré : dix minutes depuis son approbation. Nouveau couplage requis.'
+        );
+        await b.tick();
+        expect(b.view()).toMatchObject({
+            state: 'stopped',
+            confirmed: 55,
+            acceptedRequests: 11,
+            uncertain: 0,
+            expires: null,
+        });
+        expect(b.view().error).toMatch(/Canal navigateur interrompu.*dix minutes/);
+        await expect(b.approve(p.id!, p.digest!)).rejects.toThrow();
+        await f.s.close();
+        opened.splice(opened.indexOf(f.s), 1);
+        const restored = await EngineService.open({ dataDir: f.dir });
+        opened.push(restored);
+        const r = restored.singlePixelWriter.batch;
+        expect(r.view()).toMatchObject({ confirmed: 55, expires: null, uncertain: 0 });
+        await expect(r.approve(p.id!, p.digest!)).rejects.toThrow();
+        f.connect(restored);
+        await restored.bindConnector();
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        f.energy(45);
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        expect(f.calls()).toBe(11);
+        await r.approve(p.id!, p.digest!);
+        await wait(
+            () => r.view().state === 'completed',
+            () => r.view().confirmed
+        );
+        expect(r.view()).toMatchObject({ confirmed: 100, spent: 100, uncertain: 0 });
+        expect(f.writes).toHaveLength(100);
+        expect(new Set(f.writes.map((w) => `${w.x},${w.y}`)).size).toBe(100);
     });
     it('known energy refusal waits safely; a different refusal pauses and an ambiguous result blocks', async () => {
         const f = await fixture(true),

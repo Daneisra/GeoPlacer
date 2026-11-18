@@ -38,6 +38,7 @@ export type BatchView = {
     total: number;
     uncertain: number;
     expires: number | null;
+    remainingMs?: number | null;
     scheduler: string | null;
     error: string | null;
 };
@@ -440,7 +441,8 @@ export function BatchPanel({
                     )}
                     {view.expires && (
                         <p>
-                            Autorisation jusqu’à {new Date(view.expires).toLocaleTimeString('fr-FR')} ; aucun
+                            Autorisation de dessin : {Math.ceil((view.remainingMs ?? 0) / 1000)} s
+                            restantes, jusqu’à {new Date(view.expires).toLocaleTimeString('fr-FR')} ; aucun
                             renouvellement automatique.
                         </p>
                     )}

@@ -175,3 +175,12 @@ Pause/reprise conserve l’échéance initiale. Arrêt, expiration de l’autori
 
 
 Validation réelle 2J du 18 novembre 2026 : l’utilisateur confirme **50 cibles acquittées en dix requêtes**, puis **50 couleurs conformes** après observation, avec arrêt au budget et aucune tentative incertaine. La zone 10 × 10 compte 50 correctes / 50 incorrectes / 0 inconnue ; le modèle 20 × 20 compte 50 correctes / 350 incorrectes / 0 inconnue. Le diagnostic confirme les réponses natives d’énergie. La fraîcheur serveur des tuiles reste non vérifiée. Les autres scénarios de fiabilité restent des validations locales. Voir [le rapport 2J](RAPPORT-PHASE2J.md#validation-utilisateur-réelle--18-novembre-2026). Aucun nouvel envoi n’est autorisé par cette consignation.
+
+
+### Deux échéances et diagnostic d’interruption
+
+Le dashboard indique séparément le temps restant du **couplage navigateur** (dix minutes depuis son approbation) et de l’**autorisation de dessin** (durée choisie depuis son démarrage). Autoriser un dessin ne renouvelle pas le couplage. Une durée de dessin de 600 s ne garantit donc pas dix minutes supplémentaires de canal.
+
+Après interruption, le dernier motif connu s’affiche : expiration absolue, inactivité, contexte changé, canal remplacé, déconnexion ou révocation. Les nouveaux journaux serveur `[connector-http]` et `[connector-drawing]` conservent les dates et compteurs utiles, sans secrets. Une fermeture par inactivité ne permet pas à elle seule de distinguer rechargement, suspension de l’onglet ou perte de transport. Le lecteur 0.9.0 reste compatible ; aucun allongement de limite n’est nécessaire.
+
+Les cibles acquittées restent exclues. Reprendre le lot conservé exige un nouveau couplage, une observation/liaison vérifiée et une nouvelle autorisation du budget restant. Voir [le diagnostic de l’arrêt après 55 cibles](DIAGNOSTIC-2J-INTERRUPTION.md).

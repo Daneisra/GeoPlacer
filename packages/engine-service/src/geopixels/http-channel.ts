@@ -9,12 +9,21 @@ export const HTTP_LIFETIME_MS = 10 * 60_000;
 const secret = () => randomBytes(32).toString('hex');
 const equal = (a: string, b: string) =>
   /^[a-f0-9]{64}$/.test(a) && timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));
+export type ChannelDiagnostic = {
+  code: 'HTTP_APPROVED' | 'HTTP_LIFETIME_EXPIRED' | 'HTTP_IDLE_EXPIRED' | 'HTTP_PENDING_EXPIRED' | 'HTTP_CONTEXT_CHANGED' | 'HTTP_CHANNEL_REPLACED' | 'HTTP_READER_DISCONNECTED' | 'HTTP_REVOKED';
+  at: number;
+  reason: string;
+  approvedAt: number | null;
+  expiresAt: number;
+  lastSeen: number;
+};
 type Session = {
   id: string;
   capability: string;
   originClaim: string;
   fingerprint: string;
   approved: boolean;
+  approvedAt: number | null;
   deadline: number;
   lastSeen: number;
   epoch: number;
@@ -29,12 +38,14 @@ type Session = {
 export class ConnectorHttpChannel {
   private session: Session | null = null;
   private readonly controlKey: string | null;
+  private lastTermination: ChannelDiagnostic | null = null;
   constructor(
     private readonly pairing: ConnectorPairing,
     private readonly provider: GeoPixelsProvider,
     approvalKey: string | undefined,
     private readonly now: () => number = Date.now,
-    private readonly writer?: SinglePixelWriter
+    private readonly writer?: SinglePixelWriter,
+    private readonly onDiagnostic?: (event: ChannelDiagnostic) => void
   ) {
     check(approvalKey === undefined || /^[a-f0-9]{64}$/.test(approvalKey), 'invalid local approval key');
     this.controlKey = approvalKey ?? null;
@@ -50,7 +61,7 @@ export class ConnectorHttpChannel {
   claim(origin: string, code: string) {
     this.tick();
     check(this.controlKey !== null, 'privileged reader is not enabled');
-    this.pairing.redeem(origin, code, () => this.revoke('HTTP channel revoked'), 'http');
+    this.pairing.redeem(origin, code, () => this.revoke('Couplage HTTP révoqué ou remplacé ; nouveau couplage requis.'), 'http');
     const id = secret(),
       capability = secret();
     this.session = {
@@ -59,6 +70,7 @@ export class ConnectorHttpChannel {
       originClaim: origin,
       fingerprint: createHash('sha256').update(id).digest('hex').slice(0, 12),
       approved: false,
+      approvedAt: null,
       deadline: this.now() + 60_000,
       lastSeen: this.now(),
       epoch: -1,
@@ -77,9 +89,12 @@ export class ConnectorHttpChannel {
       throw new Error('real writes are unavailable');
     });
     s.approved = true;
+    s.approvedAt = this.now();
+    this.lastTermination = null;
     s.deadline = this.now() + HTTP_LIFETIME_MS;
     s.lastSeen = this.now();
     s.epoch = this.provider.channelEpoch;
+    this.diagnostic(s, 'HTTP_APPROVED', 'Couplage HTTP approuvé ; durée absolue de dix minutes.');
     s.releasePoll?.();
     return { approved: true };
   }
@@ -230,23 +245,33 @@ export class ConnectorHttpChannel {
     }
   disconnect(capability: string) {
     this.authenticate(capability);
-    this.revoke('HTTP reader disconnected');
+    this.revoke('Lecteur HTTP déconnecté ; nouveau couplage requis.', 'HTTP_READER_DISCONNECTED');
     return { disconnected: true };
   }
-  revoke(reason = 'HTTP reader revoked'): void {
+  private diagnostic(s: Session, code: ChannelDiagnostic['code'], reason: string) {
+    const event = { code, reason, at: this.now(), approvedAt: s.approvedAt, expiresAt: s.deadline, lastSeen: s.lastSeen };
+    if (code !== 'HTTP_APPROVED') this.lastTermination = event;
+    // Logging failure must never prevent a revocation. No capability, origin, token or request body.
+    try { this.onDiagnostic?.({...event}); } catch { /* retain security behaviour if logging fails */ }
+  }
+  revoke(reason = 'Couplage HTTP révoqué ; nouveau couplage requis.', code: ChannelDiagnostic['code'] = 'HTTP_REVOKED'): void {
     const s = this.session;
     this.session = null;
+    if (s) this.diagnostic(s,code,reason);
     s?.releasePoll?.();
     if (s?.approved && s.epoch === this.provider.channelEpoch) this.provider.disconnect(reason);
   }
   tick(): void {
     const s = this.session;
-    if (
-      s &&
-      (this.now() >= s.deadline ||
-        (s.approved && (this.now() - s.lastSeen >= HTTP_IDLE_MS || s.epoch !== this.provider.channelEpoch)))
-    )
-      this.revoke('HTTP reader expired or replaced');
+    if (!s) return;
+    if (this.now() >= s.deadline) {
+      this.revoke(s.approved ? 'Couplage navigateur expiré : dix minutes depuis son approbation, indépendamment de la durée du dessin. Nouveau couplage requis.' : 'Demande de couplage expirée avant approbation.', s.approved ? 'HTTP_LIFETIME_EXPIRED' : 'HTTP_PENDING_EXPIRED');
+    } else if (s.approved && this.now() - s.lastSeen >= HTTP_IDLE_MS) {
+      this.revoke('Couplage navigateur interrompu : aucune activité reçue pendant 30 secondes. Nouveau couplage requis.', 'HTTP_IDLE_EXPIRED');
+    } else if (s.approved && s.epoch !== this.provider.channelEpoch) {
+      const contextChanged = this.provider.status().error === 'Projet, position, palette ou session modifié : nouveau couplage requis.';
+      this.revoke(contextChanged ? 'Contexte de page modifié : projet, position, palette ou session. Nouveau couplage requis.' : 'Canal navigateur remplacé ou interrompu. Nouveau couplage requis.', contextChanged ? 'HTTP_CONTEXT_CHANGED' : 'HTTP_CHANNEL_REPLACED');
+    }
   }
   info() {
     this.tick();
@@ -259,6 +284,10 @@ export class ConnectorHttpChannel {
           ? { requestId: s.id, fingerprint: s.fingerprint, originClaim: s.originClaim, expires: s.deadline }
           : null,
       active: !!s?.approved,
+      approvedAt: s?.approvedAt ?? null,
+      expires: s?.approved ? s.deadline : null,
+      remainingMs: s?.approved ? Math.max(0,s.deadline-this.now()) : null,
+      lastTermination: this.lastTermination ? {...this.lastTermination} : null,
     };
   }
 }

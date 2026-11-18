@@ -1041,8 +1041,13 @@ export class ControlledBatch {
     async tick() {
         if (!['running', 'paused'].includes(this.state)) return;
         try {
+            if (this.deadline <= Date.now()) {
+                await this.stop(
+                    'Autorisation de dessin expirée : durée maximale atteinte. Nouvelle autorisation requise.'
+                );
+                return;
+            }
             this.context();
-            check(this.deadline > Date.now(), 'batch authorization expired');
             const b = this.saved.batch!;
             if (
                 b.execution === 'continuous' &&
@@ -1055,7 +1060,16 @@ export class ControlledBatch {
                 this.emit();
             }
         } catch {
-            await this.stop('Autorisation expirée ou contexte du navigateur modifié.');
+            const provider = this.d.provider.status();
+            await this.stop(
+                !this.healthy
+                    ? 'Stockage du lot indisponible : journal à vérifier.'
+                    : !provider.connected
+                      ? `Canal navigateur interrompu : ${provider.error ?? 'lecteur déconnecté'}`
+                      : this.epoch !== this.d.provider.channelEpoch
+                        ? 'Couplage navigateur remplacé : nouveau couplage et nouvelle autorisation requis.'
+                        : 'Modèle, position, couche ou état du moteur modifié : nouveau couplage et nouvelle autorisation requis.'
+            );
         }
     }
     async reconcile() {
@@ -1235,6 +1249,7 @@ export class ControlledBatch {
             error: this.error,
             uncertain: this.d.attempts.open().filter((a) => a.state === 'needs-reconciliation').length,
             expires: this.deadline || null,
+            remainingMs: this.deadline ? Math.max(0,this.deadline-Date.now()) : null,
             commandReady: !!this.pending?.ready && !this.pending.delivered && this.state === 'running',
             scheduler: this.scheduler?.status().state ?? null,
         };

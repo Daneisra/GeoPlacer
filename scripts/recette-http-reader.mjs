@@ -162,6 +162,8 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
       reader.off('dialog', handle);
     }
     await pair();
+    await page.locator('#connectorCouplingTime').filter({hasText:/Couplage navigateur.*s restantes/}).waitFor();
+    record('OK distinct absolute coupling countdown displayed; starting drawing does not renew it');
     await reader.getByRole('button', { name: 'Observer le modèle', exact: true }).click();
     await page.getByText('Modèle du navigateur : 8 × 5, origine (999, 1001)', { exact: true }).waitFor();
     await page.getByRole('button', { name: 'Lier ce modèle', exact: true }).click();
@@ -419,6 +421,7 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     await reader.waitForFunction(
       () => [...document.querySelectorAll('button')].find((b) => b.textContent === 'Coupler')?.disabled === false
     );
+    await page.locator('#connectorTermination').filter({hasText:/révoqué|déconnecté/}).waitFor();
     record('OK HTTP disconnect, new pairing and live revocation');
     // 2J: larger model, real reader code + privileged transport, all service writes mocked locally.
     const large = PNG.sync.read(readFileSync(path.join(repo,'public/fixtures/geoplacer-20x20.png')));

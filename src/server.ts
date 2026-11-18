@@ -472,7 +472,19 @@ async function startServer(): Promise<void> {
       }
       throw error;
     }
-    const httpReader = new ConnectorHttpChannel(engine.api.pairing!, engine.api.connector!, process.env.GEOPLACER_READER_APPROVAL_KEY, Date.now, engine.api.singlePixelWriter);
+    const diagnosticWriter = engine.api.singlePixelWriter;
+    const httpReader = new ConnectorHttpChannel(engine.api.pairing!, engine.api.connector!, process.env.GEOPLACER_READER_APPROVAL_KEY, Date.now, diagnosticWriter, (event) => {
+      const batch = diagnosticWriter?.batch.view();
+      logger.info('[connector-http] ' + JSON.stringify({ ...event, drawingExpiresAt: batch?.expires ?? null, drawingRemainingMs: batch?.expires ? Math.max(0,batch.expires-event.at) : null, confirmed: batch?.confirmed ?? 0 }));
+    });
+    let lastDrawingDiagnostic = '';
+    diagnosticWriter?.batch.subscribe(() => {
+      const batch = diagnosticWriter.batch.view();
+      const signature = JSON.stringify([batch.id, batch.state, batch.expires, batch.error]);
+      if (signature === lastDrawingDiagnostic) return;
+      lastDrawingDiagnostic = signature;
+      logger.info('[connector-drawing] ' + JSON.stringify({ at: Date.now(), state: batch.state, reason: batch.error, expiresAt: batch.expires, durationMs: batch.scope?.durationMs ?? null, pixelBudget: batch.budgets.pixels, confirmed: batch.confirmed, acceptedRequests: batch.acceptedRequests, uncertain: batch.uncertain }));
+    });
     privilegedReaderIngress.use(createPrivilegedReaderRouter(httpReader));
     const httpExpiry = setInterval(() => httpReader.tick(), 1000);
     httpExpiry.unref();

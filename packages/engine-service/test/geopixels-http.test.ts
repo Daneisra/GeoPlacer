@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ConnectorHttpChannel, HTTP_IDLE_MS, HTTP_LIFETIME_MS } from '../src/geopixels/http-channel.js';
+import { ConnectorHttpChannel, HTTP_IDLE_MS, HTTP_LIFETIME_MS, type ChannelDiagnostic } from '../src/geopixels/http-channel.js';
 import { ConnectorPairing } from '../src/geopixels/pairing.js';
 import { GeoPixelsProvider } from '../src/geopixels/provider.js';
 
@@ -9,7 +9,8 @@ function setup() {
   let now = 100_000;
   const pairing = new ConnectorPairing(() => now),
     provider = new GeoPixelsProvider(() => now);
-  const http = new ConnectorHttpChannel(pairing, provider, KEY, () => now);
+  const events:ChannelDiagnostic[]=[];
+  const http = new ConnectorHttpChannel(pairing, provider, KEY, () => now, undefined, event=>events.push(event));
   const claim = () => http.claim(ORIGIN, http.issue(KEY, ORIGIN).token);
   const ready = () => {
     const s = claim();
@@ -29,6 +30,7 @@ function setup() {
   });
   return {
     pairing,
+    events,
     provider,
     http,
     claim,
@@ -156,5 +158,43 @@ describe('Privileged HTTP reader capability and sequence protocol', () => {
     expect(() => s.http.status(c.capability)).toThrow();
     expect(JSON.stringify(s.http.info())).not.toContain(c.capability);
     expect(JSON.stringify(s.http.info())).not.toContain(KEY);
+  });
+});
+
+
+describe('Precise coupling diagnostics without changing lifetime or authority',()=>{
+  it('keeps the absolute deadline after nine minutes of activity, independently of a later 600 s drawing authorization',()=>{
+    const s=setup(),c=s.ready(),initial=s.http.info();
+    expect(initial).toMatchObject({approvedAt:100000,expires:100000+HTTP_LIFETIME_MS,remainingMs:HTTP_LIFETIME_MS});
+    for(let i=0;i<27;i++){s.advance(20000);s.http.status(c.capability);}
+    const drawingStartedAt=640000; // A later drawing authorization cannot reset HTTP approval.
+    expect(s.http.info()).toMatchObject({remainingMs:60000,expires:initial.expires});
+    for(let i=0;i<2;i++){s.advance(20000);s.http.status(c.capability);}
+    s.advance(20000);s.http.tick();
+    expect(s.http.info().lastTermination).toMatchObject({code:'HTTP_LIFETIME_EXPIRED',at:700000,approvedAt:100000,expiresAt:700000});
+    expect(700000-drawingStartedAt).toBe(60000);expect(s.provider.status().error).toMatch(/dix minutes/);
+    expect(()=>s.http.status(c.capability)).toThrow();expect(s.events.map(e=>e.code)).toEqual(['HTTP_APPROVED','HTTP_LIFETIME_EXPIRED']);
+  });
+  it('distinguishes inactivity from absolute expiry and keeps the reason across repeated cleanup calls',()=>{
+    const s=setup();s.ready();s.advance(HTTP_IDLE_MS);s.http.tick();s.http.revoke();
+    expect(s.http.info().lastTermination?.code).toBe('HTTP_IDLE_EXPIRED');expect(s.provider.status().error).toMatch(/30 secondes/);
+  });
+  it('distinguishes changed project context from a replacement channel',()=>{
+    const s=setup(),c=s.ready();s.http.batch(c.capability,[s.observation()]);
+    expect(()=>s.http.batch(c.capability,[{...s.observation(2),session:'changed'}])).toThrow();
+    expect(s.http.info().lastTermination?.code).toBe('HTTP_CONTEXT_CHANGED');
+    const next=s.ready();s.provider.connect('local-fake',()=>{});s.http.tick();
+    expect(s.http.info().lastTermination?.code).toBe('HTTP_CHANNEL_REPLACED');expect(s.provider.status().mode).toBe('local-fake');expect(()=>s.http.status(next.capability)).toThrow();
+  });
+  it('records pending expiry and reader disconnect without exposing approval keys or capabilities',()=>{
+    const s=setup();s.claim();s.advance(60000);s.http.tick();expect(s.http.info().lastTermination?.code).toBe('HTTP_PENDING_EXPIRED');
+    const c=s.ready();s.http.disconnect(c.capability);expect(s.http.info().lastTermination?.code).toBe('HTTP_READER_DISCONNECTED');
+    const text=JSON.stringify({events:s.events,info:s.http.info()});expect(text).not.toContain(c.capability);expect(text).not.toContain(KEY);expect(text).not.toContain(c.requestId);
+  });
+  it('revokes even if the diagnostic logger fails',()=>{
+    let now=100000;const p=new GeoPixelsProvider(()=>now),pair=new ConnectorPairing(()=>now);
+    const h=new ConnectorHttpChannel(pair,p,KEY,()=>now,undefined,()=>{throw new Error('logger unavailable');});
+    const c=h.claim(ORIGIN,h.issue(KEY,ORIGIN).token);h.approve(KEY,c.requestId);now+=HTTP_IDLE_MS;h.tick();
+    expect(p.status().connected).toBe(false);expect(h.info().lastTermination?.code).toBe('HTTP_IDLE_EXPIRED');
   });
 });
