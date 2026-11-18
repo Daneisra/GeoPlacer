@@ -4,7 +4,7 @@ import vm from 'node:vm';
 type Element = {
   textContent: string;
   disabled: boolean;
-  onclick?: () => Promise<void>;
+  onclick?: (event?: {isTrusted:boolean}) => Promise<void>;
   append: (...values: Element[]) => void;
   style: { cssText: string };
 };
@@ -144,6 +144,23 @@ describe('Passive HTTP reader panel in a local DOM fixture', () => {
     await s.button('Observer le modèle').onclick!();
     expect(s.elements.some((e) => e.textContent === 'Observation non confirmée')).toBe(true);
     expect(s.channel.connected()).toBe(false);
+  });
+  it('shows a specific safe refusal reason without sending page credentials', async () => {
+    const s=await setup();await s.button('Coupler').onclick!();
+    Object.assign(s.channel,{
+      claimPixel:async()=>({attemptId:'synthetic-operation'}),pixelAllowed:async()=>true,
+      pixelResult:async()=>({accepted:true,state:'failed'}),
+    });
+    s.context.GeoPlacerPageWriter={
+      stop:()=>{},execute:async()=> 'not-sent',
+      reason:()=> 'Énergie insuffisante pour un pixel.',
+      inspect:()=> 'Placement : Énergie insuffisante pour un pixel.',
+    };
+    await s.button('Placer le pixel préparé').onclick!({isTrusted:true});
+    expect(s.elements.some(e=>e.textContent==='Pixel non envoyé : Énergie insuffisante pour un pixel.')).toBe(true);
+    await s.button('Diagnostiquer').onclick!();
+    expect(s.elements.some(e=>e.textContent.includes('Placement : Énergie insuffisante'))).toBe(true);
+    expect(s.requests).toHaveLength(0);
   });
   it('disconnects explicitly and allows the diagnostic while unpaired', async () => {
     const s = await setup();

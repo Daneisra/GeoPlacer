@@ -62,14 +62,14 @@
       const ack = await channel.pixelResult(command.attemptId,result);
       status.textContent = result === 'confirmed' && ack.state === 'finished'
         ? 'Envoi unique confirmé par GeoPixels. Observer à nouveau pour mesurer la progression ; recharger avant un nouvel essai.'
-        : result === 'not-sent' && ack.state === 'failed' ? 'Pixel non envoyé.' : 'Résultat incertain. Aucun renvoi ; réconciliation nécessaire.';
+        : result === 'not-sent' && ack.state === 'failed' ? 'Pixel non envoyé : ' + (GeoPlacerPageWriter.reason?.() ?? 'vérification locale refusée.') : 'Résultat incertain. Aucun renvoi ; réconciliation nécessaire.';
     } catch {
       status.textContent = 'Réponse absente : résultat potentiellement incertain. Consulter le dashboard ; aucun renvoi.';
     } finally { pixel.disabled = false; }
   };
   diagnose.onclick = async () => {
     try {
-      status.textContent = await GeoPlacerPageReader.inspect();
+      status.textContent = (await GeoPlacerPageReader.inspect()) + ' ' + (GeoPlacerPageWriter.inspect?.() ?? '');
     } catch {
       status.textContent = 'Diagnostic du contexte de page indisponible';
     }

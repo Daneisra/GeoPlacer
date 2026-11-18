@@ -31,7 +31,7 @@ export async function runHttpReaderRecipe({ browser, page, api, base, approvalKe
   const html = `<!doctype html><html><head><style nonce="geoplacer-fixture-style">aside,button,p { all:unset!important; }</style></head><body><h1>LOCAL CSP FIXTURE — no GeoPixels connection</h1><script>
 let ghostImageOriginalData = new ImageData(new Uint8ClampedArray(${JSON.stringify([...png.data])}),8,5);
 let ghostImageTopLeft = {gridX:999,gridY:1001}; let ghostActivePaletteColors = new Set();
-let tileImageCache = new Map(); let userID=7; let userData={colors:[0,16777215]}; let Colors=['#000000','#ffffff'];
+let tileImageCache = new Map(); let userID=7; let userData={colors:'0,16777215'}; let Colors=['#000000','#ffffff'];
 let tokenUser='synthetic-browser-fixture-only', subject='synthetic-browser-subject';
 let currentEnergy=10, queuedPixelsObjects=new Map(), isPlacingRequestInProgress=false;
 function getSelectedEventId(){return null;}

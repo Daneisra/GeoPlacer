@@ -1,6 +1,6 @@
 # Phase 2F — essai unique de placement
 
-Base : `6792de96dc66220af9686fa88c1f3a007875dbbf`. Branche locale : `feat/phase2f-single-pixel-writer`. GeoPlacer conserve la version `6.0.0-rc.1` ; le userscript passe à **0.5.1** pour identifier explicitement son nouveau port écrivain. Aucun placement ni achat réel exécuté pendant ce développement.
+Base : `6792de96dc66220af9686fa88c1f3a007875dbbf`. Branche locale : `feat/phase2f-single-pixel-writer`. GeoPlacer conserve la version `6.0.0-rc.1` ; le userscript passe à **0.5.2** pour identifier explicitement son nouveau port écrivain. Aucun placement ni achat réel exécuté pendant ce développement.
 
 ## Contrats examinés
 
@@ -48,7 +48,7 @@ Le contrôle complet ci-dessous porte sur le commit initial `055450b` (lecteur 0
 | `npm.cmd run check:logged` | Vert : 954 tests réussis, 1 facultatif ignoré ; types et lints inclus |
 | Tests finaux écrivain | 29 réussis, dont le cas supplémentaire interdisant une réconciliation réelle depuis le fournisseur simulé |
 | HTTP local de bout en bout | 8 scénarios, inclus dans Jest : préparation, approbation, livraison unique, exécution navigateur factice, progression, réponse perdue, arrêt, révocation |
-| Build et syntaxe userscript | Verts, version 0.5.1 générée de façon déterministe |
+| Build et syntaxe userscript | Verts, version 0.5.0 générée de façon déterministe |
 | Edge et Firefox Playwright | Verts : fournisseur factice, lecteur régional, vrai formulaire et confirmation navigateur ; appel site remplacé par un stub, aucune requête externe |
 | Reprise | Sortie réelle d'un processus après journalisation `started`, reprise incertaine sans renvoi ; sauvegarde/restauration indépendante du domaine écrivain vérifiée |
 
@@ -72,10 +72,20 @@ Le profil utilisé lors du premier essai ne contenait que le paysage 96 × 64. L
 
 Le panneau local indique maintenant l'étape suivante et les tailles incompatibles ; les réglages de connexion se replient une fois connecté. Les détails techniques sont repliés et la case redondante d'autorisation est remplacée par le bouton explicite **Autoriser ce pixel**. La confirmation native du pixel et toutes les protections du serveur sont conservées.
 
-Le userscript utilise des styles limités à son panneau et l'API privilégiée [GM_addElement](https://www.tampermonkey.net/documentation.php?q=GM_addElement) pour les insérer ; seul ce droit DOM est ajouté, sans permission réseau supplémentaire ni modification de la CSP du site. Le rendu réel doit encore être confirmé par l'utilisateur après installation de **0.5.1**.
+Le userscript utilise des styles limités à son panneau et l'API privilégiée [GM_addElement](https://www.tampermonkey.net/documentation.php?q=GM_addElement) pour les insérer ; seul ce droit DOM est ajouté, sans permission réseau supplémentaire ni modification de la CSP du site. Les captures utilisateur suivantes confirment le rendu lisible du lecteur 0.5.1 et la liaison du modèle 8 × 5. Elles montrent un refus avant envoi ; aucun placement réel n'est encore validé.
 
 Validation du correctif : 38 tests ciblés du lecteur/écrivain/bundle, lint frontend et build verts. Recettes HTTP locales Edge et Firefox vertes : création/sélection/réutilisation du modèle manquant, styles du panneau sous CSP restrictive, refus du WebSocket de page, observations, commande factice d'un pixel et révocation. Firefox ajoute une feuille de style de page hostile aux boutons. L'API GM est simulée dans ces recettes ; aucune requête réelle de placement.
 
 Journaux : `test-logs/phase2f-ui-tests.log`, `test-logs/phase2f-ui-lint.log`, `test-logs/2026-11-18T00-25-33-567Z-build.log`, `test-logs/phase2f-ui-edge.log`, `test-logs/phase2f-ui-firefox.log`.
+
+## Correctif de compatibilité 0.5.2 — refus avant envoi
+
+Le lecteur 0.5.1 exigeait `Array.isArray(userData.colors)`. Or le [frontend historique vérifié](https://github.com/AntCDev/GeoPixelsFront/blob/83673896886c016a3d23bd46a2309570194a19da/wwwroot/js/index.js#L472) passe les couleurs du résultat de synchronisation à `IntToHexLst`, qui attend une chaîne décimale séparée par des virgules. Le chemin de connexion utilise initialement un tableau. Ce défaut est reproduit localement ; il constitue une cause possible du refus signalé, sans prétendre avoir inspecté le contenu privé de la page utilisateur.
+
+Le lecteur 0.5.2 accepte strictement ces deux représentations, sans déduire de couleurs débloquées à partir d'un préréglage. Le noir 0 et le blanc 16777215 sont conservés ; valeurs incorrectes et transparence -1 restent refusées. La comparaison des projets utilise les champs exacts, indépendamment de leur ordre dans le JSON.
+
+Chaque refus avant `fetch` dispose maintenant d'un motif fixe affiché dans le panneau : session indisponible, énergie insuffisante, palette invalide, couleur indisponible, file manuelle non vide, autorisation expirée, confirmation annulée ou stockage anti-doublon indisponible. **Options du lecteur → Diagnostiquer** effectue ces contrôles sans placement ni réservation. Aucun identifiant, jeton ou détail brut d'erreur n'est inclus dans ces messages. Les conditions d'autorisation, la limite d'un appel, le journal et l'absence de retry sont conservés.
+
+Validation : 52 tests ciblés verts, types du paquet verts, build vert et recette HTTP Edge locale verte avec `userData.colors` en CSV. Sont aussi testés les tableaux de connexion, la synchronisation changeant le format pendant la confirmation, les palettes invalides et l'affichage du motif. L'appel `/PlacePixels` reste simulé dans ces tests ; Firefox n'est pas réexécuté pour ce correctif ciblé. Journaux : `test-logs/phase2f-writer-csv-tests.log`, `test-logs/phase2f-writer-csv-types.log`, `test-logs/2026-11-18T00-46-07-049Z-build.log`, `test-logs/phase2f-csv-edge.log`.
 
 Suite prioritaire après cet essai : disposer d'une preuve de fraîcheur exploitable pour réconcilier les résultats réels ambigus, avant d'envisager une boucle d'écriture. Ce rapport ne valide aucun placement réel.

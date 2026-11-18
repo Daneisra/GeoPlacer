@@ -18,7 +18,7 @@ async function setup(
         lost?: boolean;
         approved?: boolean;
         energy?: number;
-        colors?: number[];
+        colors?: (number | string)[] | string;
         changed?: boolean;
     } = {}
 ) {
@@ -66,6 +66,8 @@ async function setup(
     const writer = context.writer as {
         execute: (c: Command, allowed: (id: string) => Promise<boolean>, trusted: boolean) => Promise<string>;
         stop: () => void;
+        reason: () => string | null;
+        inspect: () => string;
     };
     return { command, writer, fetch, sent, store, context, allowed: vi.fn(async () => true) };
 }
@@ -138,6 +140,49 @@ describe('Browser-only single pixel writer; all fetches are local mocks', () => 
         s.context.location = { origin: 'https://evil.example' };
         expect(await s.writer.execute(s.command, s.allowed, true)).toBe('not-sent');
         expect(s.fetch).not.toHaveBeenCalled();
+    });
+    it.each(['0, 16777215', ['0', '16777215'], [0, 16777215]])(
+        'accepts observed black/white ownership in login and sync formats: %o',
+        async (colors) => {
+            for (const color of [0, 16777215]) {
+                const s = await setup({ colors });
+                s.command.color = color;
+                expect(await s.writer.execute(s.command, s.allowed, true)).toBe('confirmed');
+                expect(s.fetch).toHaveBeenCalledTimes(1);
+                expect(s.sent[0]!.body.Pixels).toEqual([{ GridX: 1000, GridY: 1000, Color: color }]);
+            }
+        }
+    );
+    it.each(['', '0,broken', '#000000', '0x000000', '-1', '16777216', '0,'.repeat(257)])(
+        'rejects malformed account palettes without guessing: %s',
+        async (colors) => {
+            const s = await setup({ colors });
+            expect(await s.writer.execute(s.command, s.allowed, true)).toBe('not-sent');
+            expect(s.writer.reason()).toContain('Format des couleurs');
+            expect(s.fetch).not.toHaveBeenCalled();
+        }
+    );
+    it('accepts a sync switching the palette from array to CSV during confirmation', async () => {
+        const s = await setup();
+        s.context.confirm = () => {
+            s.context.userData = { colors: String(s.command.color) };
+            return true;
+        };
+        expect(await s.writer.execute(s.command, s.allowed, true)).toBe('confirmed');
+        expect(s.fetch).toHaveBeenCalledTimes(1);
+    });
+    it('compares exact project fields independently of JSON property order', async () => {
+        const s = await setup();
+        s.command.project = Object.fromEntries(Object.entries(s.command.project).reverse());
+        expect(await s.writer.execute(s.command, s.allowed, true)).toBe('confirmed');
+    });
+    it('explains refusal and provides a passive diagnostic without revealing session values', async () => {
+        const s = await setup({ energy: 0 });
+        expect(s.writer.inspect()).toContain('Énergie insuffisante');
+        expect(s.fetch).not.toHaveBeenCalled();
+        expect(await s.writer.execute(s.command, s.allowed, true)).toBe('not-sent');
+        expect(s.writer.reason()).toContain('Énergie insuffisante');
+        expect(s.writer.reason() + s.writer.inspect()).not.toMatch(/synthetic|secret|subject|123/);
     });
     it('refuses execution if the duplicate ledger cannot be saved', async () => {
         const s = await setup();
