@@ -40,3 +40,11 @@
 .observation-table { overflow-x: auto; }
 .observation-table table { width: 100%; border-collapse: collapse; font-size: .9rem; }
 .observation-table td, .observation-table th { text-align: left; padding: .5rem; border-bottom: 1px solid #334155; white-space: nowrap; }
+
+.connector-setup { border: 1px solid #475569; border-radius: .5rem; padding: 1rem; }
+.connector-setup summary { font-weight: 600; cursor: pointer; margin-bottom: .75rem; }
+.connector-test-model { display:flex; flex-wrap:wrap; align-items:center; gap:1rem; margin:.75rem 0; }
+.connector-test-model img { image-rendering:pixelated; background:#334155; border:1px solid #64748b; }
+.connector-test-model div { display:flex; flex-wrap:wrap; gap:.5rem; align-items:center; }
+.connector-dashboard fieldset details { color:#cbd5e1; font-size:.875rem; margin-top:.75rem; }
+.connector-dashboard fieldset summary { cursor:pointer; }

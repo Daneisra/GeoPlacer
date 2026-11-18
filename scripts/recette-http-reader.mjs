@@ -11,24 +11,24 @@ export async function runHttpReaderRecipe({ browser, page, api, base, approvalKe
   const { PNG } = createRequire(path.join(repo, 'package.json'))('pngjs');
   const png = PNG.sync.read(readFileSync(path.join(repo, 'public/fixtures/geoplacer-8x5.png')));
   assert.equal(png.width, 8); assert.equal(png.height, 5);
-  const imported = await api('templates', {
-    name: 'HTTP contract fixture 8 × 5',
-    pngBase64: PNG.sync.write(png).toString('base64'),
-    x: 0,
-    y: 0,
-    strategy: 'top-to-bottom',
-  });
-  await api('engine/selection', { templateId: imported.templateId }, 'PUT');
   await api('connector/source', { source: 'geopixels' });
   await page.reload();
   await page.getByLabel('Source de toile').selectOption('geopixels');
   await page.getByLabel('Clé locale d’approbation', { exact: true }).fill(approvalKey);
+  await page.getByRole('button',{name:'Utiliser le modèle de test 8 × 5',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('select[aria-label="Modèle local"]')?.selectedOptions[0]?.textContent.includes('Test GeoPixels'));
+  const imported=(await api('connector/status',undefined,'GET')).selection;
+  const count=(await api('templates',undefined,'GET')).templates.length;
+  await page.getByRole('button',{name:'Utiliser le modèle de test 8 × 5',exact:true}).click();
+  await page.waitForFunction(()=>![...document.querySelectorAll('button')].find(b=>b.textContent==='Utiliser le modèle de test 8 × 5')?.disabled);
+  assert.equal((await api('templates',undefined,'GET')).templates.length,count);
+  record('OK missing test model restored through UI, selected immediately, reused without duplicate');
   const context = await browser.newContext();
   const external = [],
     errors = [],
     timings = [];
   const fixtureUrl = 'https://geopixels.net/__geoplacer_contract_fixture__';
-  const html = `<!doctype html><html><body><h1>LOCAL CSP FIXTURE — no GeoPixels connection</h1><script>
+  const html = `<!doctype html><html><head><style nonce="geoplacer-fixture-style">aside,button,p { all:unset!important; }</style></head><body><h1>LOCAL CSP FIXTURE — no GeoPixels connection</h1><script>
 let ghostImageOriginalData = new ImageData(new Uint8ClampedArray(${JSON.stringify([...png.data])}),8,5);
 let ghostImageTopLeft = {gridX:999,gridY:1001}; let ghostActivePaletteColors = new Set();
 let tileImageCache = new Map(); let userID=7; let userData={colors:[0,16777215]}; let Colors=['#000000','#ffffff'];
@@ -54,7 +54,7 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
         status: 200,
         contentType: 'text/html',
         headers: {
-          'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self'",
+          'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self'; style-src 'nonce-geoplacer-fixture-style'",
         },
         body: html,
       });
@@ -79,6 +79,12 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     const nativeTimeout = globalThis.setTimeout.bind(globalThis), nativeInterval = globalThis.setInterval.bind(globalThis);
     globalThis.setInterval = (fn, ms, ...args) => nativeInterval(fn, Math.max(60000, ms), ...args);
     globalThis.setTimeout = (fn, ms, ...args) => nativeTimeout(fn, ms < 5000 ? 60000 : ms, ...args);
+    // Emulate privileged style insertion with a fixture-only nonce; page CSP stays enforced.
+    globalThis.GM_addElement = (tag, attributes) => {
+      if(tag !== 'style') throw new Error('Only scoped panel styles are permitted');
+      const element=document.createElement(tag);element.nonce='geoplacer-fixture-style';
+      element.textContent=attributes.textContent;document.head.append(element);return element;
+    };
     globalThis.GM_xmlhttpRequest = (o) => {
       let aborted = false;
       globalThis
@@ -118,6 +124,13 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
         : 'OK page WebSocket rejected synchronously; exact CSP event not emitted by this browser'
     );
     await reader.addScriptTag({ content: readFileSync(path.join(repo, 'public/geopixels-connector.user.js'), 'utf8') });
+    const presentation=await reader.locator('#geoplacer-reader-panel').evaluate(panel=>({
+      position:getComputedStyle(panel).position,
+      gap:parseInt(getComputedStyle(panel).gap),
+      buttonHeight:panel.querySelector('button').getBoundingClientRect().height,
+    }));
+    assert.equal(presentation.position,'fixed');assert.ok(presentation.gap>=8);assert.ok(presentation.buttonHeight>=36);
+    record('OK scoped privileged panel styles under restrictive style CSP; spaced readable buttons');
     const nativeCache=await reader.evaluate(async()=>{
       const bitmapCanvas=new OffscreenCanvas(1000,1000),ctx=bitmapCanvas.getContext('2d');ctx.fillStyle='#000000';ctx.fillRect(0,0,1000,1000);
       const source=new Map([['0,0',{colorBitmap:await createImageBitmap(bitmapCanvas)}]]),decoded=GeoPlacerCapture.createReadCache(4_000_000);
@@ -267,23 +280,23 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     });
     await reader.getByRole('button',{name:'Observer le modèle',exact:true}).click();
     await page.locator('#observedIncorrect').filter({hasText:/^1$/}).waitFor();
-    const pixelPanel=page.getByRole('group',{name:/Essai d’un pixel/});
-    await pixelPanel.getByRole('button',{name:'Préparer un pixel avec le planificateur',exact:true}).click();
+    const pixelPanel=page.getByRole('group',{name:/3. Tester un pixel/});
+    await pixelPanel.getByRole('button',{name:'Préparer un pixel',exact:true}).click();
     await pixelPanel.getByText('Préparée — réservation durable',{exact:true}).waitFor();
-    await pixelPanel.getByRole('checkbox').check();
-    await pixelPanel.getByRole('button',{name:'Autoriser cet essai — confirmer ensuite dans Tampermonkey',exact:true}).click();
+    await pixelPanel.getByRole('button',{name:'Autoriser ce pixel',exact:true}).click();
     reader.once('dialog',dialog=>dialog.accept());
-    await reader.getByRole('button',{name:'Examiner le pixel préparé (essai réel)',exact:true}).click();
+    await reader.getByRole('button',{name:'Placer le pixel préparé',exact:true}).click();
     await pixelPanel.getByText('Confirmée',{exact:true}).waitFor();
     assert.equal(await reader.evaluate(()=>globalThis.fixtureSiteCalls),1);
     assert.equal((await api('connector/status',undefined,'GET')).progress.incorrect,1);
     await reader.evaluate(()=>loadFixtureTiles());
     await reader.getByRole('button',{name:'Observer le modèle',exact:true}).click();
     await page.locator('#observedCorrect').filter({hasText:/^38$/}).waitFor();
-    await pixelPanel.getByRole('button',{name:'Arrêt immédiat de l’essai',exact:true}).click();
+    await pixelPanel.getByRole('button',{name:'Arrêter l’essai',exact:true}).click();
     record('OK single-pixel dashboard and trusted browser confirmation; site fetch STUB ONLY, independent reader progress, stop available');
     await reader.screenshot({ path: path.join(out, 'http-reader-local-fixture.png'), fullPage: true });
     await page.screenshot({ path: path.join(out, 'http-dashboard-local-fixture.png'), fullPage: true });
+    await reader.getByText('Options du lecteur',{exact:true}).click();
     await reader.getByRole('button', { name: 'Déconnecter', exact: true }).click();
     await page
       .locator('#connectorConnection')

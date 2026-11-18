@@ -1,6 +1,6 @@
 # Lecteur GeoPixels HTTP, surveillance et régions — Phase 2E
 
-Version du lecteur : **0.5.0**, serveur Phase 2F local. Le lecteur reste passif par défaut et conserve les observations régionales du protocole 1 ; les lecteurs 0.3.1/0.4.0 restent compatibles pour leurs observations respectives. Le port écrivain séparé prépare seulement un essai d'un pixel soumis à confirmation explicite dans le dashboard **et** dans le navigateur. Aucun achat ; aucun placement réel validé en Phase 2F. Voir la [recette et les limites de cet essai](RAPPORT-PHASE2F.md). Main fournit toujours la RC de démonstration sans connecteur expérimental.
+Version du lecteur : **0.5.1**, serveur Phase 2F local. Le lecteur reste passif par défaut et conserve les observations régionales du protocole 1 ; les lecteurs 0.3.1/0.4.0 restent compatibles pour leurs observations respectives. Le port écrivain séparé prépare seulement un essai d'un pixel soumis à confirmation explicite dans le dashboard **et** dans le navigateur. Aucun achat ; aucun placement réel validé en Phase 2F. Voir la [recette et les limites de cet essai](RAPPORT-PHASE2F.md). Main fournit toujours la RC de démonstration sans connecteur expérimental.
 
 ## Installation et lancement
 
@@ -17,7 +17,7 @@ Taper directement l'adresse locale dans la barre d'adresse d'un nouvel onglet (p
 
 1. Choisir « GeoPixels — connecteur expérimental ».
 2. Saisir la clé privée dans « Clé locale d'approbation ». Elle reste dans la mémoire du formulaire pendant ce montage.
-3. Télécharger et installer le lecteur Tampermonkey proposé. Vérifier **0.5.0**, désactiver les anciens lecteurs GeoPlacer, puis recharger GeoPixels. Un seul lecteur doit être actif.
+3. Télécharger et installer le lecteur Tampermonkey proposé. Vérifier **0.5.1**, désactiver les anciens lecteurs GeoPlacer, puis recharger GeoPixels. Un seul lecteur doit être actif.
 4. Les seules pages autorisées sont `https://geopixels.net/*` et `https://www.geopixels.net/*`. La permission réseau GM est **127.0.0.1**, sans `*` et sans permission de récupération sur le service. Si Tampermonkey demande l'autorisation locale, contrôler cette destination précise.
 5. Garder tous les bots de placement arrêtés. Ouvrir/recharger la page GeoPixels et conserver une copie de son fantôme et de sa position avant de changer d'image.
 

@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 const key = randomBytes(32).toString('hex');
-console.log('GeoPlacer — lecteur HTTP privilégié, placements et achats réels indisponibles.');
+console.log('GeoPlacer — connexion navigateur. Essai d’un pixel uniquement après confirmation ; aucun achat.');
 console.log('Clé locale d’approbation privée (à saisir dans le dashboard ; ne pas partager cette ligne) :');
 console.log(key);
 const child = spawn(

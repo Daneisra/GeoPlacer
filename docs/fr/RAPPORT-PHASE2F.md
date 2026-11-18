@@ -1,6 +1,6 @@
 # Phase 2F — essai unique de placement
 
-Base : `6792de96dc66220af9686fa88c1f3a007875dbbf`. Branche locale : `feat/phase2f-single-pixel-writer`. GeoPlacer conserve la version `6.0.0-rc.1` ; le userscript passe à **0.5.0** pour identifier explicitement son nouveau port écrivain. Aucun placement ni achat réel exécuté pendant ce développement.
+Base : `6792de96dc66220af9686fa88c1f3a007875dbbf`. Branche locale : `feat/phase2f-single-pixel-writer`. GeoPlacer conserve la version `6.0.0-rc.1` ; le userscript passe à **0.5.1** pour identifier explicitement son nouveau port écrivain. Aucun placement ni achat réel exécuté pendant ce développement.
 
 ## Contrats examinés
 
@@ -37,16 +37,18 @@ Le port navigateur est séparé du lecteur : `fetch` de même origine, sans redi
 
 **Arrêt immédiat** retire une préparation ou conserve un envoi commencé en état incertain. Il ne peut pas annuler rétroactivement une requête déjà reçue par GeoPixels. Déconnecter le lecteur interrompt aussi son appel navigateur. Le dialogue de confirmation et le contrôle local final réduisent la fenêtre entre autorisation et envoi sans promettre d'annulation atomique à travers le réseau.
 
-Le lecteur passif 0.4.0 reste compatible avec les observations, mais ne sait pas exécuter cet essai. Le lecteur 0.5.0 et les variables de session du port écrivain restent **à valider dans Tampermonkey sur le vrai site**. L'estimation locale `currentEnergy` peut être ancienne ; aucun refus ou résultat ambigu du service n'est traité comme un succès. Aucun dessin autonome, achat, multi-agent ou file de placements réels n'est ajouté. Pendant une intention ouverte, les changements de source, de modèle et de position restent bloqués ; une incertitude réelle non résolue impose de conserver ce profil pour diagnostic. La simulation reste utilisable dans un profil distinct.
+Le lecteur passif 0.4.0 reste compatible avec les observations, mais ne sait pas exécuter cet essai. Le lecteur 0.5.1 et les variables de session du port écrivain restent **à valider dans Tampermonkey sur le vrai site**. L'estimation locale `currentEnergy` peut être ancienne ; aucun refus ou résultat ambigu du service n'est traité comme un succès. Aucun dessin autonome, achat, multi-agent ou file de placements réels n'est ajouté. Pendant une intention ouverte, les changements de source, de modèle et de position restent bloqués ; une incertitude réelle non résolue impose de conserver ce profil pour diagnostic. La simulation reste utilisable dans un profil distinct.
 
 ## Validation locale
+
+Le contrôle complet ci-dessous porte sur le commit initial `055450b` (lecteur 0.5.0). Le correctif d’interface 0.5.1 est vérifié séparément en fin de rapport.
 
 | Vérification | Résultat |
 |---|---|
 | `npm.cmd run check:logged` | Vert : 954 tests réussis, 1 facultatif ignoré ; types et lints inclus |
 | Tests finaux écrivain | 29 réussis, dont le cas supplémentaire interdisant une réconciliation réelle depuis le fournisseur simulé |
 | HTTP local de bout en bout | 8 scénarios, inclus dans Jest : préparation, approbation, livraison unique, exécution navigateur factice, progression, réponse perdue, arrêt, révocation |
-| Build et syntaxe userscript | Verts, version 0.5.0 générée de façon déterministe |
+| Build et syntaxe userscript | Verts, version 0.5.1 générée de façon déterministe |
 | Edge et Firefox Playwright | Verts : fournisseur factice, lecteur régional, vrai formulaire et confirmation navigateur ; appel site remplacé par un stub, aucune requête externe |
 | Reprise | Sortie réelle d'un processus après journalisation `started`, reprise incertaine sans renvoi ; sauvegarde/restauration indépendante du domaine écrivain vérifiée |
 
@@ -56,13 +58,24 @@ Journaux locaux ignorés par Git : `test-logs/2026-11-17T23-36-01-369Z-check.log
 
 Un commit local regroupe cette intégration et sa documentation sur la branche 2F. `main` reste à `cb6521dd1890839ce50f3c0a6cae127451fc71da` ; aucune publication, suppression, modification de remote, création de tag ou release. Relecture des fichiers et recherche de signatures de secrets : aucun secret réel ni donnée applicative inclus.
 
-## Prochain essai utilisateur — un pixel, après accord
+## Essai court — une fois le navigateur connecté
 
-1. Garder tous les autres bots arrêtés, sauvegarder le fantôme et sa position. Ne pas placer manuellement ni déplacer le fantôme pendant l’essai. Lancer `npm.cmd run start:reader` après build ; ouvrir directement l'adresse locale, saisir la clé uniquement dans le dashboard.
-2. Installer **0.5.0**, désactiver les anciens lecteurs, recharger GeoPixels, coupler et comparer l'empreinte. Observer un petit fantôme puis lier explicitement le bon modèle. Garder la surveillance en pause pour examiner tranquillement la destination.
-3. Cliquer uniquement **Préparer un pixel**. Relever le modèle, l'origine exacte du site, la couche de base, X/Y natifs, la couleur et l'état du cache. **Ne pas cocher l'autorisation ni cliquer sur le bouton d'essai navigateur avant votre accord explicite sur ces éléments.**
-4. Après cet accord, préparer à nouveau si la réservation a expiré ; vérifier que la destination est strictement la même. Cocher l'autorisation et confirmer dans le dashboard, puis cliquer « Examiner le pixel préparé » dans Tampermonkey et contrôler une dernière fois la boîte de confirmation.
-5. En cas de `Ok`, vérifier la couleur dans l'interface native, observer de nouveau et distinguer résultat de l'opération et progression mesurée. Ne pas déclencher de rafraîchissement automatique de tuiles.
-6. En cas de réponse absente, refus non confirmé ou arrêt : **aucun renvoi**. Conserver l'intention incertaine et ses journaux ; le cache non daté ne suffit pas à la réconciliation. Arrêter l'essai, révoquer le canal et transmettre seulement les états, sans clé ni données de compte.
+1. Dans **2. Choisir le modèle**, cliquer **Utiliser le modèle de test 8 × 5** s'il manque. Le bouton ajoute et sélectionne le PNG fourni sans écraser les autres modèles. Utiliser ce même PNG comme fantôme dans GeoPixels, cliquer **Observer le modèle**, puis **Lier ce modèle**.
+2. Dans **3. Tester un pixel**, cliquer **Préparer un pixel**. Vérifier coordonnées et couleur. **S'arrêter ici tant que l'opération et sa destination n'ont pas reçu votre accord explicite.** La réservation reste limitée à 30 secondes ; si elle expire, refaire une préparation et revérifier la destination.
+3. Après accord, cliquer **Autoriser ce pixel**, puis **Placer le pixel préparé** dans GeoPixels. Le navigateur demande la confirmation finale. Observer ensuite le résultat et révoquer le canal.
+
+Réponse absente ou état incertain : **aucun renvoi**. Utiliser **Arrêter l’essai** ; un cache non daté ne suffit pas à réconcilier. Ne partager ni clé ni données de connexion.
+
+## Correctif ergonomique 0.5.1
+
+Le profil utilisé lors du premier essai ne contenait que le paysage 96 × 64. Le modèle de test a été ajouté séparément et sélectionné ; l'image du fantôme reçu correspond au PNG après normalisation des composantes RGB entièrement transparentes. Aucun placement effectué.
+
+Le panneau local indique maintenant l'étape suivante et les tailles incompatibles ; les réglages de connexion se replient une fois connecté. Les détails techniques sont repliés et la case redondante d'autorisation est remplacée par le bouton explicite **Autoriser ce pixel**. La confirmation native du pixel et toutes les protections du serveur sont conservées.
+
+Le userscript utilise des styles limités à son panneau et l'API privilégiée [GM_addElement](https://www.tampermonkey.net/documentation.php?q=GM_addElement) pour les insérer ; seul ce droit DOM est ajouté, sans permission réseau supplémentaire ni modification de la CSP du site. Le rendu réel doit encore être confirmé par l'utilisateur après installation de **0.5.1**.
+
+Validation du correctif : 38 tests ciblés du lecteur/écrivain/bundle, lint frontend et build verts. Recettes HTTP locales Edge et Firefox vertes : création/sélection/réutilisation du modèle manquant, styles du panneau sous CSP restrictive, refus du WebSocket de page, observations, commande factice d'un pixel et révocation. Firefox ajoute une feuille de style de page hostile aux boutons. L'API GM est simulée dans ces recettes ; aucune requête réelle de placement.
+
+Journaux : `test-logs/phase2f-ui-tests.log`, `test-logs/phase2f-ui-lint.log`, `test-logs/2026-11-18T00-25-33-567Z-build.log`, `test-logs/phase2f-ui-edge.log`, `test-logs/phase2f-ui-firefox.log`.
 
 Suite prioritaire après cet essai : disposer d'une preuve de fraîcheur exploitable pour réconcilier les résultats réels ambigus, avant d'envisager une boucle d'écriture. Ce rapport ne valide aucun placement réel.

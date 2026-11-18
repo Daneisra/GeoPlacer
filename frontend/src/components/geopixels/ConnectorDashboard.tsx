@@ -29,11 +29,15 @@ type View = {
     progress: { correct: number; incorrect: number; unknown: number; total: number } | null;
     scheduler: { state: string; reason: string | null; openAttempts: number; uncertainAttempts: string[] } | null;
 };
-type HttpReaderInfo = { enabled: boolean; active: boolean; pending: { requestId: string; fingerprint: string; originClaim: string; expires: number } | null };
+type HttpReaderInfo = {
+    enabled: boolean;
+    active: boolean;
+    pending: { requestId: string; fingerprint: string; originClaim: string; expires: number } | null;
+};
 type Proposal = {
-  allowed: boolean;
-  reasons: string[];
-  proposal: { id: string; kind: string; cost: number | null; savedMs: number | null; benefit: string };
+    allowed: boolean;
+    reasons: string[];
+    proposal: { id: string; kind: string; cost: number | null; savedMs: number | null; benefit: string };
 };
 const kindLabels: Record<string, string> = {
     'energy-pack': 'Recharge',
@@ -117,6 +121,31 @@ export function ConnectorDashboard() {
         setCapability(result.data.token);
         // The one-use capability stays in component memory, never in an URL or browser storage.
     }
+    const dimensionsMatch =
+        !!view?.project &&
+        !!view.selection &&
+        view.project.width === view.selection.width &&
+        view.project.height === view.selection.height;
+    async function restoreTestModel() {
+        const name = 'Test GeoPixels — fantôme 8 × 5';
+        let template = templates.find((t) => t.name === name && t.width === 8 && t.height === 5);
+        if (!template) {
+            const response = await fetch('/fixtures/geoplacer-8x5.png');
+            if (!response.ok) throw new Error('PNG de test indisponible');
+            const bytes = new Uint8Array(await response.arrayBuffer());
+            template = (
+                await engineHttp.post<TemplateInfo>('/templates', {
+                    name,
+                    pngBase64: btoa(String.fromCharCode(...bytes)),
+                    x: 0,
+                    y: 0,
+                    strategy: 'top-to-bottom',
+                })
+            ).data;
+        }
+        await engineHttp.put('/engine/selection', { templateId: template.templateId });
+        setTemplates((await engineHttp.get<{ templates: TemplateInfo[] }>('/templates')).data.templates);
+    }
     return (
         <section className="connector-dashboard space-y-4" id="connectorDashboard">
             <div className="rounded border border-amber-500 bg-amber-950/40 p-4">
@@ -134,135 +163,156 @@ export function ConnectorDashboard() {
                         : 'Indisponible'}
                 </p>
             </div>
-            {view?.singlePixel && <SinglePixelPanel view={view.singlePixel} approvalKey={approvalKey}
-                fake={view.mode === 'local-fake'} ready={view.connected && view.bound && !active}
-                refresh={async()=>{setView((await engineHttp.get<View>('/connector/status')).data);}}/>}
             {error && (
                 <p role="alert" className="text-red-300">
                     {error}
                 </p>
             )}
-            <label>
-                Origine de la page GeoPixels
-                <select
-                    aria-label="Origine GeoPixels"
-                    value={readerOrigin}
-                    disabled={busy || active}
-                    onChange={(event) => setReaderOrigin(event.target.value)}
-                >
-                    <option value="https://geopixels.net">https://geopixels.net</option>
-                    <option value="https://www.geopixels.net">https://www.geopixels.net</option>
-                </select>
-            </label>
-            <p>
-                Choisir l’origine exacte affichée dans l’adresse du site ; aucun sous-domaine supplémentaire n’est
-                autorisé.
-            </p>
-            <div className="rounded border p-3 space-y-2">
-                <h3>Couplage HTTP Tampermonkey</h3>
-                <p>
-                    {httpReader?.enabled
-                        ? 'Transport activé. La clé d’approbation n’est jamais envoyée au lecteur.'
-                        : 'Pour activer ce transport : arrêter le serveur puis lancer npm run start:reader. La clé privée apparaît dans sa console.'}
-                </p>
+            <details className="connector-setup" open={!view?.connected || !!httpReader?.pending}>
+                <summary>1. Connexion {view?.connected ? 'établie ✓ — réglages' : 'au navigateur'}</summary>
                 <label>
-                    Clé locale d’approbation privée
-                    <input
-                        aria-label="Clé locale d’approbation"
-                        className="block w-full font-mono"
-                        type="password"
-                        autoComplete="off"
-                        value={approvalKey}
-                        onChange={(e) => setApprovalKey(e.target.value)}
-                    />
+                    Origine de la page GeoPixels
+                    <select
+                        aria-label="Origine GeoPixels"
+                        value={readerOrigin}
+                        disabled={busy || active}
+                        onChange={(event) => setReaderOrigin(event.target.value)}
+                    >
+                        <option value="https://geopixels.net">https://geopixels.net</option>
+                        <option value="https://www.geopixels.net">https://www.geopixels.net</option>
+                    </select>
                 </label>
-                <p>Cette clé ne doit pas être saisie dans le lecteur. Le code temporaire ci-dessous lui est destiné.</p>
-                {httpReader?.pending && (
-                    <div role="status">
-                        <p>
-                            Demande HTTP : <strong>{httpReader.pending.fingerprint}</strong>
-                        </p>
-                        <p>Origine déclarée : {httpReader.pending.originClaim} (non attestée cryptographiquement).</p>
-                        <p>Comparer l’empreinte avec le panneau Tampermonkey avant de confirmer.</p>
-                        <button
-                            disabled={busy || !/^[a-f0-9]{64}$/.test(approvalKey)}
-                            onClick={() =>
-                                void action(async () => {
-                                    await engineHttp.post(
-                                        '/connector/http/approve',
-                                        { requestId: httpReader.pending!.requestId },
-                                        { headers: { 'X-GeoPlacer-Approval': approvalKey } }
-                                    );
-                                    setCapability('');
-                                })
-                            }
-                        >
-                            Confirmer la demande HTTP
-                        </button>
-                    </div>
-                )}
-            </div>
-            <div className="flex flex-wrap gap-2">
-                <button disabled={busy || active} onClick={() => void action(() => pair('local-fake'))}>
-                    Coupler un navigateur factice
-                </button>
-                <button
-                    disabled={busy}
-                    onClick={() =>
-                        void action(async () => {
-                            await engineHttp.post('/connector/revoke', {});
-                            setCapability('');
-                        })
-                    }
-                >
-                    Révoquer le canal
-                </button>
-                <a href="/connector-fixture.html" target="_blank" rel="noreferrer">
-                    Ouvrir la page factice
-                </a>
-                <button
-                    disabled={busy || active}
-                    onClick={() =>
-                        void action(async () => {
-                            setCapability('');
-                            const r = await engineHttp.post<{ token: string }>(
-                                '/connector/http/pair',
-                                { origin: readerOrigin },
-                                { headers: { 'X-GeoPlacer-Approval': approvalKey } }
-                            );
-                            setCapability(r.data.token);
-                        })
-                    }
-                >
-                    Coupler le lecteur GeoPixels
-                </button>
-                <a href="/geopixels-connector.user.js" download>
-                    Télécharger le lecteur Tampermonkey
-                </a>
-            </div>
-            {capability && (
-                <div className="rounded border p-3">
+                <p>
+                    Choisir l’origine exacte affichée dans l’adresse du site ; aucun sous-domaine supplémentaire n’est
+                    autorisé.
+                </p>
+                <div className="rounded border p-3 space-y-2">
+                    <h3>Couplage HTTP Tampermonkey</h3>
+                    <p>
+                        {httpReader?.enabled
+                            ? 'Transport activé. La clé d’approbation n’est jamais envoyée au lecteur.'
+                            : 'Pour activer ce transport : arrêter le serveur puis lancer npm run start:reader. La clé privée apparaît dans sa console.'}
+                    </p>
                     <label>
-                        Code à usage unique (60 secondes)
+                        Clé locale d’approbation privée
                         <input
-                            aria-label="Code de couplage"
+                            aria-label="Clé locale d’approbation"
                             className="block w-full font-mono"
                             type="password"
-                            value={capability}
-                            readOnly
                             autoComplete="off"
+                            value={approvalKey}
+                            onChange={(e) => setApprovalKey(e.target.value)}
                         />
                     </label>
-                    <button onClick={() => void navigator.clipboard.writeText(capability)}>Copier le code</button>
-                    <button onClick={() => setCapability('')}>Masquer le code</button>
+                    <p>
+                        Cette clé ne doit pas être saisie dans le lecteur. Le code temporaire ci-dessous lui est
+                        destiné.
+                    </p>
+                    {httpReader?.pending && (
+                        <div role="status">
+                            <p>
+                                Demande HTTP : <strong>{httpReader.pending.fingerprint}</strong>
+                            </p>
+                            <p>
+                                Origine déclarée : {httpReader.pending.originClaim} (non attestée cryptographiquement).
+                            </p>
+                            <p>Comparer l’empreinte avec le panneau Tampermonkey avant de confirmer.</p>
+                            <button
+                                disabled={busy || !/^[a-f0-9]{64}$/.test(approvalKey)}
+                                onClick={() =>
+                                    void action(async () => {
+                                        await engineHttp.post(
+                                            '/connector/http/approve',
+                                            { requestId: httpReader.pending!.requestId },
+                                            { headers: { 'X-GeoPlacer-Approval': approvalKey } }
+                                        );
+                                        setCapability('');
+                                    })
+                                }
+                            >
+                                Confirmer la demande HTTP
+                            </button>
+                        </div>
+                    )}
                 </div>
-            )}
+                <div className="flex flex-wrap gap-2">
+                    <button disabled={busy || active} onClick={() => void action(() => pair('local-fake'))}>
+                        Coupler un navigateur factice
+                    </button>
+
+                    <a href="/connector-fixture.html" target="_blank" rel="noreferrer">
+                        Ouvrir la page factice
+                    </a>
+                    <button
+                        disabled={busy || active}
+                        onClick={() =>
+                            void action(async () => {
+                                setCapability('');
+                                const r = await engineHttp.post<{ token: string }>(
+                                    '/connector/http/pair',
+                                    { origin: readerOrigin },
+                                    { headers: { 'X-GeoPlacer-Approval': approvalKey } }
+                                );
+                                setCapability(r.data.token);
+                            })
+                        }
+                    >
+                        Coupler le lecteur GeoPixels
+                    </button>
+                </div>
+                {capability && (
+                    <div className="rounded border p-3">
+                        <label>
+                            Code à usage unique (60 secondes)
+                            <input
+                                aria-label="Code de couplage"
+                                className="block w-full font-mono"
+                                type="password"
+                                value={capability}
+                                readOnly
+                                autoComplete="off"
+                            />
+                        </label>
+                        <button onClick={() => void navigator.clipboard.writeText(capability)}>Copier le code</button>
+                        <button onClick={() => setCapability('')}>Masquer le code</button>
+                    </div>
+                )}
+            </details>
+            <button
+                disabled={busy}
+                onClick={() =>
+                    void action(async () => {
+                        await engineHttp.post('/connector/revoke', {});
+                        setCapability('');
+                    })
+                }
+            >
+                Révoquer le canal
+            </button>
+            <a href="/geopixels-connector.user.js" download>
+                Télécharger le lecteur Tampermonkey
+            </a>
             <div className="rounded border p-4 space-y-2">
-                <h3 className="font-semibold">Lier explicitement le modèle local au modèle du navigateur</h3>
+                <h3 className="font-semibold">2. Choisir le modèle</h3>
                 <p>
-                    Vérifier l’image, les dimensions, les filtres et la position avant de lier. Une taille identique ne
-                    prouve pas une image identique.
+                    {view?.bound ? 'Modèle lié ✓' : 'Choisissez la même image que le fantôme affiché dans GeoPixels.'}
                 </p>
+                <div className="connector-test-model">
+                    <img
+                        src="/fixtures/geoplacer-8x5.png"
+                        alt="Modèle de test : L noir en haut à gauche, points en bas à droite"
+                        width="80"
+                        height="50"
+                    />
+                    <div>
+                        <button disabled={busy || active} onClick={() => void action(restoreTestModel)}>
+                            Utiliser le modèle de test 8 × 5
+                        </button>
+                        <a href="/fixtures/geoplacer-8x5.png" download>
+                            Télécharger le PNG pour GeoPixels
+                        </a>
+                    </div>
+                </div>
                 <label>
                     Modèle local{' '}
                     <select
@@ -277,7 +327,14 @@ export function ConnectorDashboard() {
                             Sélectionner
                         </option>
                         {templates.map((t) => (
-                            <option key={t.templateId} value={t.templateId}>
+                            <option
+                                key={t.templateId}
+                                value={t.templateId}
+                                disabled={
+                                    !!view?.project &&
+                                    (t.width !== view.project.width || t.height !== view.project.height)
+                                }
+                            >
                                 {t.name} ({t.width} × {t.height})
                             </option>
                         ))}
@@ -290,13 +347,45 @@ export function ConnectorDashboard() {
                         : 'Indisponible'}
                 </p>
                 <button
-                    disabled={busy || active || !view?.connected || !view?.selection}
+                    disabled={busy || active || !view?.connected || !dimensionsMatch}
                     onClick={() => void action(() => engineHttp.post('/connector/bind', {}))}
                 >
                     Lier ce modèle
                 </button>
-                <p>{view?.bound ? 'Modèle lié' : 'Liaison nécessaire'}</p>
+                {!view?.bound && view?.project && !dimensionsMatch && (
+                    <p role="status">
+                        Le fantôme fait {view.project.width} × {view.project.height}. Sélectionnez un modèle de cette
+                        taille ; le paysage de démonstration ne convient pas.
+                    </p>
+                )}
+                <details>
+                    <summary>Vérification de l’image</summary>
+                    <p>
+                        Comparez l’image, ses couleurs et sa position. Une taille identique ne suffit pas à prouver que
+                        les images sont les mêmes.
+                    </p>
+                </details>
             </div>
+            {view?.singlePixel && (
+                <SinglePixelPanel
+                    view={view.singlePixel}
+                    approvalKey={approvalKey}
+                    fake={view.mode === 'local-fake'}
+                    ready={view.connected && view.bound && !active}
+                    blockedReason={
+                        !view.connected
+                            ? 'Connectez le navigateur dans l’étape 1.'
+                            : !view.bound
+                              ? 'Liez le bon modèle dans l’étape 2.'
+                              : !approvalKey
+                                ? 'Saisissez la clé locale dans les réglages de connexion.'
+                                : null
+                    }
+                    refresh={async () => {
+                        setView((await engineHttp.get<View>('/connector/status')).data);
+                    }}
+                />
+            )}
             <div className="grid gap-4 md:grid-cols-2">
                 <div className="rounded border p-4">
                     <h3>Progression observée</h3>
