@@ -271,6 +271,89 @@ describe('Autonomous drawing: same scheduler, explicit whole-image authority', (
         expect((await pngjsCodec.decode((await f.s.exportDrawing(t.templateId)).png)).width).toBe(5000);
     });
 });
+describe('Import after a drawing: preserve receipts, never stop live or uncertain operations', () => {
+    const nextImage = async () => ({
+        name: 'New imported image',
+        png: await demoPng(4, 3, () => 0),
+        palette: ['#000000'],
+    });
+    it('imports after restart with 55 historical ACKs, without a new pairing or losing any confirmation', async () => {
+        const f = await fixture(),
+            b = f.s.singlePixelWriter.batch;
+        await f.s.bindConnector();
+        f.energy(55);
+        const p = await b.prepare('fake', 100, 'continuous', 100, {
+            region: { x: 0, y: 0, width: 20, height: 20 },
+            durationMs: 600000,
+        });
+        await b.approve(p.id!, p.digest!);
+        await wait(
+            () => b.view().confirmed === 55,
+            () => b.view().confirmed
+        );
+        await f.s.close();
+        opened.splice(opened.indexOf(f.s), 1);
+        const restored = await EngineService.open({ dataDir: f.dir });
+        opened.push(restored);
+        expect(restored.singlePixelWriter.batch.view()).toMatchObject({
+            state: 'interrupted',
+            confirmed: 55,
+            uncertain: 0,
+        });
+        expect(restored.singlePixelWriter.view()).toMatchObject({ locked: true, open: 0 });
+        const before = JSON.parse(await readFile(path.join(f.dir, 'connector-batch.json'), 'utf8'));
+        const imported = await restored.importDrawing(await nextImage());
+        expect(restored.status().selection?.templateId).toBe(imported.templateId);
+        expect(restored.singlePixelWriter.view().locked).toBe(false);
+        expect(restored.singlePixelWriter.batch.view()).toMatchObject({
+            state: 'stopped',
+            confirmed: 55,
+            acceptedRequests: 11,
+            uncertain: 0,
+        });
+        expect(restored.singlePixelWriter.batch.transportRenewable()).toBe(false);
+        const after = JSON.parse(await readFile(path.join(f.dir, 'connector-batch.json'), 'utf8'));
+        expect(after.head).toBe(before.head);
+        expect(after.recordCount).toBe(55);
+        expect(f.calls()).toBe(11);
+    });
+    it('retires an unapproved preview before importing, without executing it', async () => {
+        const f = await fixture();
+        await f.s.previewDrawing();
+        expect(f.s.singlePixelWriter.batch.view().state).toBe('prepared');
+        const imported = await f.s.importDrawing(await nextImage());
+        expect(f.s.status().selection?.templateId).toBe(imported.templateId);
+        expect(f.calls()).toBe(0);
+    });
+    it('refuses import during an authorized paused drawing and preserves its selected model', async () => {
+        const f = await fixture(),
+            b = f.s.singlePixelWriter.batch;
+        f.energy(5);
+        const p = await f.s.previewDrawing(5, 25);
+        await b.approve(p.id!, p.digest!);
+        await wait(() => b.view().confirmed === 5);
+        await b.pause();
+        await wait(() => b.view().scheduler === 'paused');
+        await expect(f.s.importDrawing(await nextImage())).rejects.toThrow(/Arrêter le dessin/);
+        expect(b.view()).toMatchObject({ state: 'paused', confirmed: 5 });
+        expect(f.s.status().selection?.templateId).toBe(f.t.templateId);
+        expect(f.calls()).toBe(1);
+    });
+    it('refuses import while a result is uncertain and keeps the operation blocked', async () => {
+        const f = await fixture(true),
+            b = f.s.singlePixelWriter.batch;
+        f.energy(5);
+        const p = await f.s.previewDrawing(5, 5);
+        await b.approve(p.id!, p.digest!);
+        await wait(() => f.calls() === 1);
+        await b.stop();
+        await expect(f.s.importDrawing(await nextImage())).rejects.toThrow(/incertaine/);
+        expect(b.view().uncertain).toBeGreaterThan(0);
+        expect(f.s.status().selection?.templateId).toBe(f.t.templateId);
+        expect(f.calls()).toBe(1);
+    });
+});
+
 describe('Durable confirmation segments without a 4096-record ceiling', () => {
     it('preserves a v1 archive, appends only new records and restores valid orphan segments after a manifest loss', async () => {
         const dir = await tempDir();

@@ -12,7 +12,10 @@ type DrawingView = {
     progress: { correct: number; incorrect: number; unknown: number; total: number } | null;
 };
 const errorMessage = (e: unknown) => {
-    const v = e as { response?: { data?: { error?: { message?: string } } } };
+    const v = e as { response?: { status?: number; data?: { error?: { message?: string } } } };
+    if (v.response?.status === 413) return 'Image trop volumineuse pour le serveur.';
+    if (v.response?.status === 404)
+        return 'Le serveur doit être redémarré pour activer l’import. Redémarrer GeoPlacer puis réessayer.';
     return (
         v.response?.data?.error?.message ??
         'Serveur indisponible : vérifier la connexion et l’état avant de poursuivre.'
@@ -34,6 +37,10 @@ export function SimpleDrawingPanel({
     const [groupSize, setGroupSize] = useState(5),
         [budget, setBudget] = useState(''),
         [palette, setPalette] = useState(PERSONAL_GEOPIXELS_PALETTE.join('\n'));
+    const [importNotice, setImportNotice] = useState<{ kind: 'loading' | 'success' | 'error'; text: string } | null>(
+        null
+    );
+    const importing = importNotice?.kind === 'loading';
     const attempted = useRef('');
     const batch = view?.batch,
         selected = view?.selection,
@@ -52,26 +59,45 @@ export function SimpleDrawingPanel({
         }
     }
     async function importImage() {
-        if (!file) return;
+        if (!file || busy) return;
         const colors = parsePaletteText(palette);
         if (colors.invalid.length || !colors.colors.length) {
-            setError('Palette invalide : codes #RRGGBB requis.');
+            setImportNotice({ kind: 'error', text: 'Palette invalide : codes #RRGGBB requis.' });
             return;
         }
-        await action(async () => {
+        setBusy(true);
+        setImportNotice({ kind: 'loading', text: 'Importation de l’image en cours…' });
+        try {
             const data = await new Promise<string>((resolve, reject) => {
                 const r = new FileReader();
                 r.onload = () => resolve(String(r.result).split(',')[1]!);
-                r.onerror = reject;
+                r.onerror = () => reject(new Error('Lecture du PNG impossible.'));
+                r.onabort = () => reject(new Error('Lecture du PNG interrompue.'));
                 r.readAsDataURL(file);
             });
-            await engineHttp.post(
-                '/connector/drawing/import',
-                { name: file.name.replace(/\.png$/i, ''), pngBase64: data, palette: colors.colors },
-                { headers: { 'X-GeoPlacer-Approval': approvalKey } }
-            );
+            const { data: imported } = await engineHttp.post<TemplateInfo>('/connector/drawing/import', {
+                name: file.name.replace(/\.png$/i, ''),
+                pngBase64: data,
+                palette: colors.colors,
+            }); // Local preparation does not require pairing or a private approval key.
             attempted.current = '';
-        });
+            setImportNotice({
+                kind: 'success',
+                text: `Image importée : ${imported.name} (${imported.width} × ${imported.height}).`,
+            });
+            try {
+                await refresh();
+            } catch {
+                setError('Image enregistrée ; actualiser le dashboard pour afficher le modèle.');
+            }
+        } catch (e) {
+            setImportNotice({
+                kind: 'error',
+                text: e instanceof Error && !('response' in e) && !('isAxiosError' in e) ? e.message : errorMessage(e),
+            });
+        } finally {
+            setBusy(false);
+        }
     }
     const previewIdentity =
         selected && view?.project
@@ -105,7 +131,7 @@ export function SimpleDrawingPanel({
     const consent = { batchId: batch?.id, digest: batch?.digest, approved: true };
     return (
         <div className="space-y-4" id="simpleDrawing">
-            <div className="rounded border p-4 space-y-3">
+            <div className="rounded border p-4 space-y-3" aria-busy={importing}>
                 <h3 className="text-lg font-semibold">1. Importer votre image</h3>
                 <p>
                     Le PNG préparé est le modèle qui sera dessiné. Chargez ce même fichier comme fantôme dans GeoPixels.
@@ -115,11 +141,19 @@ export function SimpleDrawingPanel({
                     type="file"
                     accept="image/png"
                     disabled={active || busy}
-                    onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                    onChange={(e) => {
+                        setFile(e.target.files?.[0] ?? null);
+                        setImportNotice(null);
+                    }}
                 />
                 <button disabled={!file || active || busy} onClick={() => void importImage()}>
-                    Importer l’image
+                    {importing ? 'Importation en cours…' : 'Importer l’image'}
                 </button>
+                {importNotice && (
+                    <p id="drawingImportNotice" role={importNotice.kind === 'error' ? 'alert' : 'status'}>
+                        {importNotice.text}
+                    </p>
+                )}
                 {selected && imageUrl && (
                     <div className="flex flex-wrap items-center gap-4">
                         <img

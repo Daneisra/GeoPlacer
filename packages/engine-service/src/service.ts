@@ -1168,7 +1168,15 @@ export class EngineService {
 
   async importDrawing(input: GhostImportInput) {
     this.guard();this.requireIdle('importing a drawing');
-    check(!this.singlePixelWriter.view().locked,'stop the current drawing before importing');
+    const batch = this.singlePixelWriter.batch, previous = batch.view();
+    check(!['running', 'paused'].includes(previous.state), 'Arrêter le dessin en cours avant d’importer une autre image.');
+    check(this.singlePixelWriter.view().open === 0, 'Une opération est en attente ou incertaine : l’arrêter ou la réconcilier avant l’import.');
+    // A restored/draft scope has no live authority. Retire it without losing its journal or receipts.
+    if (this.singlePixelWriter.view().locked) {
+      check(['prepared', 'interrupted', 'blocked'].includes(previous.state), 'Le dessin est encore verrouillé ; vérifier son état avant l’import.');
+      await batch.stop('Nouveau modèle importé : ancien accord inactif retiré, confirmations conservées.');
+    }
+    check(!this.singlePixelWriter.view().locked, 'Le dessin est encore verrouillé ; vérifier son état avant l’import.');
     const t=await importGhost(this.templates,pngjsCodec,{...input,x:0,y:0},SIMULATION_PROJECT);
     await this.selectTemplate(t.id);return this.templateInfo(t);
   }

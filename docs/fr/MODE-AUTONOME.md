@@ -10,6 +10,8 @@ Branche locale `feat/autonomous-drawing`, issue de `e38998f`. Aucun nouvel envoi
 4. Dans **Connexion au navigateur**, effectuer le couplage : clé privée dans le dashboard uniquement, code temporaire dans le lecteur, comparaison de l’empreinte et confirmation locale. Une première observation de 256 × 256 maximum part automatiquement ; le reste demeure inconnu.
 5. La correspondance des pixels RGBA est vérifiée par SHA-256 et le modèle est lié automatiquement. Vérifier l’aperçu, le rectangle natif et le budget, puis **Lancer le dessin**. Surveillance, planification et envois démarrent ensemble.
 
+L’import affiche sa progression puis son résultat juste sous le bouton. Un ancien brouillon ou travail interrompu sans opération ouverte est retiré automatiquement, en conservant ses confirmations. Un dessin actif/pausé ou une opération incertaine bloque toujours le changement de modèle. Le couplage n’est pas nécessaire pour importer.
+
 **Options du dessin** permet de réduire le budget et de régler les groupes entre **1 et 5** pixels. Sans budget personnalisé, le maximum correspond aux cibles opaques. La palette proposée reprend la liste personnelle de 28 couleurs, sans présumer des couleurs débloquées ; la modifier avant l’import si nécessaire. **Réglages avancés** retrouve les anciens parcours et diagnostics.
 
 Pause, reprise, arrêt et révocation restent disponibles. **Préparer la suite** crée une nouvelle prévisualisation après arrêt/terminaison, sans autoriser d’envoi.
@@ -40,6 +42,8 @@ Les confirmations sont enregistrées en segments immuables chaînés SHA-256, à
 | Connexion prolongée | Une heure avec horloge contrôlée ; aucun renouvellement après retrait d’accord |
 
 Journal complet : `test-logs/2026-11-18T20-20-44-528Z-check.log`. Après le dernier ajustement de l’interface, lint frontend sans avertissement et build avec types validés : `test-logs/2026-11-18T20-33-52-132Z-build.log`. Journaux des recettes : `test-logs/autonomous-edge-delivery.log` (simulateur/factice), `test-logs/autonomous-edge-http-delivery.log` et `test-logs/autonomous-firefox-delivery.log` (HTTP final). Les recettes navigateur utilisent une page factice et une API GM simulée ; elles ne valident pas Tampermonkey sur le site réel.
+
+Correctif d’import : 11 tests du dessin autonome réussis, dont quatre cas de reprise/import (55 confirmations conservées, brouillon non autorisé, pause et résultat incertain), types et lints validés. Journal : `test-logs/import-fix-all-drawing-tests.log`. Build : `test-logs/2026-11-18T21-20-27-021Z-build.log`. Recette ciblée : `node scripts/recette-connecteur.mjs test-logs/import-fix/edge --import-only` (page locale uniquement).
 
 Aucun clone supplémentaire : installation, dépendances et archives Windows inchangées. Les données de votre serveur n’ont pas été utilisées ni migrées pendant les tests.
 

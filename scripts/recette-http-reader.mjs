@@ -499,7 +499,7 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     await simple.getByRole('button',{name:'Importer l’image',exact:true}).click();
     await simple.getByText('Options du dessin',{exact:true}).click();
     await simple.getByLabel('Budget du dessin',{exact:true}).fill('20');
-    await page.waitForFunction(()=>![...document.querySelectorAll('#simpleDrawing button')].find(b=>b.textContent==='Importer l’image')?.disabled);
+    await simple.locator('#drawingImportNotice').filter({hasText:/^Image importée :/}).waitFor();
     await reader.evaluate(()=>{currentEnergy=100;globalThis.fixtureWrites=[];});
     await pair(); // Auto-observation after approved coupling must match the imported PNG hash.
     await simple.getByRole('button',{name:'Lancer le dessin',exact:true}).waitFor();

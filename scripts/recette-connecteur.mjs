@@ -10,10 +10,11 @@ import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.resolve(process.argv[2] ?? 'test-logs/phase2a/browser');
+const importOnly=process.argv.includes('--import-only');
 mkdirSync(out, { recursive: true });
 // Independent acceptance scenarios: do not exhaust the production 300/min management
 // budget with the preceding simulator stress workflow, or weaken that protection.
-if (!process.argv.includes('--fake-only') && !process.argv.includes('--http-only')) {
+if (!importOnly && !process.argv.includes('--fake-only') && !process.argv.includes('--http-only')) {
   for (const part of ['fake', 'http']) {
     const code = await new Promise(resolve => {
       const child=spawn(process.execPath,[fileURLToPath(import.meta.url),path.join(out,part),`--${part}-only`],{
@@ -101,7 +102,40 @@ try {
   });
   const page = await context.newPage();
   await page.goto(base);
-  if (!process.argv.includes('--http-only')) {
+  if(importOnly){
+    await page.getByLabel('Source de toile').selectOption('geopixels');
+    const simple=page.locator('#simpleDrawing'),notice=simple.locator('#drawingImportNotice');
+    await simple.getByLabel('Image à dessiner',{exact:true}).setInputFiles(path.join(repo,'public/fixtures/geoplacer-20x20.png'));
+    const url='**/api/v1/connector/drawing/import',refusal='Arrêter le dessin en cours avant d’importer une autre image.';
+    const refuse=route=>route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({error:{message:refusal}})});
+    await page.route(url,refuse);
+    await simple.getByRole('button',{name:'Importer l’image',exact:true}).click();
+    await notice.filter({hasText:refusal}).waitFor();assert.equal(await notice.getAttribute('role'),'alert');
+    assert.equal(await simple.getByRole('button',{name:'Importer l’image',exact:true}).isEnabled(),true);
+    await page.unroute(url,refuse);
+    record('OK import rejection remains visible beside the import button, without a false success');
+    let release;const gate=new Promise(resolve=>{release=resolve;});
+    const hold=async route=>{await gate;await route.continue();};await page.route(url,hold);
+    await simple.getByRole('button',{name:'Importer l’image',exact:true}).click();
+    assert.equal(await simple.getByRole('button',{name:'Importation en cours…',exact:true}).isDisabled(),true);
+    await notice.filter({hasText:'Importation de l’image en cours…'}).waitFor();
+    release();await notice.filter({hasText:/^Image importée :.*20 × 20/}).waitFor();
+    assert.equal(await notice.getAttribute('role'),'status');
+    await page.unroute(url,hold);
+    const actual=await api('connector/status',undefined,'GET');assert.equal(actual.selection.width,20);assert.equal(actual.selection.height,20);
+    assert.equal(actual.connected,false);assert.equal(actual.batch.confirmed,0);assert.equal(actual.batch.uncertain,0);
+    assert.equal(await page.getByLabel('Clé locale d’approbation',{exact:true}).inputValue(),'');
+    await simple.getByRole('link',{name:'Télécharger le fantôme pour GeoPixels',exact:true}).waitFor();
+    record('OK real local import WITHOUT pairing/key: progress feedback, success with dimensions, selected model and downloadable PNG, zero placements');
+    const missing=route=>route.fulfill({status:404,contentType:'application/json',body:'{}'});await page.route(url,missing);
+    await simple.getByRole('button',{name:'Importer l’image',exact:true}).click();
+    await notice.filter({hasText:/serveur doit être redémarré/}).waitFor();
+    assert.equal(await notice.getAttribute('role'),'alert');await page.unroute(url,missing);
+    assert.equal((await api('connector/status',undefined,'GET')).selection.templateId,actual.selection.templateId);
+    record('OK stale server response gives an explicit restart instruction; existing imported model preserved');
+    await page.screenshot({path:path.join(out,'import-local-regression.png'),fullPage:true});
+  }
+  if (!importOnly && !process.argv.includes('--http-only')) {
   await page.getByLabel('Source de toile').selectOption('geopixels');
   await page.locator('#connectorDashboard').waitFor();
   await page.getByLabel('Réglages avancés',{exact:true}).check();
@@ -228,7 +262,7 @@ try {
     record(`OK browser fixture stores and reloads ${width} x ${height} without placement`);
   }
   }
-  if (!process.argv.includes('--fake-only'))
+  if (!importOnly && !process.argv.includes('--fake-only'))
     await runHttpReaderRecipe({ browser, page, api, base, approvalKey, repo, out, record });
   assert.equal(external.length, 0, JSON.stringify(external));
   assert.equal(errors.length, 0, JSON.stringify(errors));
