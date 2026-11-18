@@ -43,3 +43,4 @@ data.avant-restauration-*/
 
 # Public synthetic fixture for reproducible read-only connector validation
 !/public/fixtures/geoplacer-8x5.png
+!/public/fixtures/geoplacer-20x20.png

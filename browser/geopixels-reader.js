@@ -177,6 +177,13 @@ const GeoPlacerPageReader = (() => {
     return { project, contract: c.id, cacheStats };
   }
   return {
+    targetColor: (x, y) => {
+      if (!Number.isInteger(x) || !Number.isInteger(y) || typeof ghostImageOriginalData === 'undefined') return null;
+      const d = ghostImageOriginalData;
+      if (!d || x < 0 || y < 0 || x >= d.width || y >= d.height) return null;
+      const i = (y * d.width + x) * 4;
+      return d.data[i + 3] === 255 ? (d.data[i] << 16) | (d.data[i + 1] << 8) | d.data[i + 2] : null;
+    },
     contract,
     project: () => lastProject,
     inspect,

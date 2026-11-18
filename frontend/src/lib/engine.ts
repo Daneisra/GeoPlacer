@@ -9,7 +9,7 @@ import { translateError } from './i18n';
 
 export const engineHttp = axios.create({ baseURL: '/api/v1', headers: { 'Content-Type': 'application/json' } });
 
-export type SchedulerState = 'stopped' | 'initializing' | 'running' | 'paused' | 'waiting-resources' | 'waiting-reconciliation' | 'completed' | 'error';
+export type SchedulerState = 'stopped' | 'initializing' | 'running' | 'paused' | 'waiting-resources' | 'waiting-observation' | 'waiting-reconciliation' | 'completed' | 'error';
 
 export interface TemplateInfo {
   templateId: string;
@@ -174,6 +174,7 @@ export const STATE_LABELS: Record<SchedulerState, string> = {
   running: 'En cours',
   paused: 'En pause',
   'waiting-resources': 'Attente ressources',
+  'waiting-observation': 'En attente d’observations',
   'waiting-reconciliation': 'Attente réconciliation',
   completed: 'Terminé',
   error: 'Erreur',

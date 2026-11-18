@@ -1,3 +1,4 @@
+import { validWriterResources } from '@geoplacer/engine-service';
 import express, { Router, type ErrorRequestHandler } from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
@@ -120,7 +121,7 @@ export function createPrivilegedReaderRouter(channel: ConnectorHttpChannel): Rou
                     protocol: z.literal(1),
                     batchId: z.string().uuid(),
                     attemptId: z.string().uuid(),
-                    result: z.enum(['confirmed', 'not-sent', 'uncertain']),
+                    result: z.enum(['confirmed', 'not-sent', 'uncertain', 'waiting-resources']),
                 })
                 .parse(req.body);
             const view = await channel.batchResult(res.locals.capability as string, b.batchId, b.attemptId, b.result);
@@ -141,9 +142,10 @@ export function createPrivilegedReaderRouter(channel: ConnectorHttpChannel): Rou
                 .strictObject({
                     protocol: z.literal(1),
                     readerVersion: z
-                        .union([z.literal(3), z.literal(4), z.literal(5), z.literal(6), z.literal(7)])
+                        .union([z.literal(3), z.literal(4), z.literal(5), z.literal(6), z.literal(7), z.literal(8)])
                         .optional(),
                     waitMs: z.literal(5000).optional(),
+                    writerResources: z.custom(validWriterResources).optional(),
                     abortedCapture: z
                         .string()
                         .regex(/^[a-zA-Z0-9._:-]{1,128}$/)
@@ -156,8 +158,9 @@ export function createPrivilegedReaderRouter(channel: ConnectorHttpChannel): Rou
                         .optional(),
                 })
                 .parse(req.body);
-            if ((b.monitoring || b.waitMs || b.abortedCapture) && ![3, 4, 5, 6, 7].includes(b.readerVersion ?? 0))
+            if ((b.monitoring || b.waitMs || b.abortedCapture) && ![3, 4, 5, 6, 7, 8].includes(b.readerVersion ?? 0))
                 throw new Error('reader version required');
+            if (b.writerResources !== undefined && b.readerVersion !== 8) throw new Error('resource protocol required');
             const abort = new AbortController();
             res.once('close', () => abort.abort());
             const answer = b.waitMs
@@ -166,9 +169,16 @@ export function createPrivilegedReaderRouter(channel: ConnectorHttpChannel): Rou
                       b.readerVersion!,
                       b.monitoring,
                       abort.signal,
-                      b.abortedCapture
+                      b.abortedCapture,
+                      b.writerResources
                   )
-                : channel.status(res.locals.capability as string, b.readerVersion, b.monitoring, b.abortedCapture);
+                : channel.status(
+                      res.locals.capability as string,
+                      b.readerVersion,
+                      b.monitoring,
+                      b.abortedCapture,
+                      b.writerResources
+                  );
             await pace(start);
             channel.verify(res.locals.capability as string);
             if (!res.destroyed) res.json(answer);

@@ -115,6 +115,7 @@ export function validateSchedulerConfig(config: SchedulerConfig): void {
     if (!positive(n)) throw new SchedulerConfigError(`${name} must be a positive integer`);
   }
   if (config.minBatchSize > config.maxBatchSize) throw new SchedulerConfigError('minBatchSize must not exceed maxBatchSize');
+  if (config.watchOnIdle !== undefined && typeof config.watchOnIdle !== 'boolean') throw new SchedulerConfigError('watchOnIdle must be boolean');
   if (config.maxCycles !== null && !positive(config.maxCycles)) throw new SchedulerConfigError('maxCycles must be a positive integer or null');
   if (config.progressMode !== undefined && config.progressMode !== 'full' && config.progressMode !== 'incremental') throw new SchedulerConfigError('progressMode must be full or incremental');
 }
@@ -382,6 +383,10 @@ export function createScheduler(config: SchedulerConfig, deps: SchedulerDependen
         const latest = await deps.templates.current(ref);
         if (latest.revision !== current.revision) return { kind: 'continue' };
       }
+      if (config.watchOnIdle) {
+        setState('waiting-observation', 'waiting for changed or newly covered pixels');
+        return { kind: 'sleep', ms: config.reconcileRetryMs };
+      }
       setState('completed', 'the canvas matches the template');
       return { kind: 'end' };
     }
@@ -428,6 +433,10 @@ export function createScheduler(config: SchedulerConfig, deps: SchedulerDependen
           return { kind: 'sleep', ms: config.reconcileRetryMs };
         }
         const blocked = plan.unavailableColors.length > 0 ? `${plan.unavailableColors.reduce((n, c) => n + c.pixels, 0)} pixel(s) of colors the agent has not unlocked` : `${progress.unknown} pixel(s) never observed`;
+        if (config.watchOnIdle) {
+          setState(plan.unavailableColors.length ? 'waiting-resources' : 'waiting-observation', blocked);
+          return { kind: 'sleep', ms: config.reconcileRetryMs };
+        }
         return fail('BLOCKED', `work left that the agent cannot do: ${blocked}`);
       }
       case 'waiting': {

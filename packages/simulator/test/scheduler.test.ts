@@ -331,3 +331,15 @@ describe('scheduler: faults, restarts, revisions', () => {
     expect(report).toMatchObject({ fromCheckpoint: true, damaged: false, toReconcile: [] });
   });
 });
+
+
+describe('scheduler: opt-in observation watch uses the same loop',()=>{
+  it('does not finish on a correct scope; later damage becomes work without a new scheduler',async()=>{
+    const e=new Engine(flag(2,2),{config:{watchOnIdle:true}});
+    for(let i=0;i<10 && e.scheduler.status().state!=='waiting-observation';i++)await e.scheduler.step();
+    expect(e.scheduler.status().state).toBe('waiting-observation');expect(e.wrong()).toBe(0);
+    e.canvas.erase({x:2,y:3});await e.scheduler.step();
+    expect(e.wrong()).toBe(0);expect(e.scheduler.status().state).not.toBe('completed');
+    await e.scheduler.stop();
+  });
+});

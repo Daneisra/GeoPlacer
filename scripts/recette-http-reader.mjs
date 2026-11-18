@@ -420,6 +420,74 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
       () => [...document.querySelectorAll('button')].find((b) => b.textContent === 'Coupler')?.disabled === false
     );
     record('OK HTTP disconnect, new pairing and live revocation');
+    // 2J: larger model, real reader code + privileged transport, all service writes mocked locally.
+    const large = PNG.sync.read(readFileSync(path.join(repo,'public/fixtures/geoplacer-20x20.png')));
+    assert.equal(large.width,20); assert.equal(large.height,20);
+    const largeTemplate=await api('templates',{name:'LOCAL FIXTURE — continuous 20 × 20',pngBase64:PNG.sync.write(large).toString('base64'),x:0,y:0,strategy:'top-to-bottom'});
+    await api('engine/selection',{templateId:largeTemplate.templateId},'PUT');
+    await reader.evaluate((rgba)=>{
+      ghostImageOriginalData=new ImageData(new Uint8ClampedArray(rgba),20,20);
+      tileImageCache.clear();
+      for(let y=0;y<20;y++)for(let x=0;x<20;x++){
+        const gx=ghostImageTopLeft.gridX+x,gy=ghostImageTopLeft.gridY-y,tx=Math.floor(gx/1000)*1000,ty=Math.floor(gy/1000)*1000,key=tx+','+ty;
+        if(!tileImageCache.has(key)){const c=document.createElement('canvas');c.width=c.height=1000;tileImageCache.set(key,{colorBitmap:c});}
+      }
+      globalThis.fixtureEnergyListeners=new Set();
+      globalThis.syncWorker={postMessage(){},addEventListener(type,fn){if(type==='message')fixtureEnergyListeners.add(fn);},removeEventListener(type,fn){if(type==='message')fixtureEnergyListeners.delete(fn);}};
+      currentEnergy=100;globalThis.fixtureWrites=[];
+    },[...large.data]);
+    await page.reload();
+    await page.getByLabel('Clé locale d’approbation',{exact:true}).fill(approvalKey);
+    await pair();
+    await reader.getByRole('button',{name:'Observer le modèle',exact:true}).click();
+    await page.getByText('Modèle du navigateur : 20 × 20, origine (999, 1001)',{exact:true}).waitFor();
+    await page.getByLabel('Modèle local',{exact:true}).selectOption(largeTemplate.templateId);
+    await page.getByRole('button',{name:'Lier ce modèle',exact:true}).click();
+    await page.getByText('Modèle lié ✓',{exact:true}).waitFor();
+    await batchPanel.getByLabel('Mode d’envoi',{exact:true}).selectOption('continuous');
+    await batchPanel.getByLabel('Nombre maximal de pixels',{exact:true}).fill('30');
+    await batchPanel.getByLabel('Budget maximal d’énergie',{exact:true}).fill('30');
+    await batchPanel.getByLabel('Zone X',{exact:true}).fill('2');
+    await batchPanel.getByLabel('Zone Y',{exact:true}).fill('3');
+    await batchPanel.getByLabel('Largeur de zone',{exact:true}).fill('10');
+    await batchPanel.getByLabel('Hauteur de zone',{exact:true}).fill('10');
+    await batchPanel.getByRole('button',{name:'Prévisualiser la session',exact:true}).click();
+    await page.locator('[data-batch-state="prepared"]').waitFor();
+    await batchPanel.getByLabel('Autorisation continue',{exact:true}).getByText(/zone image \(2, 3\).*10 × 10/).waitFor();
+    const callsBefore=await reader.evaluate(()=>globalThis.fixtureSiteCalls);
+    await batchPanel.getByRole('button',{name:'Autoriser et démarrer la session',exact:true}).click();
+    await batchPanel.getByText('Attente de ressources observables',{exact:false}).waitFor();
+    assert.equal(await reader.evaluate(()=>globalThis.fixtureSiteCalls),callsBefore);
+    // Only a native worker response supplies spendable energy; the page clock alone cannot.
+    await reader.evaluate(()=>{
+      syncWorker.postMessage({type:'sync-delta'});
+      for(const fn of fixtureEnergyListeners)fn({data:{ok:true,userData:{energy:10,colors:'0,16777215'}}});
+    });
+    await page.waitForFunction(()=>document.querySelector('[data-batch-state]')?.textContent.includes('10 / 30'));
+    await batchPanel.getByText('Attente de ressources observables',{exact:false}).waitFor();
+    assert.equal(await reader.evaluate(()=>globalThis.fixtureSiteCalls),callsBefore+2);
+    await batchPanel.getByRole('button',{name:'Mettre la session en pause',exact:true}).click();
+    await page.locator('[data-batch-state="paused"]').waitFor();
+    await reader.evaluate(()=>{
+      currentEnergy=90; // A separate, explicit fixture response; no regeneration assumption.
+      syncWorker.postMessage({type:'sync-delta'});
+      for(const fn of fixtureEnergyListeners)fn({data:{ok:true,userData:{energy:20,colors:'0,16777215'}}});
+    });
+    await batchPanel.getByRole('button',{name:'Reprendre la session autorisée',exact:true}).click();
+    await page.locator('[data-batch-state="completed"]').waitFor();
+    const continuous=await api('connector/status',undefined,'GET');
+    assert.equal(continuous.batch.confirmed,30);assert.equal(continuous.batch.acceptedRequests,6);
+    assert.equal(await reader.evaluate(()=>globalThis.fixtureSiteCalls),callsBefore+6);
+    const actual=await reader.evaluate(()=>globalThis.fixtureWrites);
+    // The fixture's existing fetch mock retains the last request only.
+    assert.ok(actual.every(p=>p.GridX>=1001&&p.GridX<1011&&p.GridY<=998&&p.GridY>988));
+    assert.ok(continuous.batch.targets.every(p=>p.x>=1001&&p.x<1011&&p.y<=998&&p.y>988));
+    assert.equal(new Set(continuous.batch.targets.map(p=>p.x+','+p.y)).size,30);
+    assert.equal(continuous.progress.correct,0); // ACK never mutates the cache.
+    record('OK continuous 20x20 model: rectangle preview, one approval, native-energy wait, 30 unique targets in six groups <=5, pause/resume, bounded stop; no real service requests');
+    await page.screenshot({path:path.join(out,'continuous-dashboard-local-fixture.png'),fullPage:true});
+    await page.getByRole('button',{name:'Révoquer le canal',exact:true}).click();
+
     assert.deepEqual(external, []);
     assert.deepEqual(errors, []);
     writeFileSync(

@@ -106,10 +106,10 @@ const GeoPlacerHttpTransport = (address, request) => {
       capability = claimed.capability;
       pending(claimed.fingerprint);
       for (let i = 0; i < 60; i++) {
-        const state = await post('status', { protocol: 1, readerVersion: 7, waitMs: 5000 });
+        const state = await post('status', { protocol: 1, readerVersion: 8, waitMs: 5000 });
         if (state.approved === true && state.lastSequence === 0) {
-          if (state.pacing !== 'server-50ms' || state.regionalProtocol !== 1 || state.batchProtocol !== 3)
-            throw new Error('Serveur incompatible : installer la Phase 2G et refaire le couplage.');
+          if (state.pacing !== 'server-50ms' || state.regionalProtocol !== 1 || state.batchProtocol !== 4)
+            throw new Error('Serveur incompatible : installer la Phase 2J et refaire le couplage.');
           active = true;
           return;
         }
@@ -145,7 +145,7 @@ const GeoPlacerHttpTransport = (address, request) => {
       if (!active || busy) return;
       const answer = await post('status', {
         protocol: 1,
-        readerVersion: 7,
+        readerVersion: 8,
         ...(monitoring ? { monitoring } : {}),
       });
       if (answer.approved !== true || answer.lastSequence !== sequence) {
@@ -154,12 +154,13 @@ const GeoPlacerHttpTransport = (address, request) => {
       }
       return answer;
     },
-    async poll(monitoring, abortedCapture) {
+    async poll(monitoring, abortedCapture, writerResources) {
       if (!active) throw new Error('Canal non couplé');
       const answer = await post('status', {
         protocol: 1,
-        readerVersion: 7,
+        readerVersion: 8,
         waitMs: 5000,
+        ...(writerResources ? { writerResources } : {}),
         ...(abortedCapture ? { abortedCapture } : {}),
         ...(monitoring ? { monitoring } : {}),
       });

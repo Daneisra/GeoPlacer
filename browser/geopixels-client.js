@@ -82,7 +82,7 @@
   };
   diagnose.onclick = async () => {
     try {
-      status.textContent = (await GeoPlacerPageReader.inspect()) + ' ' + (GeoPlacerPageWriter.inspect?.() ?? '');
+      status.textContent = (await GeoPlacerPageReader.inspect()) + ' ' + (GeoPlacerPageWriter.inspect?.() ?? '') + ' ' + GeoPlacerEnergy.inspect();
     } catch {
       status.textContent = 'Diagnostic du contexte de page indisponible';
     }
@@ -145,7 +145,8 @@
               throw new Error('Modèle, position, palette, couche ou session modifié : nouveau couplage nécessaire.');
             const answer = await next.poll(
               monitoring ? { revision: monitoring.revision, state: monitoring.state } : undefined,
-              abortedCapture
+              abortedCapture,
+              GeoPlacerEnergy.snapshot()
             );
             abortedCapture = null;
             if (current !== generation) return;
@@ -164,6 +165,8 @@
                 status.textContent =
                   result === 'confirmed' && !['stopped', 'blocked'].includes(ack.state)
                     ? `Lot : ${ack.acceptedRequests} requête(s) acceptée(s), ${ack.confirmed} cible(s) couverte(s) par cet accusé. Progression mesurée séparément.`
+                    : result === 'waiting-resources'
+                      ? 'Dessin suspendu : attente d’une nouvelle observation native de l’énergie.'
                     : result === 'not-sent'
                       ? 'Lot en pause : ' + (GeoPlacerPageWriter.reason?.() ?? 'pixel refusé avant envoi.')
                       : 'Lot interrompu, résultat incertain. Aucun renvoi.';

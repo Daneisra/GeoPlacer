@@ -93,7 +93,24 @@ const GeoPlacerPageWriter = (() => {
             c.gridY > p.gridY - p.height
         );
     }
+    function continuousGrant(c,g) {
+        const r=g.region;
+        return c.protocol === 2 && exact(g,['id','digest','expires','project','writes','execution','budgets','region']) &&
+            g.id === c.batchId && /^[a-f0-9-]{36}$/.test(g.id) && /^[a-f0-9]{64}$/.test(g.digest) &&
+            Number.isSafeInteger(g.expires) && g.expires > Date.now() && g.expires <= Date.now()+600000 &&
+            exact(g.project,['id','generation','width','height','gridX','gridY','layer']) &&
+            Object.keys(g.project).every(k=>g.project[k] === c.project[k]) &&
+            Array.isArray(g.writes) && g.writes.length === 0 &&
+            exact(g.budgets,['pixels','energy']) && [g.budgets.pixels,g.budgets.energy].every(n=>Number.isSafeInteger(n)&&n>=1&&n<=1000) &&
+            exact(r,['x','y','width','height']) && [r.x,r.y,r.width,r.height].every(Number.isSafeInteger) &&
+            r.x>=0 && r.y>=0 && r.width>0 && r.height>0 && r.x+r.width<=c.project.width && r.y+r.height<=c.project.height &&
+            c.pixels.every(p=> {
+                const x=p.gridX-c.project.gridX, y=c.project.gridY-p.gridY;
+                return x>=r.x && x<r.x+r.width && y>=r.y && y<r.y+r.height && GeoPlacerPageReader.targetColor(x,y)===p.color;
+            });
+    }
     function validGrant(c, grant) {
+        if (grant?.execution === 'continuous') return continuousGrant(c,grant);
         const session = grant?.execution === 'session';
         return (
             exact(grant, [
@@ -144,8 +161,8 @@ const GeoPlacerPageWriter = (() => {
         );
     }
     function sessionAllowance(c, grant, commit = false) {
-        if (grant?.execution !== 'session') return true;
-        const scope = JSON.stringify([grant.digest, grant.project, grant.writes, grant.budgets]);
+        if (!['session','continuous'].includes(grant?.execution)) return true;
+        const scope = JSON.stringify([grant.digest, grant.project, grant.writes, grant.budgets, grant.region]);
         const prior = sessionBudgets.get(c.batchId);
         if (prior && prior.scope !== scope) return false;
         const spent = (prior?.spent ?? 0) + c.pixels.length;
@@ -153,7 +170,7 @@ const GeoPlacerPageWriter = (() => {
         if (commit) sessionBudgets.set(c.batchId, { scope, spent });
         return true;
     }
-    function readinessReason(cost = 1) {
+    function readinessReason(cost = 1, continuous = false) {
         if (
             typeof tokenUser !== 'string' ||
             !tokenUser ||
@@ -175,7 +192,7 @@ const GeoPlacerPageWriter = (() => {
             return 'Énergie de la page indisponible.';
         if (
             currentEnergy < cost ||
-            (energyCeiling !== null && Math.min(currentEnergy, energyCeiling - energySpent) < cost)
+            (!continuous && energyCeiling !== null && Math.min(currentEnergy, energyCeiling - energySpent) < cost)
         )
             return 'Énergie insuffisante pour poursuivre ce lot.';
         if (ownedColors() === null) return 'Format des couleurs du compte non reconnu.';
@@ -241,7 +258,12 @@ const GeoPlacerPageWriter = (() => {
                     !(await GeoPlacerPageReader.unchanged())
                 )
                     return refuse('Modèle, position, couche ou session modifié : observer et lier de nouveau.');
-                const reason = readinessReason(pixels.length);
+                const continuous = grant?.execution === 'continuous';
+                if (continuous && (GeoPlacerEnergy.snapshot()?.available ?? 0) < pixels.length) {
+                    lastReason = 'En attente d’une nouvelle réponse native confirmant l’énergie disponible.';
+                    return 'waiting-resources';
+                }
+                const reason = readinessReason(pixels.length,continuous);
                 if (reason) return refuse(reason);
                 if (!pixels.every((p) => ownedColors().includes(p.color)))
                     return refuse('Cette couleur ne figure pas dans les couleurs du compte.');
@@ -258,7 +280,11 @@ const GeoPlacerPageWriter = (() => {
                     return refuse('Autorisation locale retirée ou expirée : préparez un nouveau pixel.');
                 if (!(await GeoPlacerPageReader.unchanged()) || !valid(c, batch) || (batch && !validGrant(c, grant)))
                     return refuse('Modèle modifié ou autorisation expirée pendant la confirmation.');
-                const finalReason = readinessReason(pixels.length);
+                if (continuous && (GeoPlacerEnergy.snapshot()?.available ?? 0) < pixels.length) {
+                    lastReason = 'Énergie non confirmée par une nouvelle réponse native.';
+                    return 'waiting-resources';
+                }
+                const finalReason = readinessReason(pixels.length,continuous);
                 if (finalReason) return refuse(finalReason);
                 if (!pixels.every((p) => ownedColors().includes(p.color)))
                     return refuse('Cette couleur ne figure plus dans les couleurs du compte.');
@@ -266,7 +292,7 @@ const GeoPlacerPageWriter = (() => {
                     return refuse('Budget de session épuisé ou autorisation modifiée.');
                 const key = 'geoplacer-single-pixel-dispatched-v1';
                 const ids = JSON.parse(sessionStorage.getItem(key) || '[]');
-                if (!Array.isArray(ids) || ids.includes(c.attemptId) || ids.length >= 100)
+                if (!Array.isArray(ids) || ids.includes(c.attemptId) || ids.length >= 2048)
                     return refuse('Registre anti-doublon indisponible ou opération déjà enregistrée. Aucun renvoi.');
                 sessionStorage.setItem(key, JSON.stringify([...ids, c.attemptId]));
                 controller = new AbortController();
@@ -278,6 +304,7 @@ const GeoPlacerPageWriter = (() => {
                 energySpent += pixels.length;
                 if (batch)
                     for (const p of pixels) batchTargets.add(c.batchId + '/' + p.gridX + ',' + p.gridY + ':' + p.color);
+                if (typeof GeoPlacerEnergy !== 'undefined') GeoPlacerEnergy.spend(pixels.length);
                 sent = true;
                 // Fixed same-origin endpoint, one approved request, no redirects, no retry. No queue or bitmap mutation.
                 const response = await fetch(location.origin + '/PlacePixels', {
@@ -300,6 +327,7 @@ const GeoPlacerPageWriter = (() => {
                     : 'Vérification locale ou stockage anti-doublon indisponible.';
                 return sent ? 'uncertain' : 'not-sent';
             } finally {
+                if (sent && typeof GeoPlacerEnergy !== 'undefined') GeoPlacerEnergy.settled();
                 clearTimeout(timer);
                 controller = null;
                 busy = false;

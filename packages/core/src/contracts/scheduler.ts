@@ -34,7 +34,7 @@ import type { AttemptManager, UnknownPixelPolicy } from './work.js';
  * attempt); error: needs an intervention (blocked work, unusable journal,
  * failing provider...).
  */
-export type SchedulerState = 'stopped' | 'initializing' | 'running' | 'paused' | 'waiting-resources' | 'waiting-reconciliation' | 'completed' | 'error';
+export type SchedulerState = 'stopped' | 'initializing' | 'running' | 'paused' | 'waiting-resources' | 'waiting-reconciliation' | 'waiting-observation' | 'completed' | 'error';
 
 /** The current revision of a template (a TemplateManager: `(await load(ref)).template`). */
 export interface TemplateSource {
@@ -77,6 +77,8 @@ export interface SchedulerConfig {
    * difference the full result is used and the state rebuilt).
    */
   readonly progressMode?: 'full' | 'incremental';
+  /** Keep observing an authorized scope instead of ending when no eligible work is visible. */
+  readonly watchOnIdle?: boolean;
 }
 
 /**

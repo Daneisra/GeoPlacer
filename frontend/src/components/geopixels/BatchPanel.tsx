@@ -6,9 +6,13 @@ export type BatchView = {
     digest: string | null;
     state: string;
     mode: 'fake' | 'real' | null;
-    execution?: 'sequential' | 'grouped' | 'session';
+    execution?: 'sequential' | 'grouped' | 'session' | 'continuous';
     energyCost?: number;
     budgets?: { pixels: number; energy: number };
+    scope?: { region: { x: number; y: number; width: number; height: number }; durationMs: number } | null;
+    spent?: number;
+    resources?: { available: number; capturedAt: number } | null;
+    regionProgress?: { correct: number; incorrect: number; unknown: number; percent: number | null } | null;
     history?: {
         attemptId: string;
         state: string;
@@ -60,6 +64,8 @@ export function BatchPanel({
     ready,
     groupedReady,
     sessionReady,
+    continuousReady,
+    project,
     refresh,
 }: {
     view: BatchView;
@@ -68,16 +74,31 @@ export function BatchPanel({
     ready: boolean;
     groupedReady: boolean;
     sessionReady: boolean;
+    continuousReady: boolean;
+    project: { width: number; height: number; gridX: number; gridY: number } | null;
     refresh: () => Promise<void>;
 }) {
     const [limit, setLimit] = useState(25);
     const [energyBudget, setEnergyBudget] = useState(25);
-    const [execution, setExecution] = useState<'grouped' | 'sequential' | 'session'>('session');
+    const [execution, setExecution] = useState<'grouped' | 'sequential' | 'session' | 'continuous'>('session');
+    const [region, setRegion] = useState({ x: 0, y: 0, width: project?.width ?? 1, height: project?.height ?? 1 });
+    const [duration, setDuration] = useState(120);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const active = ['running', 'paused'].includes(view.state);
     const locked = ['prepared', 'running', 'paused', 'interrupted', 'blocked'].includes(view.state);
     const selectedExecution = locked ? (view.execution ?? 'sequential') : execution;
+    const continuous = selectedExecution === 'continuous';
+    const scoped = view.scope?.region ?? region;
+    const invalidScope =
+        !project ||
+        !Object.values(region).every(Number.isInteger) ||
+        region.x < 0 ||
+        region.y < 0 ||
+        region.width < 1 ||
+        region.height < 1 ||
+        region.x + region.width > project.width ||
+        region.y + region.height > project.height;
     const enabled = ready && !!approvalKey && !busy;
     async function command(path: string, body: object) {
         setBusy(true);
@@ -137,11 +158,14 @@ export function BatchPanel({
                         value={selectedExecution}
                         disabled={locked || busy}
                         onChange={(e) => {
-                            const value = e.target.value as 'grouped' | 'sequential' | 'session';
+                            const value = e.target.value as 'grouped' | 'sequential' | 'session' | 'continuous';
                             setExecution(value);
-                            setLimit(value === 'session' ? 25 : 5);
+                            setLimit(value === 'continuous' ? 100 : value === 'session' ? 25 : 5);
+                            setEnergyBudget(value === 'continuous' ? 100 : 25);
+                            if (project) setRegion({ x: 0, y: 0, width: project.width, height: project.height });
                         }}
                     >
+                        <option value="continuous">Dessin continu — zone et budgets autorisés</option>
                         <option value="session">Session supervisée — 25 pixels maximum</option>
                         <option value="grouped">Groupé natif — une requête</option>
                         <option value="sequential">Séquentiel — solution de repli</option>
@@ -159,30 +183,83 @@ export function BatchPanel({
                         aria-label="Nombre maximal de pixels"
                         type="number"
                         min={1}
-                        max={selectedExecution === 'session' ? 25 : 5}
+                        max={continuous ? 1000 : selectedExecution === 'session' ? 25 : 5}
                         value={locked ? (view.budgets?.pixels ?? view.total) : limit}
                         disabled={locked || busy}
                         onChange={(e) => setLimit(Number(e.target.value))}
                     />
                 </label>{' '}
-                {selectedExecution === 'session' && (
+                {['session', 'continuous'].includes(selectedExecution) && (
                     <label className="flex flex-col gap-1">
                         Budget maximal d’énergie{' '}
                         <input
                             aria-label="Budget maximal d’énergie"
                             type="number"
                             min={1}
-                            max={25}
+                            max={continuous ? 1000 : 25}
                             value={locked ? (view.budgets?.energy ?? view.energyCost) : energyBudget}
                             disabled={locked || busy}
                             onChange={(e) => setEnergyBudget(Number(e.target.value))}
                         />
                     </label>
                 )}
+                {continuous && (
+                    <>
+                        {(['x', 'y', 'width', 'height'] as const).map((k) => (
+                            <label className="flex flex-col gap-1" key={k}>
+                                {
+                                    {
+                                        x: 'Zone X (image)',
+                                        y: 'Zone Y (image)',
+                                        width: 'Largeur de zone',
+                                        height: 'Hauteur de zone',
+                                    }[k]
+                                }
+                                <input
+                                    aria-label={
+                                        {
+                                            x: 'Zone X',
+                                            y: 'Zone Y',
+                                            width: 'Largeur de zone',
+                                            height: 'Hauteur de zone',
+                                        }[k]
+                                    }
+                                    type="number"
+                                    min={k === 'x' || k === 'y' ? 0 : 1}
+                                    value={locked ? scoped[k] : region[k]}
+                                    disabled={locked || busy}
+                                    onChange={(e) => setRegion({ ...region, [k]: Number(e.target.value) })}
+                                />
+                            </label>
+                        ))}
+                        <label className="flex flex-col gap-1">
+                            Durée maximale (secondes)
+                            <input
+                                aria-label="Durée maximale"
+                                type="number"
+                                min={30}
+                                max={600}
+                                value={locked ? (view.scope?.durationMs ?? 120000) / 1000 : duration}
+                                disabled={locked || busy}
+                                onChange={(e) => setDuration(Number(e.target.value))}
+                            />
+                        </label>
+                        {!continuousReady && <p>Installer et coupler le lecteur 0.9.0.</p>}
+                    </>
+                )}
                 <button
                     disabled={
                         !enabled ||
                         (execution === 'grouped' && !groupedReady) ||
+                        (execution === 'continuous' &&
+                            (!continuousReady ||
+                                invalidScope ||
+                                !Number.isInteger(duration) ||
+                                duration < 30 ||
+                                duration > 600 ||
+                                !Number.isInteger(energyBudget) ||
+                                energyBudget < 1 ||
+                                energyBudget > 1000)) ||
                         (execution === 'session' &&
                             (!sessionReady ||
                                 !Number.isInteger(energyBudget) ||
@@ -192,7 +269,7 @@ export function BatchPanel({
                         view.uncertain > 0 ||
                         !Number.isInteger(limit) ||
                         limit < 1 ||
-                        limit > (execution === 'session' ? 25 : 5) ||
+                        limit > (execution === 'continuous' ? 1000 : execution === 'session' ? 25 : 5) ||
                         ['prepared', 'interrupted', 'blocked'].includes(view.state)
                     }
                     onClick={() =>
@@ -200,24 +277,67 @@ export function BatchPanel({
                             mode: fake ? 'fake' : 'real',
                             limit,
                             execution,
-                            ...(execution === 'session' ? { energyBudget } : {}),
+                            ...(['session', 'continuous'].includes(execution) ? { energyBudget } : {}),
+                            ...(execution === 'continuous' ? { scope: { region, durationMs: duration * 1000 } } : {}),
                         })
                     }
                 >
-                    {execution === 'session' ? 'Prévisualiser la session' : 'Préparer le lot'}
+                    {['session', 'continuous'].includes(execution) ? 'Prévisualiser la session' : 'Préparer le lot'}
                 </button>
             </div>
-            {view.targets.length > 0 && (
+            {view.execution === 'continuous' && view.scope && project && (
+                <div className="rounded border p-3 space-y-2" aria-label="Autorisation continue">
+                    <p>
+                        Modèle lié · couche de base · zone image ({scoped.x}, {scoped.y}) · {scoped.width} ×{' '}
+                        {scoped.height}.
+                    </p>
+                    <p>
+                        Rectangle natif : ({project.gridX + scoped.x}, {project.gridY - scoped.y}) à (
+                        {project.gridX + scoped.x + scoped.width - 1}, {project.gridY - scoped.y - scoped.height + 1}).
+                    </p>
+                    <p>
+                        Autorisation : {view.scope.durationMs / 1000} s maximum · {view.budgets?.pixels} pixels
+                        distincts · {view.budgets?.energy} énergie maximum. Groupes de cinq maximum, choisis
+                        dynamiquement dans cette zone.
+                    </p>
+                    <p>
+                        Quota consommé ou réservé : {view.spent ?? 0}. Énergie exploitable :{' '}
+                        {view.resources
+                            ? `${view.resources.available} (réponse native reçue à ${new Date(view.resources.capturedAt).toLocaleTimeString('fr-FR')})`
+                            : 'indisponible ou expirée — attente d’une nouvelle réponse native'}
+                        . Aucune recharge estimée.
+                    </p>
+                    <p>
+                        État :{' '}
+                        {view.scheduler === 'waiting-resources'
+                            ? 'Attente de ressources observables'
+                            : view.scheduler === 'waiting-observation'
+                              ? 'Attente de pixels incorrects connus'
+                              : (labels[view.state] ?? view.state)}
+                        .
+                    </p>
+                    <p>
+                        Zone observée :{' '}
+                        {view.regionProgress
+                            ? `${view.regionProgress.correct} corrects · ${view.regionProgress.incorrect} incorrects · ${view.regionProgress.unknown} inconnus · ${view.regionProgress.percent == null ? 'progression indéterminée' : view.regionProgress.percent.toFixed(1) + ' %'}`
+                            : 'indisponible'}
+                        . Fraîcheur du cache non vérifiée ; un accusé reste distinct de cette mesure.
+                    </p>
+                </div>
+            )}
+            {(view.targets.length > 0 || view.scope) && (
                 <>
                     <p>
                         Vérifiez les destinations exactes : couche de base ·{' '}
                         {view.mode === 'fake'
                             ? 'simulation, aucun envoi au site'
-                            : view.execution === 'session'
-                              ? 'groupes automatiques de cinq maximum, limités aux destinations ci-dessous'
-                              : view.execution === 'grouped'
-                                ? 'une requête groupée pour toutes les lignes'
-                                : 'un envoi réel par ligne'}
+                            : view.execution === 'continuous'
+                              ? 'cibles dynamiques dans la zone autorisée ; les lignes ci-dessous sont les opérations déjà réservées'
+                              : ['session', 'continuous'].includes(view.execution ?? '')
+                                ? 'groupes automatiques de cinq maximum, limités aux destinations ci-dessous'
+                                : view.execution === 'grouped'
+                                  ? 'une requête groupée pour toutes les lignes'
+                                  : 'un envoi réel par ligne'}
                         . Coût maximal : {view.energyCost ?? view.total} énergie (1 par pixel).
                     </p>
                     <div className="overflow-x-auto">
@@ -272,12 +392,13 @@ export function BatchPanel({
                             disabled={
                                 !enabled ||
                                 (view.execution === 'grouped' && !groupedReady) ||
-                                (view.execution === 'session' && !sessionReady)
+                                (view.execution === 'session' && !sessionReady) ||
+                                (view.execution === 'continuous' && !continuousReady)
                             }
                             onClick={() => void command('approve', approval)}
                         >
                             {view.state === 'prepared'
-                                ? view.execution === 'session'
+                                ? ['session', 'continuous'].includes(view.execution ?? '')
                                     ? 'Autoriser et démarrer la session'
                                     : 'Autoriser et démarrer le lot'
                                 : 'Autoriser les pixels restants'}
@@ -285,7 +406,9 @@ export function BatchPanel({
                     )}
                     {view.state === 'running' && (
                         <button disabled={!enabled} onClick={() => void command('pause', {})}>
-                            {view.execution === 'session' ? 'Mettre la session en pause' : 'Mettre le lot en pause'}
+                            {['session', 'continuous'].includes(view.execution ?? '')
+                                ? 'Mettre la session en pause'
+                                : 'Mettre le lot en pause'}
                         </button>
                     )}
                     {view.state === 'paused' && (
@@ -295,17 +418,18 @@ export function BatchPanel({
                                 (view.execution === 'grouped' && !groupedReady) ||
                                 view.scheduler !== 'paused' ||
                                 view.uncertain > 0 ||
-                                (view.execution === 'session' && !sessionReady)
+                                (view.execution === 'session' && !sessionReady) ||
+                                (view.execution === 'continuous' && !continuousReady)
                             }
                             onClick={() => void command('resume', approval)}
                         >
-                            {view.execution === 'session'
+                            {['session', 'continuous'].includes(view.execution ?? '')
                                 ? 'Reprendre la session autorisée'
                                 : 'Reprendre le lot autorisé'}
                         </button>
                     )}
                     <button disabled={!approvalKey} onClick={() => void command('stop', {})}>
-                        {view.execution === 'session'
+                        {['session', 'continuous'].includes(view.execution ?? '')
                             ? 'Arrêter la session immédiatement'
                             : 'Arrêter le lot immédiatement'}
                     </button>
@@ -358,9 +482,10 @@ export function BatchPanel({
             <details>
                 <summary>Sécurité et interruptions</summary>
                 <p>
-                    Une session autorise au maximum 25 pixels distincts et 25 énergie ; chaque groupe contient cinq
-                    pixels maximum. En séquentiel : une seconde minimum entre envois. Aucun achat. Le navigateur vérifie
-                    l’énergie et les couleurs du compte avant chaque envoi.
+                    Le dessin continu autorise une zone, 30 à 600 secondes et jusqu’à 1 000 pixels/énergie. Une session
+                    fixe reste limitée à 25. Chaque groupe contient cinq pixels maximum. En séquentiel : une seconde
+                    minimum entre envois. Aucun achat. Le navigateur vérifie l’énergie et les couleurs du compte avant
+                    chaque envoi.
                 </p>
                 <p>
                     Arrêter révoque le lot ; un envoi déjà parti ne peut pas être annulé. Un résultat incertain bloque

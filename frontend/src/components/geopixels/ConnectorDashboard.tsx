@@ -156,7 +156,7 @@ export function ConnectorDashboard() {
                 <p>
                     {view?.mode === 'local-fake'
                         ? 'Fournisseur factice local : écritures synthétiques uniquement.'
-                        : 'Lecture du cache ; session autorisée de 25 pixels maximum, par groupes de cinq. Achats indisponibles.'}
+                        : 'Lecture du cache ; dessin supervisé dans une zone et un budget autorisés, par groupes de cinq. Achats indisponibles.'}
                 </p>
                 <p>
                     Connexion : <strong id="connectorConnection">{view?.connected ? 'Connecté' : 'Déconnecté'}</strong>{' '}
@@ -375,7 +375,9 @@ export function ConnectorDashboard() {
                     approvalKey={approvalKey}
                     fake={view.mode === 'local-fake'}
                     groupedReady={view.mode === 'local-fake' || (httpReader?.batchProtocol ?? 0) >= 2}
-                    sessionReady={view.mode === 'local-fake' || httpReader?.batchProtocol === 3}
+                    sessionReady={view.mode === 'local-fake' || (httpReader?.batchProtocol ?? 0) >= 3}
+                    continuousReady={view.mode === 'local-fake' || httpReader?.batchProtocol === 4}
+                    project={view.project}
                     ready={view.connected && view.bound && !active}
                     refresh={async () => setView((await engineHttp.get<View>('/connector/status')).data)}
                 />

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
     createScheduler,
+    computeProgress,
     createWorkPlanner,
     prepareTemplate,
     taskIdOf,
@@ -19,6 +20,7 @@ import { nodeSha256Hasher } from '@geoplacer/adapters-node';
 import { monotonicClock } from '../clock.js';
 import { check, type BrowserProject } from './protocol.js';
 import { nativePoint, type GeoPixelsProvider } from './provider.js';
+import { validWriterResources, type WriterResources } from './writer-resources.js';
 import type { SinglePixelCommand } from './single-pixel-writer.js';
 
 type State = 'idle' | 'prepared' | 'running' | 'paused' | 'interrupted' | 'blocked' | 'completed' | 'stopped';
@@ -27,14 +29,16 @@ type RecordEntry = {
     identity: string;
     batchId: string;
     write: PixelWrite;
-    execution?: 'sequential' | 'grouped' | 'session';
+    execution?: 'sequential' | 'grouped' | 'session' | 'continuous';
 };
+export type DrawingScope = { region: { x: number; y: number; width: number; height: number }; durationMs: number };
 type Batch = {
     id: string;
     identity: string;
     mode: 'fake' | 'real';
-    execution?: 'sequential' | 'grouped' | 'session';
+    execution?: 'sequential' | 'grouped' | 'session' | 'continuous';
     budgets?: { pixels: number; energy: number };
+    scope?: DrawingScope;
     project: BrowserProject;
     origin: { x: number; y: number };
     writes: PixelWrite[];
@@ -86,6 +90,7 @@ export class ControlledBatch {
     private nextAt = 0;
     private epoch = -1;
     private generation = 0;
+    private wallet: { epoch: number; baseline: number; value: WriterResources } | null = null;
     private saveQueue: Promise<void> = Promise.resolve();
     private healthy = true;
     private controlling = false;
@@ -133,7 +138,8 @@ export class ControlledBatch {
                         typeof r.batchId === 'string' &&
                         typeof r.identity === 'string' &&
                         r.identity.length < 4096 &&
-                        (r.execution === undefined || ['sequential', 'grouped', 'session'].includes(r.execution)) &&
+                        (r.execution === undefined ||
+                            ['sequential', 'grouped', 'session', 'continuous'].includes(r.execution)) &&
                         validWrite(r.write)
                 ),
                 'invalid batch records'
@@ -144,11 +150,18 @@ export class ControlledBatch {
                         typeof s.batch.identity === 'string' &&
                         ['fake', 'real'].includes(s.batch.mode) &&
                         (s.batch.execution === undefined ||
-                            ['sequential', 'grouped', 'session'].includes(s.batch.execution)) &&
+                            ['sequential', 'grouped', 'session', 'continuous'].includes(s.batch.execution)) &&
                         Number.isSafeInteger(s.batch.origin?.x) &&
                         Number.isSafeInteger(s.batch.origin?.y) &&
                         Array.isArray(s.batch.writes) &&
-                        s.batch.writes.length >= 1 &&
+                        (s.batch.execution === 'continuous'
+                            ? s.batch.writes.length === 0 &&
+                              this.validScope(s.batch.scope, s.batch.project) &&
+                              !!s.batch.budgets &&
+                              [s.batch.budgets.pixels, s.batch.budgets.energy].every(
+                                  (n) => Number.isInteger(n) && n >= 1 && n <= 1000
+                              )
+                            : s.batch.writes.length >= 1) &&
                         s.batch.writes.length <= (s.batch.execution === 'session' ? 25 : 5) &&
                         (s.batch.execution !== 'session' ||
                             (!!s.batch.budgets &&
@@ -165,9 +178,13 @@ export class ControlledBatch {
                     'invalid saved batch'
                 );
             this.saved = s;
-            this.state = s.batch ? (s.batch.writes.every((w) => this.done(w)) ? 'completed' : 'interrupted') : 'idle'; // Neither permission nor a live scheduler survives restart.
+            this.state = s.batch
+                ? s.batch.execution !== 'continuous' && s.batch.writes.every((w) => this.done(w))
+                    ? 'completed'
+                    : 'interrupted'
+                : 'idle'; // Neither permission nor a live scheduler survives restart.
             for (const a of this.d.attempts.open())
-                if (s.batch && a.writes.every((w) => s.batch!.writes.some((candidate) => same(w, candidate))))
+                if (s.batch && a.writes.every((w) => this.inScope(w, s.batch!)))
                     for (const w of a.writes)
                         if (!s.records.some((r) => r.attemptId === a.attemptId && same(r.write, w)))
                             s.records.push({
@@ -191,9 +208,127 @@ export class ControlledBatch {
                     b.writes,
                     ...(b.execution === undefined ? [] : [b.execution]),
                     ...(b.budgets === undefined ? [] : [b.budgets]),
+                    ...(b.scope === undefined ? [] : [b.scope]),
                 ])
             )
             .digest('hex');
+    }
+    private validScope(scope: DrawingScope | undefined, project: BrowserProject) {
+        const r = scope?.region;
+        return (
+            !!r &&
+            Object.keys(scope!).every((k) => ['region', 'durationMs'].includes(k)) &&
+            Object.keys(r).length === 4 &&
+            ['x', 'y', 'width', 'height'].every((k) => Object.hasOwn(r, k)) &&
+            [r.x, r.y, r.width, r.height].every(Number.isSafeInteger) &&
+            r.x >= 0 &&
+            r.y >= 0 &&
+            r.width > 0 &&
+            r.height > 0 &&
+            r.x + r.width <= project.width &&
+            r.y + r.height <= project.height &&
+            Number.isSafeInteger(scope!.durationMs) &&
+            scope!.durationMs >= 30000 &&
+            scope!.durationMs <= 600000
+        );
+    }
+    private inScope(w: PixelWrite, b = this.saved.batch!) {
+        if (b.execution !== 'continuous') return b.writes.some((candidate) => same(w, candidate));
+        const r = b.scope!.region,
+            x = w.point.x - b.origin.x,
+            y = w.point.y - b.origin.y;
+        return x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
+    }
+    private batchWrites() {
+        const b = this.saved.batch;
+        return !b
+            ? []
+            : b.execution !== 'continuous'
+              ? b.writes
+              : [
+                    ...new Map(
+                        this.saved.records.filter((r) => r.batchId === b.id).map((r) => [key(r.write), r.write])
+                    ).values(),
+                ];
+    }
+    private used() {
+        return this.saved.records.filter(
+            (r) =>
+                r.batchId === this.saved.batch?.id &&
+                !['failed', 'cancelled'].includes(this.d.attempts.get(r.attemptId)?.state ?? 'started')
+        ).length;
+    }
+    /** Volatile, epoch-bound evidence; never a restored account balance or a clock estimate. */
+    observeResources(value: unknown) {
+        check(validWriterResources(value), 'invalid writer resources');
+        const now = Date.now(),
+            epoch = this.d.provider.channelEpoch;
+        if (value.capturedAt > now || now - value.capturedAt > 30000) return;
+        const previous = this.wallet?.epoch === epoch ? this.wallet.value : null;
+        if (
+            previous &&
+            (value.sequence < previous.sequence ||
+                (value.sequence === previous.sequence &&
+                    (value.available > previous.available ||
+                        JSON.stringify({ ...value, available: 0 }) !== JSON.stringify({ ...previous, available: 0 }))))
+        )
+            return;
+        // A delayed response initiated before an already closed write cannot replenish its cost.
+        const relevant = this.saved.records.filter((r) => {
+            try {
+                return JSON.parse(r.identity).at(-1) === this.d.provider.status().mode;
+            } catch {
+                return false;
+            }
+        });
+        const barrier = Math.max(
+            0,
+            ...relevant.map((r) => {
+                const a = this.d.attempts.get(r.attemptId);
+                return a && a.state !== 'failed' && a.state !== 'cancelled' ? (a.closedAt ?? a.startedAt ?? 0) : 0;
+            })
+        );
+        if ((!previous || value.sequence > previous.sequence) && value.requestStartedAt <= barrier) return;
+        this.wallet = {
+            epoch,
+            baseline: previous?.sequence === value.sequence ? this.wallet!.baseline : value.available,
+            value: structuredClone(value),
+        };
+        this.emit();
+    }
+    private energy() {
+        const value = this.wallet?.epoch === this.d.provider.channelEpoch ? this.wallet.value : null;
+        if (!value || Date.now() - value.capturedAt > 30000) return null;
+        const committed = this.saved.records.filter((r) => {
+            const a = this.d.attempts.get(r.attemptId);
+            let modeMatches = false;
+            try {
+                modeMatches = JSON.parse(r.identity).at(-1) === this.d.provider.status().mode;
+            } catch {
+                /* damaged metadata is rejected by archive checks */
+            }
+            return (
+                modeMatches &&
+                a &&
+                !['failed', 'cancelled'].includes(a.state) &&
+                (a.startedAt ?? 0) >= value.requestStartedAt
+            );
+        }).length;
+        return {
+            available: Math.max(0, Math.min(value.available, this.wallet!.baseline - committed)),
+            capturedAt: value.capturedAt,
+            colors: value.colors,
+        };
+    }
+    private scopedTemplate(t: Template, exclude = false) {
+        const r = this.saved.batch!.scope!.region,
+            pixels = new Uint32Array(t.image.pixels.length).fill(0xffffffff);
+        const excluded = exclude ? this.excluded(this.saved.batch!.identity) : new Set<string>();
+        for (let y = r.y; y < r.y + r.height; y++)
+            for (let x = r.x; x < r.x + r.width; x++)
+                if (!excluded.has(canvasPointKey(t.placement.topLeft.x + x, t.placement.topLeft.y + y)))
+                    pixels[y * t.image.width + x] = t.image.pixels[y * t.image.width + x]!;
+        return { ...t, image: { ...t.image, pixels } };
     }
     private identity(t: Template) {
         return JSON.stringify([
@@ -286,19 +421,23 @@ export class ControlledBatch {
     async prepare(
         mode: 'fake' | 'real',
         limit: number,
-        execution: 'sequential' | 'grouped' | 'session' = 'sequential',
-        energyBudget?: number
+        execution: 'sequential' | 'grouped' | 'session' | 'continuous' = 'sequential',
+        energyBudget?: number,
+        scope?: DrawingScope
     ) {
         check(
             !this.busy() &&
                 !this.controlling &&
                 Number.isInteger(limit) &&
                 limit >= 1 &&
-                limit <= (execution === 'session' ? 25 : 5) &&
-                (execution === 'session'
-                    ? Number.isInteger(energyBudget) && energyBudget! >= 1 && energyBudget! <= 25
+                limit <= (execution === 'continuous' ? 1000 : execution === 'session' ? 25 : 5) &&
+                (['session', 'continuous'].includes(execution)
+                    ? Number.isInteger(energyBudget) &&
+                      energyBudget! >= 1 &&
+                      energyBudget! <= (execution === 'continuous' ? 1000 : 25)
                     : energyBudget === undefined) &&
-                ['sequential', 'grouped', 'session'].includes(execution),
+                (execution === 'continuous' || scope === undefined) &&
+                ['sequential', 'grouped', 'session', 'continuous'].includes(execution),
             'stop/reconcile first; lot limit 1..5, session pixels and energy 1..25'
         );
         this.controlling = true;
@@ -320,8 +459,13 @@ export class ControlledBatch {
                 this.saved.records.length + limit <= 4096,
                 'confirmation archive full; preserve the journal before further work'
             );
-            const capacity = execution === 'session' ? 25 : 5;
-            const budget = execution === 'session' ? Math.min(limit, energyBudget!) : limit;
+            const continuous = execution === 'continuous';
+            check(
+                !continuous || this.validScope(scope, this.d.provider.status().project!),
+                'zone or duration invalid (30..600 seconds)'
+            );
+            const capacity = continuous ? 1000 : execution === 'session' ? 25 : 5;
+            const budget = ['session', 'continuous'].includes(execution) ? Math.min(limit, energyBudget!) : limit;
             this.d.initialize(t, capacity);
             const state = this.d.resources.observe(this.allowance(t, budget, capacity)).state;
             const { snapshot } = await this.d.provider.readWindow({
@@ -343,7 +487,7 @@ export class ControlledBatch {
                 now: Date.now(),
             });
             check(
-                plan.status === 'ok' && plan.writes.length > 0,
+                continuous || (plan.status === 'ok' && plan.writes.length > 0),
                 'no known incorrect unconfirmed target; observe the model first'
             );
             const b = {
@@ -351,10 +495,13 @@ export class ControlledBatch {
                 identity,
                 mode,
                 execution,
-                ...(execution === 'session' ? { budgets: { pixels: limit, energy: energyBudget! } } : {}),
+                ...(['session', 'continuous'].includes(execution)
+                    ? { budgets: { pixels: limit, energy: energyBudget! } }
+                    : {}),
+                ...(continuous ? { scope: structuredClone(scope!) } : {}),
                 project: this.d.provider.status().project!,
                 origin: { ...t.placement.topLeft },
-                writes: [...plan.writes],
+                writes: continuous ? [] : [...(plan.status === 'ok' ? plan.writes : [])],
             };
             this.saved.batch = { ...b, digest: this.digest(b) };
             this.epoch = this.d.provider.channelEpoch;
@@ -370,7 +517,34 @@ export class ControlledBatch {
             this.controlling = false;
         }
     }
-    private allowance(t: Template, count?: number, capacity = this.saved.batch?.execution === 'session' ? 25 : 5) {
+    private allowance(
+        t: Template,
+        count?: number,
+        capacity = this.saved.batch?.execution === 'continuous'
+            ? 1000
+            : this.saved.batch?.execution === 'session'
+              ? 25
+              : 5
+    ) {
+        if (count === undefined && this.saved.batch?.execution === 'continuous') {
+            const b = this.saved.batch,
+                wallet = this.energy();
+            const energy = Math.max(0, Math.min(b.budgets!.pixels, b.budgets!.energy) - this.used());
+            return {
+                type: 'resource-observation' as const,
+                agent: this.d.agent,
+                observedAt: Date.now(),
+                energy: Math.min(energy, wallet?.available ?? 0),
+                capacity,
+                currency: 0,
+                unlockedColors: t.palette.colors.map((c) => c.rgb).filter((c) => wallet?.colors.includes(c)),
+                upgrades: { maxEnergy: 0, regenSpeed: 0, energyPacks: 0 },
+                availability:
+                    !wallet || wallet.available < 1 || energy < 1
+                        ? { status: 'unavailable' as const, until: Date.now() + 1000 }
+                        : { status: 'available' as const },
+            };
+        }
         const remaining = count ?? (this.saved.batch ? this.saved.batch.writes.filter((w) => !this.done(w)).length : 5);
         return {
             type: 'resource-observation' as const,
@@ -387,6 +561,7 @@ export class ControlledBatch {
     private async executionTemplate() {
         const t = this.context();
         check(this.deadline > Date.now(), 'batch authorization expired');
+        if (this.saved.batch!.execution === 'continuous') return this.scopedTemplate(t, true);
         // Ephemeral work view of the SAME template/revision. Original pixels and observed canvas are untouched.
         const pixels = new Uint32Array(t.image.pixels.length).fill(0xffffffff);
         for (const w of this.saved.batch!.writes)
@@ -425,15 +600,21 @@ export class ControlledBatch {
             await this.scheduler?.stop({ abort: true });
             check(generation === this.generation, 'batch approval interrupted');
             this.epoch = this.d.provider.channelEpoch;
-            this.d.initialize(t, this.saved.batch!.execution === 'session' ? 25 : 5);
-            this.deadline = Date.now() + 120_000;
+            this.d.initialize(
+                t,
+                this.saved.batch!.execution === 'continuous' ? 1000 : this.saved.batch!.execution === 'session' ? 25 : 5
+            );
+            this.deadline = Date.now() + (this.saved.batch!.scope?.durationMs ?? 120_000);
             this.state = 'running';
             this.error = null;
             const base = this.d.attempts;
             const finish = async (method: 'finish' | 'fail', args: unknown[]) => {
                 const closed = await Reflect.apply(base[method], base, args);
                 const p = this.pending;
-                if (closed.state === 'finished') this.nextAt = Date.now() + 1000;
+                if (closed.state === 'finished')
+                    this.nextAt =
+                        Date.now() +
+                        (this.saved.batch?.execution === 'continuous' && this.saved.batch.mode === 'fake' ? 10 : 1000);
                 await this.persist();
                 if (p && p.command.attemptId === closed.attemptId) {
                     clearTimeout(p.timer);
@@ -465,11 +646,27 @@ export class ControlledBatch {
                                 this.saved.records.length + leased.writes.length <= 4096,
                                 'confirmation archive full; stop and preserve the journal'
                             );
+                            if (b.execution === 'continuous') {
+                                const t = this.context();
+                                check(
+                                    this.used() + leased.writes.length <=
+                                        Math.min(b.budgets!.pixels, b.budgets!.energy) &&
+                                        leased.writes.every(
+                                            (w) =>
+                                                this.inScope(w, b) &&
+                                                t.image.pixels[
+                                                    (w.point.y - b.origin.y) * t.image.width + w.point.x - b.origin.x
+                                                ] === w.color &&
+                                                taskIdOf(t, w.point.x, w.point.y, w.color) === w.taskId
+                                        ),
+                                    'continuous scope or budget changed'
+                                );
+                            }
                             const a = await base.start(id, now);
                             check(
                                 a.writes.length >= 1 &&
                                     a.writes.length <= 5 &&
-                                    a.writes.every((w) => b.writes.some((candidate) => same(w, candidate))),
+                                    a.writes.every((w) => this.inScope(w, b)),
                                 'attempt outside batch scope'
                             );
                             for (const w of a.writes)
@@ -484,7 +681,14 @@ export class ControlledBatch {
                             return a;
                         };
                     if (prop === 'inFlight')
-                        return () => new Set([...base.inFlight(), ...this.excluded(this.saved.batch!.identity)]);
+                        return () =>
+                            new Set([
+                                ...base.inFlight(),
+                                ...this.excluded(this.saved.batch!.identity),
+                                ...this.saved.records
+                                    .filter((r) => r.batchId === this.saved.batch!.id && this.accounted(r))
+                                    .map((r) => key(r.write)),
+                            ]);
                     if (prop === 'finish' || prop === 'fail') return (...args: unknown[]) => finish(prop, args);
                     return Reflect.get(target, prop);
                 },
@@ -495,12 +699,11 @@ export class ControlledBatch {
                     templateId: t.id,
                     agents: [this.d.agent],
                     maxActiveAgents: 1,
-                    maxBatchSize:
-                        this.saved.batch!.execution === 'session'
-                            ? 5
-                            : this.saved.batch!.execution === 'grouped'
-                              ? this.saved.batch!.writes.length
-                              : 1,
+                    maxBatchSize: ['session', 'continuous'].includes(this.saved.batch!.execution!)
+                        ? 5
+                        : this.saved.batch!.execution === 'grouped'
+                          ? this.saved.batch!.writes.length
+                          : 1,
                     minBatchSize: 1,
                     leaseTtlMs: 30_000,
                     unknownPixels: 'skip',
@@ -509,7 +712,8 @@ export class ControlledBatch {
                     reconcileRetryMs: 500,
                     maxWaitMs: 1000,
                     maxRecentErrors: 10,
-                    maxCycles: 100,
+                    maxCycles: this.saved.batch!.execution === 'continuous' ? null : 100,
+                    watchOnIdle: this.saved.batch!.execution === 'continuous',
                 },
                 {
                     clock: monotonicClock(),
@@ -585,13 +789,8 @@ export class ControlledBatch {
                 this.deadline > Date.now() &&
                 !this.pending &&
                 writes.length >= 1 &&
-                writes.length <= (b.execution === 'grouped' || b.execution === 'session' ? 5 : 1) &&
-                writes.every(
-                    (w) =>
-                        b.writes.some((candidate) => same(w, candidate)) &&
-                        !this.done(w) &&
-                        !this.excluded(b.identity).has(key(w))
-                ),
+                writes.length <= (['grouped', 'session', 'continuous'].includes(b.execution!) ? 5 : 1) &&
+                writes.every((w) => this.inScope(w, b) && !this.done(w) && !this.excluded(b.identity).has(key(w))),
             'write outside authorized batch'
         );
         const w = writes[0]!,
@@ -602,34 +801,33 @@ export class ControlledBatch {
             settle = resolve;
         });
         return new Promise<ApplyResult>((resolve, reject) => {
-            const command: BatchCommand =
-                b.execution === 'grouped' || b.execution === 'session'
-                    ? {
-                          protocol: 2,
-                          attemptId: options.attemptId,
-                          project: b.project,
-                          batchId: b.id,
-                          deadline: Math.min(this.deadline, Date.now() + 30_000),
-                          pixels: writes
-                              .map((write) => ({
-                                  ...nativePoint(
-                                      b.project,
-                                      write.point.x - t.placement.topLeft.x,
-                                      write.point.y - t.placement.topLeft.y
-                                  ),
-                              }))
-                              .map((point, i) => ({ gridX: point.x, gridY: point.y, color: writes[i]!.color })),
-                      }
-                    : {
-                          protocol: 1,
-                          attemptId: options.attemptId,
-                          project: b.project,
-                          gridX: point.x,
-                          gridY: point.y,
-                          color: w.color,
-                          deadline: Math.min(this.deadline, Date.now() + 30_000),
-                          batchId: b.id,
-                      };
+            const command: BatchCommand = ['grouped', 'session', 'continuous'].includes(b.execution!)
+                ? {
+                      protocol: 2,
+                      attemptId: options.attemptId,
+                      project: b.project,
+                      batchId: b.id,
+                      deadline: Math.min(this.deadline, Date.now() + 30_000),
+                      pixels: writes
+                          .map((write) => ({
+                              ...nativePoint(
+                                  b.project,
+                                  write.point.x - t.placement.topLeft.x,
+                                  write.point.y - t.placement.topLeft.y
+                              ),
+                          }))
+                          .map((point, i) => ({ gridX: point.x, gridY: point.y, color: writes[i]!.color })),
+                  }
+                : {
+                      protocol: 1,
+                      attemptId: options.attemptId,
+                      project: b.project,
+                      gridX: point.x,
+                      gridY: point.y,
+                      color: w.color,
+                      deadline: Math.min(this.deadline, Date.now() + 30_000),
+                      batchId: b.id,
+                  };
             const p: Pending = {
                 command,
                 writes,
@@ -669,6 +867,10 @@ export class ControlledBatch {
                                 window.snapshot.get(write.point) !== -2 && window.validUntil > Date.now(),
                                 'target observation expired or unknown'
                             );
+                            if (b.execution === 'continuous' && window.snapshot.get(write.point) === write.color)
+                                return this.cancelPending(
+                                    'Cible devenue conforme avant livraison ; recalcul du groupe.'
+                                );
                             p.command.deadline = Math.min(p.command.deadline, window.validUntil);
                         }
                         check(this.pending === p && this.state === 'running', 'batch changed while preparing delivery');
@@ -692,7 +894,7 @@ export class ControlledBatch {
                             this.emit();
                         }
                     } catch {
-                        if (this.state === 'running') await this.pause();
+                        if (this.state === 'running' && b.execution !== 'continuous') await this.pause();
                         await this.cancelPending('Données du modèle indisponibles avant envoi.');
                     }
                 })
@@ -728,7 +930,7 @@ export class ControlledBatch {
             return false;
         }
     }
-    async result(id: string, status: 'confirmed' | 'not-sent' | 'uncertain') {
+    async result(id: string, status: 'confirmed' | 'not-sent' | 'uncertain' | 'waiting-resources') {
         check(
             this.saved.records.some((r) => r.attemptId === id),
             'unknown batch result'
@@ -753,6 +955,11 @@ export class ControlledBatch {
             await this.stop('Résultat incertain ou reçu après interruption. Aucun renvoi.');
             return this.view();
         }
+        check(
+            status !== 'waiting-resources' || this.saved.batch?.execution === 'continuous',
+            'resource wait requires continuous session'
+        );
+        if (status === 'waiting-resources') this.wallet = null; // A refusal cannot leave a spendable stale balance.
         const writes = p.writes;
         if (status === 'not-sent') {
             this.state = 'paused';
@@ -760,6 +967,7 @@ export class ControlledBatch {
             void this.scheduler?.pause();
         }
         p.resolve({
+            ...(status === 'waiting-resources' ? { resources: this.allowance(this.context()) } : {}),
             attemptId: id as AttemptId,
             outcomes: writes.map((w) =>
                 status === 'confirmed'
@@ -835,6 +1043,17 @@ export class ControlledBatch {
         try {
             this.context();
             check(this.deadline > Date.now(), 'batch authorization expired');
+            const b = this.saved.batch!;
+            if (
+                b.execution === 'continuous' &&
+                this.used() >= Math.min(b.budgets!.pixels, b.budgets!.energy) &&
+                !this.pending &&
+                this.d.attempts.open().length === 0
+            ) {
+                await this.stop('Budget autorisé atteint.');
+                this.state = 'completed';
+                this.emit();
+            }
         } catch {
             await this.stop('Autorisation expirée ou contexte du navigateur modifié.');
         }
@@ -872,7 +1091,9 @@ export class ControlledBatch {
     /** Read-only comparison: a transport ACK is never evidence of the resulting canvas. */
     async observedView() {
         const view = this.view(),
-            batch = this.saved.batch;
+            batch = this.saved.batch,
+            writes = this.batchWrites(),
+            latest = new Map(this.saved.records.filter((r) => r.batchId === batch?.id).map((r) => [key(r.write), r]));
         const targets = view.targets.map((t) => ({
             ...t,
             observation: 'unknown' as 'unknown' | 'pending' | 'correct' | 'different',
@@ -885,7 +1106,7 @@ export class ControlledBatch {
                 this.context(true);
                 const epoch = this.d.provider.channelEpoch;
                 const windows = await Promise.all(
-                    batch.writes.map((w) =>
+                    writes.map((w) =>
                         this.d.provider.readWindow({
                             minX: w.point.x,
                             minY: w.point.y,
@@ -901,13 +1122,13 @@ export class ControlledBatch {
                 );
                 windows.forEach((window, i) => {
                     const target = targets[i]!,
-                        w = batch.writes[i]!;
+                        w = writes[i]!;
                     const color = window.snapshot.get(w.point);
                     if (color === -2 || window.validUntil < Date.now()) return;
                     target.observedColor = color;
                     target.capturedAt = window.captureRange?.oldest ?? null;
                     target.sourceAt = window.sourceRange?.oldest ?? null;
-                    const record = this.saved.records.filter((r) => r.batchId === batch.id && same(r.write, w)).at(-1);
+                    const record = latest.get(key(w));
                     const attempt = record ? this.d.attempts.get(record.attemptId) : null;
                     // A pre-ACK capture cannot verify that acknowledged operation, even if its color matches.
                     target.observation =
@@ -924,8 +1145,35 @@ export class ControlledBatch {
         const sent = targets.filter((t) => t.confirmed);
         const count = (value: (typeof targets)[number]['observation']) =>
             sent.filter((t) => t.observation === value).length;
+        let regionProgress = null;
+        if (batch?.execution === 'continuous')
+            try {
+                const t = this.context(true),
+                    r = batch.scope!.region;
+                const w = await this.d.provider.readWindow({
+                    minX: batch.origin.x + r.x,
+                    minY: batch.origin.y + r.y,
+                    width: r.width,
+                    height: r.height,
+                });
+                const p = computeProgress(this.scopedTemplate(t), w.snapshot, Date.now());
+                regionProgress = {
+                    correct: p.correct,
+                    incorrect: p.incorrect,
+                    unknown: p.unknown,
+                    percent:
+                        p.completion === 'complete'
+                            ? 100
+                            : p.unknown === 0 && p.correct + p.incorrect > 0
+                              ? (100 * p.correct) / (p.correct + p.incorrect)
+                              : null,
+                };
+            } catch {
+                /* unavailable/expired remains unknown */
+            }
         return {
             ...view,
+            regionProgress,
             targets,
             verification: {
                 correct: count('correct'),
@@ -938,9 +1186,12 @@ export class ControlledBatch {
     }
     view() {
         const b = this.saved.batch;
+        const latest = new Map(this.saved.records.filter((r) => r.batchId === b?.id).map((r) => [key(r.write), r]));
+        const accepted = b ? this.excluded(b.identity) : new Set<string>();
         const targets =
-            b?.writes.map((w) => {
-                const r = this.saved.records.filter((r) => r.batchId === b.id && same(r.write, w)).at(-1);
+            this.batchWrites().map((w) => {
+                const b = this.saved.batch!;
+                const r = latest.get(key(w));
                 const a = r ? this.d.attempts.get(r.attemptId) : undefined;
                 return {
                     ...nativePoint(b.project, w.point.x - b.origin.x, w.point.y - b.origin.y),
@@ -955,7 +1206,10 @@ export class ControlledBatch {
             state: this.state,
             mode: b?.mode ?? null,
             execution: b?.execution ?? 'sequential',
-            energyCost: targets.length,
+            energyCost: b?.execution === 'continuous' ? Math.min(b.budgets!.pixels, b.budgets!.energy) : targets.length,
+            scope: b?.scope ?? null,
+            spent: this.used(),
+            resources: this.energy(),
             budgets: b?.budgets ?? { pixels: targets.length, energy: targets.length },
             history: [...new Set(this.saved.records.filter((r) => r.batchId === b?.id).map((r) => r.attemptId))]
                 .slice(-50)
@@ -972,14 +1226,12 @@ export class ControlledBatch {
                 }),
             acceptedRequests: new Set(
                 this.saved.records
-                    .filter(
-                        (r) => r.batchId === b?.id && this.accounted(r) && this.excluded(r.identity).has(key(r.write))
-                    )
+                    .filter((r) => r.batchId === b?.id && this.accounted(r) && accepted.has(key(r.write)))
                     .map((r) => r.attemptId)
             ).size,
             targets,
             confirmed: targets.filter((t) => t.confirmed).length,
-            total: targets.length,
+            total: b?.execution === 'continuous' ? Math.min(b.budgets!.pixels, b.budgets!.energy) : targets.length,
             error: this.error,
             uncertain: this.d.attempts.open().filter((a) => a.state === 'needs-reconciliation').length,
             expires: this.deadline || null,
@@ -997,6 +1249,9 @@ export class ControlledBatch {
             digest: b.digest,
             expires: this.deadline,
             project: b.project,
+            ...(b.execution === 'continuous'
+                ? { execution: 'continuous' as const, budgets: b.budgets!, region: b.scope!.region }
+                : {}),
             ...(b.execution === 'grouped'
                 ? { execution: 'grouped' as const }
                 : b.execution === 'session'

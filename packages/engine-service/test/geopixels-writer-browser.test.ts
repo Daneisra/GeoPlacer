@@ -421,3 +421,36 @@ describe('Browser-only bounded session (no account request or regeneration)', ()
         expect(await s.writer.executeBatch(b.commands[2]!, s.allowed, over)).toBe('not-sent');
     });
 });
+
+
+describe('Continuous writer browser boundaries',()=>{
+    async function continuous() {
+        const s=await setup({energy:100,colors:[0]});
+        s.context.GeoPlacerPageReader.targetColor=()=>0;
+        let available=10;
+        s.context.GeoPlacerEnergy={snapshot:()=>({available}),spend:(n:number)=>{available-=n;},settled:()=>{}};
+        const command={protocol:2 as const,attemptId:s.command.attemptId,batchId:'c954385d-7ab0-4939-a233-1d7e784bd526',project:s.command.project,deadline:Date.now()+20000,pixels:[{gridX:999,gridY:1001,color:0}]};
+        const grant={id:command.batchId,digest:'a'.repeat(64),expires:Date.now()+60000,project:command.project,writes:[],execution:'continuous',budgets:{pixels:100,energy:100},region:{x:0,y:0,width:2,height:2}};
+        return {...s,command,grant,setAvailable:(n:number)=>{available=n;}};
+    }
+    it('sends a dynamically chosen exact template color inside the approved rectangle',async()=>{
+        const s=await continuous();expect(await s.writer.executeBatch(s.command,s.allowed,s.grant)).toBe('confirmed');expect(s.fetch).toHaveBeenCalledTimes(1);
+        expect(await s.writer.executeBatch({...s.command,attemptId:'b6a44c06-1c32-40d6-9c68-c885d44e0cd1'},s.allowed,s.grant)).toBe('not-sent');
+    });
+    it.each(['outside','wrong-color','budget','duration','field'])('rejects altered continuous authority: %s',async kind=>{
+        const s=await continuous();
+        if(kind==='outside')s.command.pixels[0]!.gridX=1001;
+        if(kind==='wrong-color')s.command.pixels[0]!.color=1;
+        if(kind==='budget')s.grant.budgets.energy=1001;
+        if(kind==='duration')s.grant.expires=Date.now()+600001;
+        if(kind==='field')Object.assign(s.grant,{endpoint:'https://example.invalid'});
+        expect(await s.writer.executeBatch(s.command,s.allowed,s.grant)).toBe('not-sent');expect(s.fetch).not.toHaveBeenCalled();
+    });
+    it('waits without sending when no proven energy is available, then accepts new evidence',async()=>{
+        const s=await continuous();s.setAvailable(0);expect(await s.writer.executeBatch(s.command,s.allowed,s.grant)).toBe('waiting-resources');expect(s.fetch).not.toHaveBeenCalled();
+        s.setAvailable(1);expect(await s.writer.executeBatch(s.command,s.allowed,s.grant)).toBe('confirmed');
+    });
+    it('checks energy again after the asynchronous channel check',async()=>{
+        const s=await continuous();expect(await s.writer.executeBatch(s.command,async()=>{s.setAvailable(0);return true;},s.grant)).toBe('waiting-resources');expect(s.fetch).not.toHaveBeenCalled();
+    });
+});

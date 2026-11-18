@@ -1,6 +1,6 @@
 # Lecteur GeoPixels HTTP — observations et petits lots contrôlés
 
-Version du lecteur : **0.8.0**, serveur Phase 2I local. Les observations restent passives par défaut. Le port écrivain propose une **session supervisée bornée à 25 cibles distinctes**, par groupes natifs de cinq maximum, avec budgets de pixels et d’énergie, destinations prévisualisées et accord unique. Les lots groupés uniques et séquentiels restent disponibles. Aucun achat ni transfert de session du site au serveur local. Le groupe réel 2H de cinq pixels est validé ; la première session réelle 2I est également validée par l’utilisateur le 18 novembre 2026 : cinq requêtes acceptées et 25 cibles conformes après observation. Chaque nouvelle session exige son accord explicite.
+Version du lecteur : **0.9.0**, serveur Phase 2J local. Les observations restent passives par défaut. Le dessin continu autorise un modèle lié, un rectangle en coordonnées image, une durée de **30 à 600 secondes** et des budgets plafonnés à **1 000 pixels / énergie**, par groupes natifs de cinq maximum. Les cibles sont choisies dynamiquement dans la zone. Les sessions fixes de 25 et les lots groupés/séquentiels restent disponibles. Aucun achat ni transfert de session du site. Les validations réelles 2H et 2I restent acquises ; **2J reste à valider par l’utilisateur**. Chaque nouvelle autorisation doit être examinée avant son démarrage.
 
 ## Installation et lancement
 
@@ -17,7 +17,7 @@ Taper directement l'adresse locale dans la barre d'adresse d'un nouvel onglet (p
 
 1. Choisir « GeoPixels — connecteur expérimental ».
 2. Saisir la clé privée dans « Clé locale d'approbation ». Elle reste dans la mémoire du formulaire pendant ce montage.
-3. Télécharger et installer le lecteur Tampermonkey proposé. Vérifier **0.5.2**, désactiver les anciens lecteurs GeoPlacer, puis recharger GeoPixels. Un seul lecteur doit être actif.
+3. Télécharger et installer le lecteur Tampermonkey proposé. Vérifier **0.9.0**, désactiver les anciens lecteurs GeoPlacer, puis recharger GeoPixels. Un seul lecteur doit être actif.
 4. Les seules pages autorisées sont `https://geopixels.net/*` et `https://www.geopixels.net/*`. La permission réseau GM est **127.0.0.1**, sans `*` et sans permission de récupération sur le service. Si Tampermonkey demande l'autorisation locale, contrôler cette destination précise.
 5. Garder tous les bots de placement arrêtés. Ouvrir/recharger la page GeoPixels et conserver une copie de son fantôme et de sa position avant de changer d'image.
 
@@ -152,3 +152,23 @@ Pause/reprise ne renouvelle pas l’échéance absolue de deux minutes. Arrêt o
 
 
 Validation réelle 2I du 18 novembre 2026 : l’utilisateur confirme une session de 25 cibles, cinq requêtes acceptées et 25 couleurs conformes après observation ; progression globale du modèle : 36 corrects, 2 incorrects, 0 inconnu. La fraîcheur source reste non vérifiée et les deux cibles restantes ne sont pas envoyées automatiquement. Voir [le rapport 2I](RAPPORT-PHASE2I.md#validation-utilisateur-réelle--18-novembre-2026).
+
+
+## Dessin continu supervisé (Phase 2J)
+
+Choisir **Dessin continu — zone et budgets autorisés**. X/Y désignent le coin supérieur gauche dans l’image (Y vers le bas), pas les coordonnées de la carte. La prévisualisation indique le rectangle natif (Y décroissant), les budgets et la durée. Elle autorise les futures cibles incorrectes de ce rectangle, pas une liste figée. Les lignes apparaissent au fur et à mesure des réservations durables. Le modèle, sa révision, ses couleurs, sa position et sa couche sont scellés ; leur changement interrompt la session.
+
+Les groupes s’enchaînent dans le TaskScheduler existant. Une cible déjà acquittée reste exclue malgré un cache ancien ou une modification ultérieure. Les autres pixels devenus incorrects peuvent être sélectionnés dans la zone. Les pixels inconnus restent ignorés jusqu’à une capture exploitable ; la surveillance du cache doit être active pour suivre les changements. Le lecteur ne récupère aucune tuile.
+
+**Énergie :** le lecteur observe passivement les réponses du `syncWorker` natif (`sync-delta` / `ok`, `userData.energy`, `colors`). Il ne déclenche pas de synchronisation et ne transmet que sept champs autorisés : source, séquence, début de requête, réception, énergie brute, solde conservateur et couleurs. Le compteur `currentEnergy`, recalculé à l’horloge par GeoPixels, peut abaisser le solde mais jamais le recharger. Les réponses anciennes ou initiées avant les envois précédents ne peuvent pas restituer leur coût. Une réponse doit rester exploitable moins de 30 s ; sa réception n’atteste pas la fraîcheur des tuiles.
+
+Sans cette interface ou sans nouvelle réponse native, l’état devient **Attente de ressources observables**. Aucun calcul de régénération ne fait repartir les envois. Le frontend peut suspendre sa synchronisation native lorsque son onglet est masqué : remettre GeoPixels au premier plan, puis consulter **Diagnostiquer**. Ne pas désactiver la sécurité du navigateur. Cette interface d’énergie supplémentaire est testée sur contrats factices ; sa disponibilité sur la production reste à confirmer.
+
+Pause/reprise conserve l’échéance initiale. Arrêt, expiration de l’autorisation ou du couplage interrompt les nouveaux envois. Un groupe déjà parti peut rester incertain : aucun renvoi, même après redémarrage. L’autorisation et le solde exploitable ne sont jamais restaurés automatiquement. Une nouvelle approbation explicite peut reprendre le périmètre conservé, dans le budget restant, seulement après traitement des tentatives incertaines.
+
+### Premier essai réel 2J — ne pas démarrer avant accord
+
+1. Installer **0.9.0**, coupler comme précédemment ; importer [le PNG 20 × 20](../../public/fixtures/geoplacer-20x20.png) dans GeoPlacer et dans le fantôme GeoPixels. Vérifier l’image, sa position et la liaison. Garder les autres bots arrêtés et la file native vide.
+2. Choisir **Dessin continu**, zone image **X=0, Y=0, largeur=10, hauteur=10**, **50 pixels / 50 énergie / 120 s**. Cliquer **Prévisualiser la session**. Vérifier le modèle, la couche et les deux coins natifs affichés. **S’arrêter ici et faire valider explicitement ce rectangle et ces budgets par l’utilisateur.** Aucun envoi n’est encore autorisé.
+3. Après cet accord seulement : démarrer la surveillance du cache, puis **Autoriser et démarrer la session**. Les groupes de cinq maximum avancent automatiquement ; si l’énergie n’est pas exploitable, ils attendent une nouvelle réponse native. Ne pas augmenter le budget pour contourner cette attente.
+4. Observer les compteurs et l’historique ; tester pause/reprise puis arrêt et révocation. Vérifier ensuite les couleurs séparément des accusés, éventuellement après rechargement du site. Rapporter le résultat sans transmettre de code, clé ou donnée de session.

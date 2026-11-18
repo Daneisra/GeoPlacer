@@ -238,6 +238,23 @@ try {
     await post('/privileged/batch-result',{protocol:1,batchId:session.id,attemptId:sessionCommand.attemptId,result:'not-sent'},ingress());
     await post('/batch/stop',{},management);
     passed.push('supervised session requires explicit bounded energy budget, reader 0.8.0 and sealed destination approval');
+    const continuousBody={mode:'real',limit:100,execution:'continuous',energyBudget:50,scope:{region:{x:0,y:0,width:2,height:2},durationMs:60000}};
+    assert.equal((await post('/batch/prepare',continuousBody,management)).status,409);
+    await post('/privileged/status',{protocol:1,readerVersion:8},ingress());
+    assert.equal((await post('/batch/prepare',{...continuousBody,limit:1001},management)).status,400);
+    assert.equal((await post('/batch/prepare',{...continuousBody,scope:{...continuousBody.scope,durationMs:600001}},management)).status,400);
+    assert.equal((await post('/batch/prepare',{...continuousBody,scope:{...continuousBody.scope,region:{x:1,y:0,width:2,height:2}}},management)).status,409);
+    const resource={source:'native-worker-response',sequence:1,requestStartedAt:Date.now(),capturedAt:Date.now(),energy:0,available:0,colors:[0]};
+    assert.equal((await post('/privileged/status',{protocol:1,readerVersion:8,writerResources:{...resource,token:'unexpected-field'}},ingress())).status,409);
+    assert.equal((await post('/privileged/status',{protocol:1,readerVersion:7,writerResources:resource},ingress())).status,409);
+    assert.equal((await post('/privileged/status',{protocol:1,readerVersion:8,writerResources:resource},ingress())).status,200);
+    const continuous=await (await post('/batch/prepare',continuousBody,management)).json();
+    assert.equal(continuous.execution,'continuous');assert.equal(continuous.targets.length,0);assert.deepEqual(continuous.scope,continuousBody.scope);
+    await post('/batch/approve',{batchId:continuous.id,digest:continuous.digest,approved:true},management);
+    {const end=Date.now()+3000;while(s.singlePixelWriter.batch.view().scheduler!=='waiting-resources'){assert.ok(Date.now()<end);await new Promise(r=>setTimeout(r,10));}}
+    assert.equal((await (await post('/privileged/batch-claim',{protocol:1},ingress())).json()).command,null);
+    await post('/batch/stop',{},management);
+    passed.push('continuous scope and budgets require reader 0.9.0, strict resource whitelist, no secrets, no fabricated energy or renewal');
     const second = (await (await post('/pixel/prepare', { mode: 'real' }, management)).json()).destination;
     await post(
         '/pixel/confirm',

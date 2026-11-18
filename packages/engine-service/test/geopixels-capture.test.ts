@@ -105,7 +105,7 @@ describe('Browser contract fixture: current GeoPixelsFront cache, no service cal
     expect(capture.resources(null, [])).toBeNull();
   });
   it('keeps the bundle deterministic, the reader passive and the writer separate without interception', async () => {
-    const paths = ['geopixels-capture.js', 'geopixels-reader.js', 'geopixels-http-transport.js', 'geopixels-writer.js', 'geopixels-client.js'];
+    const paths = ['geopixels-capture.js', 'geopixels-reader.js', 'geopixels-http-transport.js', 'geopixels-energy.js', 'geopixels-writer.js', 'geopixels-client.js'];
     const sources = await Promise.all(paths.map((p) => readFile(new URL('../../../browser/' + p, import.meta.url), 'utf8')));
     const bundle = await readFile(new URL('../../../public/geopixels-connector.user.js', import.meta.url), 'utf8');
     const version = bundle.match(/@version\s+([^\s]+)/)![1]!;

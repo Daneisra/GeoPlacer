@@ -73,3 +73,5 @@ export type { ConnectorMode, BrowserProject, BrowserObservation } from './geopix
 export { ConnectorHttpChannel } from './geopixels/http-channel.js';
 
 export { SinglePixelWriter, type SinglePixelCommand } from './geopixels/single-pixel-writer.js';
+
+export { validWriterResources, type WriterResources } from './geopixels/writer-resources.js';
