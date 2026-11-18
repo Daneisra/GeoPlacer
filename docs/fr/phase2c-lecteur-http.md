@@ -1,6 +1,6 @@
 # Lecteur GeoPixels HTTP — observations et petits lots contrôlés
 
-Version du lecteur : **0.8.0**, serveur Phase 2I local. Les observations restent passives par défaut. Le port écrivain propose une **session supervisée bornée à 25 cibles distinctes**, par groupes natifs de cinq maximum, avec budgets de pixels et d’énergie, destinations prévisualisées et accord unique. Les lots groupés uniques et séquentiels restent disponibles. Aucun achat ni transfert de session du site au serveur local. Le groupe réel 2H de cinq pixels est validé ; la première session réelle 2I reste à autoriser et valider.
+Version du lecteur : **0.8.0**, serveur Phase 2I local. Les observations restent passives par défaut. Le port écrivain propose une **session supervisée bornée à 25 cibles distinctes**, par groupes natifs de cinq maximum, avec budgets de pixels et d’énergie, destinations prévisualisées et accord unique. Les lots groupés uniques et séquentiels restent disponibles. Aucun achat ni transfert de session du site au serveur local. Le groupe réel 2H de cinq pixels est validé ; la première session réelle 2I est également validée par l’utilisateur le 18 novembre 2026 : cinq requêtes acceptées et 25 cibles conformes après observation. Chaque nouvelle session exige son accord explicite.
 
 ## Installation et lancement
 
@@ -149,3 +149,6 @@ Validation réelle 2H du 18 novembre 2026 : l’utilisateur confirme le succès 
 Installer 0.8.0, coupler et lier le modèle après observation. Choisir **Session supervisée**, budgets de pixels et d’énergie (25 maximum chacun), puis **Prévisualiser la session**. Le nombre de destinations ne dépasse pas le plus petit budget ni les cibles connues disponibles. **Attendre l’accord explicite de l’utilisateur sur les coordonnées/couleurs affichées avant « Autoriser et démarrer la session ».** Les groupes de cinq maximum s’enchaînent ensuite sans nouvelle confirmation.
 
 Pause/reprise ne renouvelle pas l’échéance absolue de deux minutes. Arrêt ou résultat incertain bloque les envois suivants ; une requête déjà partie ne peut être annulée sur le service. Aucune régénération d’énergie n’est créditée automatiquement. Le redémarrage conserve l’historique des groupes et les cibles acquittées, jamais l’autorisation. La progression observée et sa fraîcheur restent distinctes de l’acceptation des requêtes. Voir [le rapport 2I](RAPPORT-PHASE2I.md).
+
+
+Validation réelle 2I du 18 novembre 2026 : l’utilisateur confirme une session de 25 cibles, cinq requêtes acceptées et 25 couleurs conformes après observation ; progression globale du modèle : 36 corrects, 2 incorrects, 0 inconnu. La fraîcheur source reste non vérifiée et les deux cibles restantes ne sont pas envoyées automatiquement. Voir [le rapport 2I](RAPPORT-PHASE2I.md#validation-utilisateur-réelle--18-novembre-2026).

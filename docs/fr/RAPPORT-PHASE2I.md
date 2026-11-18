@@ -40,11 +40,24 @@ Résultats :
 - Recettes **Edge et Firefox locales réussies** : `test-logs/phase2i/edge-final/recipe.log` et `test-logs/phase2i/firefox/recipe.log`. Une approbation, un refus énergétique connu sans envoi, une reprise explicite, cinq groupes automatiques et 25 cibles distinctes ; les 25 conformités ne sont comptées qu’après nouvelle observation. L’historique conserve également le groupe refusé. Aucune erreur de page ni requête externe.
 - Les placements sont des stubs locaux et l’API GM est simulée par Node ; aucune validation Tampermonkey réelle de la session n’est revendiquée. Installation, dépendances et packaging inchangés : pas de clone neuf, audit ni benchmark supplémentaire. `git diff --check` réussi ; licence et attributions conservées.
 
-## Premier essai réel — accord séparé requis
+## Recette réelle — accord requis pour chaque nouvelle session
 
 1. Redémarrer GeoPlacer, installer **0.8.0**, coupler, observer puis lier le modèle souhaité. Arrêter les autres bots et garder la file native vide.
 2. Choisir **Session supervisée**, budgets **25 pixels / 25 énergie**, puis **Prévisualiser la session**. Vérifier les destinations exactes, couleurs, nombre de cibles réellement préparées et coût. **S’arrêter ici : attendre l’accord explicite de l’utilisateur sur cette liste.**
 3. Après cet accord seulement, cliquer **Autoriser et démarrer la session** une fois. Pour 25 cibles toujours incorrectes et suffisamment d’énergie : cinq requêtes au maximum de cinq pixels chacune, sans clic entre groupes. Pause/reprise/arrêt restent disponibles ; aucun nouvel envoi en cas d’incertitude.
 4. Observer à nouveau pour contrôler les couleurs, puis arrêter et révoquer le canal. La fraîcheur source reste indiquée séparément ; une couleur absente du cache ne justifie pas un renvoi automatique.
 
-**La session autonome réelle de 25 pixels n’est pas encore validée.** La validation réelle 2H porte seulement sur un groupe de cinq. Aucun push, modification de main, achat, nouveau compte, tag, release ou nettoyage.
+**La première session réelle de 25 pixels est validée par l’utilisateur**, selon les éléments ci-dessous. Chaque nouvelle session conserve ses budgets et son accord explicite. La validation réelle 2H reste acquise pour un groupe de cinq. Aucun push, modification de main, achat, nouveau compte, tag, release ou nettoyage.
+
+
+## Validation utilisateur réelle — 18 novembre 2026
+
+L’utilisateur confirme « c’est tout bon » et fournit les captures après l’essai de session supervisée :
+
+- Budgets affichés : **25 pixels / 25 énergie**, modèle de test **8 × 5** lié, couche de base.
+- **25 / 25 cibles couvertes par un accusé**, **5 requêtes acceptées** ; l’historique affiche cinq opérations.
+- Une première capture montre les cibles « À réobserver après envoi » ; la capture suivante affiche **une couleur conforme pour chacune des 25 destinations**, noires et blanches. Les accusés et l’observation restent ainsi distincts.
+- Progression globale constatée : **36 corrects, 2 incorrects, 0 inconnu**, sur 38 cibles opaques. Les deux cibles restantes ne sont pas envoyées automatiquement.
+- Tentatives incertaines affichées : **0**. Fraîcheur source toujours **non vérifiée** ; la capture ne certifie pas l’âge réel du cache côté service.
+
+Cette confirmation valide, **pour cet essai réalisé par l’utilisateur**, la session bornée et l’enchaînement de cinq groupes avec contrôle ultérieur des 25 couleurs. L’agent n’a effectué aucun placement pour enregistrer ce résultat. Les scénarios de refus énergétique, pause/reprise, arrêt, expiration, réponse perdue et redémarrage restent couverts localement ; ils ne sont pas présentés comme testés sur le service réel lors de cet essai. Aucun changement applicatif ni nouvel envoi n’accompagne cette mise à jour documentaire.
