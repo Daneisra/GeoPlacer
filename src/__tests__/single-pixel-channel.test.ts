@@ -7,5 +7,5 @@ it('passes the single-pixel and bounded-batch HTTP/browser workflows and securit
         timeout: 25_000,
     });
     expect({ status: result.status, stderr: result.stderr }).toEqual({ status: 0, stderr: '' });
-    expect(JSON.parse(result.stdout.trim())).toMatchObject({ passed: 10, realPlacements: 0 });
+    expect(JSON.parse(result.stdout.trim())).toMatchObject({ passed: 11, realPlacements: 0 });
 }, 30_000);

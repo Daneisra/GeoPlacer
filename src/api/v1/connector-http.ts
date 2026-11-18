@@ -140,7 +140,9 @@ export function createPrivilegedReaderRouter(channel: ConnectorHttpChannel): Rou
             const b = z
                 .strictObject({
                     protocol: z.literal(1),
-                    readerVersion: z.union([z.literal(3), z.literal(4), z.literal(5), z.literal(6)]).optional(),
+                    readerVersion: z
+                        .union([z.literal(3), z.literal(4), z.literal(5), z.literal(6), z.literal(7)])
+                        .optional(),
                     waitMs: z.literal(5000).optional(),
                     abortedCapture: z
                         .string()
@@ -154,7 +156,7 @@ export function createPrivilegedReaderRouter(channel: ConnectorHttpChannel): Rou
                         .optional(),
                 })
                 .parse(req.body);
-            if ((b.monitoring || b.waitMs || b.abortedCapture) && ![3, 4, 5, 6].includes(b.readerVersion ?? 0))
+            if ((b.monitoring || b.waitMs || b.abortedCapture) && ![3, 4, 5, 6, 7].includes(b.readerVersion ?? 0))
                 throw new Error('reader version required');
             const abort = new AbortController();
             res.once('close', () => abort.abort());

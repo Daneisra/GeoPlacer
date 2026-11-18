@@ -533,4 +533,137 @@ describe('Bounded work through the existing TaskScheduler', () => {
         expect(b.view().targets.every((t) => t.state === 'finished')).toBe(true);
         expect(f.calls()).toBe(1);
     });
+    it('runs exactly 25 distinct authorized targets in five native groups and keeps an old cache from reselecting them', async () => {
+        const f = await fixture(),
+            b = f.s.singlePixelWriter.batch,
+            p = await b.prepare('fake', 25, 'session', 25);
+        expect(p).toMatchObject({
+            total: 25,
+            energyCost: 25,
+            budgets: { pixels: 25, energy: 25 },
+            execution: 'session',
+        });
+        expect(f.calls()).toBe(0);
+        await b.approve(p.id!, p.digest!);
+        await wait(() => b.view().state === 'completed');
+        expect(b.view()).toMatchObject({ confirmed: 25, acceptedRequests: 5, uncertain: 0 });
+        expect(f.calls()).toBe(5);
+        expect(f.pixels.filter((c) => c === 0)).toHaveLength(25);
+        expect(
+            b
+                .view()
+                .history.filter((h) => h.accepted)
+                .map((h) => h.pixels)
+        ).toEqual([5, 5, 5, 5, 5]);
+        expect((await f.s.connectorView()).progress!.correct).toBe(0);
+        const next = await b.prepare('fake', 25, 'session', 25);
+        expect(next.total).toBe(15);
+        expect(next.targets.some((n) => p.targets.some((old) => old.x === n.x && old.y === n.y))).toBe(false);
+    });
+    it('seals both budgets before authorization and uses a smaller final group without exceeding energy', async () => {
+        const f = await fixture(),
+            b = f.s.singlePixelWriter.batch;
+        for (const [n, e] of [
+            [26, 25],
+            [25, 26],
+            [25, 0],
+            [0, 25],
+        ])
+            await expect(b.prepare('fake', n!, 'session', e!)).rejects.toThrow();
+        await expect(b.prepare('fake', 25, 'session')).rejects.toThrow();
+        const p = await b.prepare('fake', 25, 'session', 12);
+        expect(p).toMatchObject({ total: 12, energyCost: 12, budgets: { pixels: 25, energy: 12 } });
+        await b.approve(p.id!, p.digest!);
+        await wait(() => b.view().state === 'completed');
+        expect(f.calls()).toBe(3);
+        expect(
+            b
+                .view()
+                .history.filter((h) => h.accepted)
+                .map((h) => h.pixels)
+        ).toEqual([5, 5, 2]);
+        expect(b.view().confirmed).toBe(12);
+    });
+    it('pauses after two groups, restores history without permission and explicitly resumes only the remaining 15 targets', async () => {
+        const f = await fixture(),
+            b = f.s.singlePixelWriter.batch,
+            p = await b.prepare('fake', 25, 'session', 25);
+        await b.approve(p.id!, p.digest!);
+        await wait(() => b.view().confirmed === 10);
+        await b.pause();
+        await wait(() => b.view().scheduler === 'paused');
+        const calls = f.calls();
+        await new Promise((r) => setTimeout(r, 1100));
+        expect(f.calls()).toBe(calls);
+        await b.stop();
+        await f.s.close();
+        opened.splice(opened.indexOf(f.s), 1);
+        const restored = await EngineService.open({ dataDir: f.dir });
+        opened.push(restored);
+        f.connect(restored);
+        await restored.bindConnector();
+        const next = restored.singlePixelWriter.batch;
+        expect(next.view()).toMatchObject({ execution: 'session', expires: null, confirmed: 10, commandReady: false });
+        expect(f.calls()).toBe(2);
+        await next.approve(p.id!, p.digest!);
+        await wait(() => next.view().state === 'completed');
+        expect(f.calls()).toBe(5);
+        expect(next.view()).toMatchObject({ confirmed: 25, acceptedRequests: 5 });
+        expect(f.pixels.filter((c) => c === 0)).toHaveLength(25);
+    });
+    it('stops the whole session on an ambiguous group, rejects fallback and ignores a late result', async () => {
+        const f = await fixture({ real: true }),
+            b = f.s.singlePixelWriter.batch,
+            p = await b.prepare('real', 25, 'session', 25);
+        await b.approve(p.id!, p.digest!);
+        await wait(() => b.view().commandReady);
+        const c = b.claim()!;
+        expect(c.protocol).toBe(2);
+        expect(b.grant()?.writes).toHaveLength(25);
+        await b.result(c.attemptId, 'uncertain');
+        await b.result(c.attemptId, 'confirmed');
+        expect(b.view()).toMatchObject({ confirmed: 0, uncertain: 1, commandReady: false, expires: null });
+        expect(b.view().targets.filter((t) => t.state === 'needs-reconciliation')).toHaveLength(5);
+        await expect(b.prepare('real', 5, 'sequential')).rejects.toThrow();
+        expect(f.calls()).toBe(0);
+    });
+    it('can resume after a known energy refusal, but never extends the absolute authorization', async () => {
+        const f = await fixture({ real: true }),
+            b = f.s.singlePixelWriter.batch,
+            p = await b.prepare('real', 25, 'session', 25);
+        await b.approve(p.id!, p.digest!);
+        await wait(() => b.view().commandReady);
+        const expires = b.view().expires!,
+            c = b.claim()!;
+        await b.result(c.attemptId, 'not-sent');
+        await wait(() => b.view().scheduler === 'paused');
+        expect(b.view()).toMatchObject({ confirmed: 0, uncertain: 0 });
+        b.resume(p.id!, p.digest!);
+        expect(b.view().expires).toBe(expires);
+        await wait(() => b.view().commandReady);
+        const time = vi.spyOn(Date, 'now').mockReturnValue(expires + 1);
+        try {
+            await b.tick();
+            expect(b.view()).toMatchObject({ expires: null, commandReady: false, confirmed: 0 });
+        } finally {
+            time.mockRestore();
+        }
+    });
+    it('stops a session after durable start but before publication without claiming an uncertain send', async () => {
+        const f = await fixture(),
+            b = f.s.singlePixelWriter.batch,
+            p = await b.prepare('fake', 25, 'session', 25);
+        const port = b as unknown as { dispatch: (w: readonly PixelWrite[], o: WriteOptions) => Promise<ApplyResult> };
+        const original = port.dispatch.bind(port);
+        let stopped: Promise<unknown> | null = null;
+        vi.spyOn(port, 'dispatch').mockImplementationOnce((w, o) => {
+            stopped = b.stop();
+            return original(w, o);
+        });
+        await b.approve(p.id!, p.digest!);
+        await wait(() => stopped !== null);
+        await stopped;
+        expect(b.view()).toMatchObject({ confirmed: 0, uncertain: 0, state: 'stopped', commandReady: false });
+        expect(f.calls()).toBe(0);
+    });
 });

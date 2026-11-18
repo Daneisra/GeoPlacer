@@ -1,6 +1,6 @@
 # Lecteur GeoPixels HTTP — observations et petits lots contrôlés
 
-Version du lecteur : **0.7.0**, serveur Phase 2H local. Les observations restent passives par défaut. Le port écrivain séparé propose un envoi **groupé natif** (une requête) ou **séquentiel** (repli), avec un lot explicitement autorisé de **1 à 5 pixels** et son coût affiché avant accord. Aucun achat. La session du site reste dans le navigateur. Le lot réel séquentiel 2G est validé visuellement après rechargement ; le premier envoi groupé réel de cinq pixels est également validé par l’utilisateur (18 novembre 2026 : une requête acceptée, cinq couleurs conformes observées). Chaque nouveau lot exige son accord. Le lecteur 0.6.0 conserve les observations et les lots séquentiels ; les plus anciens gardent leurs fonctions de lecture compatibles. Le groupé exige 0.7.0.
+Version du lecteur : **0.8.0**, serveur Phase 2I local. Les observations restent passives par défaut. Le port écrivain propose une **session supervisée bornée à 25 cibles distinctes**, par groupes natifs de cinq maximum, avec budgets de pixels et d’énergie, destinations prévisualisées et accord unique. Les lots groupés uniques et séquentiels restent disponibles. Aucun achat ni transfert de session du site au serveur local. Le groupe réel 2H de cinq pixels est validé ; la première session réelle 2I reste à autoriser et valider.
 
 ## Installation et lancement
 
@@ -142,3 +142,10 @@ Le séquentiel reste sélectionnable pour un nouveau lot. Un groupe incertain ne
 
 
 Validation réelle 2H du 18 novembre 2026 : l’utilisateur confirme le succès d’un lot groupé de cinq cibles, avec une requête acceptée et cinq couleurs conformes dans l’observation. La fraîcheur source du cache reste non vérifiée. Détails : [rapport 2H](RAPPORT-PHASE2H.md#validation-utilisateur-réelle--18-novembre-2026).
+
+
+## Session supervisée (Phase 2I)
+
+Installer 0.8.0, coupler et lier le modèle après observation. Choisir **Session supervisée**, budgets de pixels et d’énergie (25 maximum chacun), puis **Prévisualiser la session**. Le nombre de destinations ne dépasse pas le plus petit budget ni les cibles connues disponibles. **Attendre l’accord explicite de l’utilisateur sur les coordonnées/couleurs affichées avant « Autoriser et démarrer la session ».** Les groupes de cinq maximum s’enchaînent ensuite sans nouvelle confirmation.
+
+Pause/reprise ne renouvelle pas l’échéance absolue de deux minutes. Arrêt ou résultat incertain bloque les envois suivants ; une requête déjà partie ne peut être annulée sur le service. Aucune régénération d’énergie n’est créditée automatiquement. Le redémarrage conserve l’historique des groupes et les cibles acquittées, jamais l’autorisation. La progression observée et sa fraîcheur restent distinctes de l’acceptation des requêtes. Voir [le rapport 2I](RAPPORT-PHASE2I.md).

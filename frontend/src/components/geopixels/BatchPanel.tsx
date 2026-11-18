@@ -6,8 +6,17 @@ export type BatchView = {
     digest: string | null;
     state: string;
     mode: 'fake' | 'real' | null;
-    execution?: 'sequential' | 'grouped';
+    execution?: 'sequential' | 'grouped' | 'session';
     energyCost?: number;
+    budgets?: { pixels: number; energy: number };
+    history?: {
+        attemptId: string;
+        state: string;
+        pixels: number;
+        startedAt: number | null;
+        closedAt: number | null;
+        accepted: boolean;
+    }[];
     acceptedRequests?: number;
     targets: {
         x: number;
@@ -50,6 +59,7 @@ export function BatchPanel({
     fake,
     ready,
     groupedReady,
+    sessionReady,
     refresh,
 }: {
     view: BatchView;
@@ -57,10 +67,12 @@ export function BatchPanel({
     fake: boolean;
     ready: boolean;
     groupedReady: boolean;
+    sessionReady: boolean;
     refresh: () => Promise<void>;
 }) {
-    const [limit, setLimit] = useState(5);
-    const [execution, setExecution] = useState<'grouped' | 'sequential'>('grouped');
+    const [limit, setLimit] = useState(25);
+    const [energyBudget, setEnergyBudget] = useState(25);
+    const [execution, setExecution] = useState<'grouped' | 'sequential' | 'session'>('session');
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const active = ['running', 'paused'].includes(view.state);
@@ -87,7 +99,7 @@ export function BatchPanel({
     return (
         <fieldset className="rounded border border-amber-500 p-4 space-y-3" data-batch-state={view.state}>
             <legend>
-                3. Dessiner un petit lot{' '}
+                3. Dessiner un lot ou une session{' '}
                 {view.mode === 'fake' || (view.mode === null && fake) ? '— fournisseur factice' : 'sur GeoPixels'}
             </legend>
             <p>
@@ -115,59 +127,97 @@ export function BatchPanel({
                         ' Un accusé ne prouve pas la couleur finale. Aucun renvoi automatique.'}
                 </p>
             )}
-            {!ready && <p>Connectez le lecteur 0.7.0, observez puis liez le modèle dans les étapes 1 et 2.</p>}
+            {!ready && <p>Connectez le lecteur 0.8.0, observez puis liez le modèle dans les étapes 1 et 2.</p>}
             {!approvalKey && <p>Saisissez la clé locale dans les réglages de connexion.</p>}
-            <label>
-                Mode d’envoi{' '}
-                <select
-                    aria-label="Mode d’envoi"
-                    value={selectedExecution}
-                    disabled={locked || busy}
-                    onChange={(e) => setExecution(e.target.value as 'grouped' | 'sequential')}
+            <div className="flex flex-wrap items-end gap-3">
+                <label className="flex flex-col gap-1">
+                    Mode d’envoi{' '}
+                    <select
+                        aria-label="Mode d’envoi"
+                        value={selectedExecution}
+                        disabled={locked || busy}
+                        onChange={(e) => {
+                            const value = e.target.value as 'grouped' | 'sequential' | 'session';
+                            setExecution(value);
+                            setLimit(value === 'session' ? 25 : 5);
+                        }}
+                    >
+                        <option value="session">Session supervisée — 25 pixels maximum</option>
+                        <option value="grouped">Groupé natif — une requête</option>
+                        <option value="sequential">Séquentiel — solution de repli</option>
+                    </select>
+                </label>
+                {selectedExecution === 'grouped' && !groupedReady && (
+                    <p>Installer et coupler le lecteur 0.7.0 pour le mode groupé.</p>
+                )}
+                {selectedExecution === 'session' && !sessionReady && (
+                    <p>Installer et coupler le lecteur 0.8.0 pour une session supervisée.</p>
+                )}
+                <label className="flex flex-col gap-1">
+                    Nombre maximal de pixels{' '}
+                    <input
+                        aria-label="Nombre maximal de pixels"
+                        type="number"
+                        min={1}
+                        max={selectedExecution === 'session' ? 25 : 5}
+                        value={locked ? (view.budgets?.pixels ?? view.total) : limit}
+                        disabled={locked || busy}
+                        onChange={(e) => setLimit(Number(e.target.value))}
+                    />
+                </label>{' '}
+                {selectedExecution === 'session' && (
+                    <label className="flex flex-col gap-1">
+                        Budget maximal d’énergie{' '}
+                        <input
+                            aria-label="Budget maximal d’énergie"
+                            type="number"
+                            min={1}
+                            max={25}
+                            value={locked ? (view.budgets?.energy ?? view.energyCost) : energyBudget}
+                            disabled={locked || busy}
+                            onChange={(e) => setEnergyBudget(Number(e.target.value))}
+                        />
+                    </label>
+                )}
+                <button
+                    disabled={
+                        !enabled ||
+                        (execution === 'grouped' && !groupedReady) ||
+                        (execution === 'session' &&
+                            (!sessionReady ||
+                                !Number.isInteger(energyBudget) ||
+                                energyBudget < 1 ||
+                                energyBudget > 25)) ||
+                        active ||
+                        view.uncertain > 0 ||
+                        !Number.isInteger(limit) ||
+                        limit < 1 ||
+                        limit > (execution === 'session' ? 25 : 5) ||
+                        ['prepared', 'interrupted', 'blocked'].includes(view.state)
+                    }
+                    onClick={() =>
+                        void command('prepare', {
+                            mode: fake ? 'fake' : 'real',
+                            limit,
+                            execution,
+                            ...(execution === 'session' ? { energyBudget } : {}),
+                        })
+                    }
                 >
-                    <option value="grouped">Groupé natif — une requête</option>
-                    <option value="sequential">Séquentiel — solution de repli</option>
-                </select>
-            </label>
-            {selectedExecution === 'grouped' && !groupedReady && (
-                <p>Installer et coupler le lecteur 0.7.0 pour le mode groupé.</p>
-            )}
-            <label>
-                Nombre maximal de pixels{' '}
-                <input
-                    aria-label="Nombre maximal de pixels"
-                    type="number"
-                    min={1}
-                    max={5}
-                    value={limit}
-                    disabled={locked || busy}
-                    onChange={(e) => setLimit(Number(e.target.value))}
-                />
-            </label>{' '}
-            <button
-                disabled={
-                    !enabled ||
-                    (execution === 'grouped' && !groupedReady) ||
-                    active ||
-                    view.uncertain > 0 ||
-                    !Number.isInteger(limit) ||
-                    limit < 1 ||
-                    limit > 5 ||
-                    ['prepared', 'interrupted', 'blocked'].includes(view.state)
-                }
-                onClick={() => void command('prepare', { mode: fake ? 'fake' : 'real', limit, execution })}
-            >
-                Préparer le lot
-            </button>
+                    {execution === 'session' ? 'Prévisualiser la session' : 'Préparer le lot'}
+                </button>
+            </div>
             {view.targets.length > 0 && (
                 <>
                     <p>
                         Vérifiez les destinations exactes : couche de base ·{' '}
                         {view.mode === 'fake'
                             ? 'simulation, aucun envoi au site'
-                            : view.execution === 'grouped'
-                              ? 'une requête groupée pour toutes les lignes'
-                              : 'un envoi réel par ligne'}
+                            : view.execution === 'session'
+                              ? 'groupes automatiques de cinq maximum, limités aux destinations ci-dessous'
+                              : view.execution === 'grouped'
+                                ? 'une requête groupée pour toutes les lignes'
+                                : 'un envoi réel par ligne'}
                         . Coût maximal : {view.energyCost ?? view.total} énergie (1 par pixel).
                     </p>
                     <div className="overflow-x-auto">
@@ -219,17 +269,23 @@ export function BatchPanel({
                     </div>
                     {['prepared', 'interrupted', 'blocked'].includes(view.state) && view.uncertain === 0 && (
                         <button
-                            disabled={!enabled || (view.execution === 'grouped' && !groupedReady)}
+                            disabled={
+                                !enabled ||
+                                (view.execution === 'grouped' && !groupedReady) ||
+                                (view.execution === 'session' && !sessionReady)
+                            }
                             onClick={() => void command('approve', approval)}
                         >
                             {view.state === 'prepared'
-                                ? 'Autoriser et démarrer le lot'
+                                ? view.execution === 'session'
+                                    ? 'Autoriser et démarrer la session'
+                                    : 'Autoriser et démarrer le lot'
                                 : 'Autoriser les pixels restants'}
                         </button>
                     )}
                     {view.state === 'running' && (
                         <button disabled={!enabled} onClick={() => void command('pause', {})}>
-                            Mettre le lot en pause
+                            {view.execution === 'session' ? 'Mettre la session en pause' : 'Mettre le lot en pause'}
                         </button>
                     )}
                     {view.state === 'paused' && (
@@ -238,15 +294,20 @@ export function BatchPanel({
                                 !enabled ||
                                 (view.execution === 'grouped' && !groupedReady) ||
                                 view.scheduler !== 'paused' ||
-                                view.uncertain > 0
+                                view.uncertain > 0 ||
+                                (view.execution === 'session' && !sessionReady)
                             }
                             onClick={() => void command('resume', approval)}
                         >
-                            Reprendre le lot autorisé
+                            {view.execution === 'session'
+                                ? 'Reprendre la session autorisée'
+                                : 'Reprendre le lot autorisé'}
                         </button>
                     )}
                     <button disabled={!approvalKey} onClick={() => void command('stop', {})}>
-                        Arrêter le lot immédiatement
+                        {view.execution === 'session'
+                            ? 'Arrêter la session immédiatement'
+                            : 'Arrêter le lot immédiatement'}
                     </button>
                     {view.uncertain > 0 && (
                         <button disabled={!enabled} onClick={() => void command('reconcile', {})}>
@@ -265,11 +326,41 @@ export function BatchPanel({
                 Les envois s’enchaînent après une seule autorisation. La progression observée reste mesurée séparément
                 ci-dessous.
             </p>
+            {!!view.history?.length && (
+                <details>
+                    <summary>Historique des groupes ({view.history.length} opérations)</summary>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left" aria-label="Historique des groupes">
+                            <thead>
+                                <tr>
+                                    <th>Début</th>
+                                    <th>Pixels</th>
+                                    <th>Résultat de la requête</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {view.history.map((h) => (
+                                    <tr key={h.attemptId}>
+                                        <td>
+                                            {h.startedAt
+                                                ? new Date(h.startedAt).toLocaleTimeString('fr-FR')
+                                                : 'Non démarrée'}
+                                        </td>
+                                        <td>{h.pixels}</td>
+                                        <td>{h.accepted ? 'Acceptée' : (labels[h.state] ?? h.state)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </details>
+            )}
             <details>
                 <summary>Sécurité et interruptions</summary>
                 <p>
-                    Cinq pixels maximum. En séquentiel : une seconde minimum entre envois. Aucun achat. Le navigateur
-                    vérifie l’énergie et les couleurs du compte avant chaque envoi.
+                    Une session autorise au maximum 25 pixels distincts et 25 énergie ; chaque groupe contient cinq
+                    pixels maximum. En séquentiel : une seconde minimum entre envois. Aucun achat. Le navigateur vérifie
+                    l’énergie et les couleurs du compte avant chaque envoi.
                 </p>
                 <p>
                     Arrêter révoque le lot ; un envoi déjà parti ne peut pas être annulé. Un résultat incertain bloque

@@ -22,7 +22,7 @@ type Session = {
   lastDigest: string | null;
   requests: number[];
   releasePoll?: () => void;
-  batchProtocol?: 1 | 2;
+  batchProtocol?: 1 | 2 | 3;
 };
 
 /** Privileged HTTP is capability-authenticated. Its Origin is NOT page attestation. */
@@ -94,7 +94,7 @@ export class ConnectorHttpChannel {
     s.lastSeen = this.now();
     return this.writer;
   }
-  claimBatch(capability:string){const w=this.writerAccess(capability);check(w.batch.view().execution!=='grouped'||this.session?.batchProtocol===2,'reader 0.7.0 required for grouped execution');return w.batch.claim();}
+  claimBatch(capability:string){const w=this.writerAccess(capability);check((w.batch.view().execution!=='grouped'||(this.session?.batchProtocol??0)>=2) && (w.batch.view().execution!=='session'||this.session?.batchProtocol===3),'reader 0.7.0 required for grouped execution');return w.batch.claim();}
   batchAllowed(capability:string,batchId:string,attemptId:string){const b=this.writerAccess(capability).batch;return {allowed:b.view().id===batchId && b.allowed(attemptId)};}
   batchResult(capability:string,batchId:string,attemptId:string,result:'confirmed'|'not-sent'|'uncertain'){
     const b=this.writerAccess(capability).batch;check(b.view().id===batchId,'batch result mismatch');return b.result(attemptId,result);
@@ -119,18 +119,18 @@ export class ConnectorHttpChannel {
   }
     status(
         capability: string,
-        readerVersion?: 3 | 4 | 5 | 6,
+        readerVersion?: 3 | 4 | 5 | 6 | 7,
         ack?: { revision: number; state: 'running' | 'paused' | 'stopped' },
         abortedCapture?: string
     ) {
         const s = this.authenticate(capability);
         s.lastSeen = this.now();
         if (s.approved) {
-            if(readerVersion===5 || readerVersion===6)s.batchProtocol=readerVersion===6?2:1;
+            if(readerVersion===5 || readerVersion===6 || readerVersion===7)s.batchProtocol=readerVersion===7?3:readerVersion===6?2:1;
             this.provider.heartbeat();
-            this.provider.monitoring.capabilities(readerVersion === 3 || readerVersion === 4 || readerVersion === 5 || readerVersion === 6, readerVersion === 4 || readerVersion === 5 || readerVersion === 6);
+            this.provider.monitoring.capabilities(readerVersion === 3 || readerVersion === 4 || readerVersion === 5 || readerVersion === 6 || readerVersion === 7, readerVersion === 4 || readerVersion === 5 || readerVersion === 6 || readerVersion === 7);
             if (abortedCapture) {
-                check(readerVersion === 4 || readerVersion === 5 || readerVersion === 6, 'regional reader required');
+                check(readerVersion === 4 || readerVersion === 5 || readerVersion === 6 || readerVersion === 7, 'regional reader required');
                 this.provider.monitoring.abortCapture(abortedCapture);
             }
             if (ack) this.provider.monitoring.acknowledge(ack.revision, ack.state);
@@ -140,9 +140,9 @@ export class ConnectorHttpChannel {
             expires: s.deadline,
             lastSequence: s.lastSequence,
             fingerprint: s.fingerprint,
-            ...([4,5,6].includes(readerVersion??0) ? { regionalProtocol: 1 } : {}),
-            ...([5,6].includes(readerVersion??0)?{batchProtocol:readerVersion===6?2:1,batch:this.writer?{...this.writer.batch.view(),grant:this.writer.batch.grant()}:null}:{}),
-            ...(readerVersion === 3 || readerVersion === 4 || readerVersion === 5 || readerVersion === 6
+            ...([4,5,6,7].includes(readerVersion??0) ? { regionalProtocol: 1 } : {}),
+            ...([5,6,7].includes(readerVersion??0)?{batchProtocol:readerVersion===7?3:readerVersion===6?2:1,batch:this.writer?{...this.writer.batch.view(),grant:this.writer.batch.grant()}:null}:{}),
+            ...(readerVersion === 3 || readerVersion === 4 || readerVersion === 5 || readerVersion === 6 || readerVersion === 7
                 ? { monitoring: this.provider.monitoring.control(), pacing: 'server-50ms' }
                 : {}),
         };
@@ -150,7 +150,7 @@ export class ConnectorHttpChannel {
     /** One bounded held HTTP response. No browser timer, no permission renewal beyond deadline. */
     async poll(
         capability: string,
-        readerVersion: 3 | 4 | 5 | 6,
+        readerVersion: 3 | 4 | 5 | 6 | 7,
         ack: { revision: number; state: 'running' | 'paused' | 'stopped' } | undefined,
         signal: AbortSignal,
         abortedCapture?: string

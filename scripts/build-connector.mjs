@@ -4,12 +4,12 @@ const client = (await readFile(new URL('../browser/geopixels-client.js', import.
 const reader = (await readFile(new URL('../browser/geopixels-reader.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 const transport = (await readFile(new URL('../browser/geopixels-http-transport.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 const writer = (await readFile(new URL('../browser/geopixels-writer.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
-const version = '0.7.0';
+const version = '0.8.0';
 const header = `// ==UserScript==
 // @name         GeoPlacer experimental observer
 // @namespace    geoplacer.local
 // @version      ${version}
-// @description  GeoPixels cache reader and explicitly authorized small batches; no purchases
+// @description  GeoPixels cache reader and explicitly authorized bounded sessions; no purchases
 // @match        https://geopixels.net/*
 // @match        https://www.geopixels.net/*
 // @grant        GM_xmlhttpRequest

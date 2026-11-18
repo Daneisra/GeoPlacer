@@ -360,3 +360,64 @@ describe('Native grouped browser writer (site fetch is always mocked)', () => {
         expect(s.fetch).toHaveBeenCalledTimes(1);
     });
 });
+
+function sessionLot(s: Awaited<ReturnType<typeof setup>>, size = 25, energy = 25) {
+    s.command.project.width = 25;
+    s.command.project.height = 1;
+    const pixels = Array.from({ length: size }, (_, i) => ({ gridX: 999 + i, gridY: 1001, color: s.command.color }));
+    const grant = {
+        id: '8c555673-b6ee-4c25-8a33-84b90e84d6c4',
+        digest: 'b'.repeat(64),
+        expires: Date.now() + 110000,
+        project: s.command.project,
+        execution: 'session',
+        budgets: { pixels: 25, energy },
+        writes: pixels,
+    };
+    const commands = Array.from({ length: Math.ceil(size / 5) }, (_, i): NativeCommand => ({
+        protocol: 2,
+        batchId: grant.id,
+        attemptId: `64de9aa7-8259-4f7d-98b5-5a861ca8b3f${i}`,
+        project: s.command.project,
+        deadline: Date.now() + 25000,
+        pixels: pixels.slice(i * 5, i * 5 + 5),
+    }));
+    return { grant, commands };
+}
+describe('Browser-only bounded session (no account request or regeneration)', () => {
+    it('sends 25 different authorized pixels in five groups under one frozen budget', async () => {
+        const s = await setup({ energy: 25 }),
+            b = sessionLot(s);
+        for (const c of b.commands) expect(await s.writer.executeBatch(c, s.allowed, b.grant)).toBe('confirmed');
+        expect(s.fetch).toHaveBeenCalledTimes(5);
+        const sent = s.sent.flatMap((x) => x.body.Pixels as { GridX: number; GridY: number }[]);
+        expect(sent).toHaveLength(25);
+        expect(new Set(sent.map((p) => p.GridX + ',' + p.GridY)).size).toBe(25);
+        expect(await s.writer.executeBatch(b.commands[0]!, s.allowed, b.grant)).toBe('not-sent');
+        expect(s.fetch).toHaveBeenCalledTimes(5);
+    });
+    it('refuses a group with insufficient real page energy and resumes only within the original conservative balance', async () => {
+        const s = await setup({ energy: 25 }),
+            b = sessionLot(s);
+        for (const c of b.commands.slice(0, 2))
+            expect(await s.writer.executeBatch(c, s.allowed, b.grant)).toBe('confirmed');
+        s.context.currentEnergy = 0;
+        expect(await s.writer.executeBatch(b.commands[2]!, s.allowed, b.grant)).toBe('not-sent');
+        expect(s.fetch).toHaveBeenCalledTimes(2);
+        s.context.currentEnergy = 15;
+        for (const c of b.commands.slice(2))
+            expect(await s.writer.executeBatch(c, s.allowed, b.grant)).toBe('confirmed');
+        expect(s.fetch).toHaveBeenCalledTimes(5);
+    });
+    it('does not invent regeneration or silently change the approved energy budget', async () => {
+        const s = await setup({ energy: 10 }),
+            b = sessionLot(s);
+        for (const c of b.commands.slice(0, 2))
+            expect(await s.writer.executeBatch(c, s.allowed, b.grant)).toBe('confirmed');
+        s.context.currentEnergy = 25;
+        expect(await s.writer.executeBatch(b.commands[2]!, s.allowed, b.grant)).toBe('not-sent');
+        expect(s.fetch).toHaveBeenCalledTimes(2);
+        const over = { ...b.grant, budgets: { pixels: 25, energy: 26 } };
+        expect(await s.writer.executeBatch(b.commands[2]!, s.allowed, over)).toBe('not-sent');
+    });
+});

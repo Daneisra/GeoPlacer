@@ -225,6 +225,19 @@ try {
     const refused=await (await post('/privileged/batch-result',{protocol:1,batchId:group.id,attemptId:native.attemptId,result:'not-sent'},ingress())).json();
     assert.equal(refused.state,'paused');assert.equal(refused.confirmed,0);await post('/batch/stop',{},management);
     passed.push('native group requires negotiated reader 0.7.0; bounded command and whole-group refusal preserve sequential fallback');
+    assert.equal((await post('/batch/prepare',{mode:'real',limit:25,execution:'session'},management)).status,400);
+    assert.equal((await post('/batch/prepare',{mode:'real',limit:25,execution:'session',energyBudget:26},management)).status,400);
+    assert.equal((await post('/batch/prepare',{mode:'real',limit:25,execution:'session',energyBudget:25},management)).status,409);
+    await post('/privileged/status',{protocol:1,readerVersion:7},ingress());
+    const session=await (await post('/batch/prepare',{mode:'real',limit:25,execution:'session',energyBudget:25},management)).json();
+    assert.equal(session.execution,'session');assert.deepEqual(session.budgets,{pixels:25,energy:25});assert.equal(session.total,1);
+    await post('/batch/approve',{batchId:session.id,digest:session.digest,approved:true},management);
+    {const end=Date.now()+5000;while(!s.singlePixelWriter.batch.view().commandReady){assert.ok(Date.now()<end);await new Promise(r=>setTimeout(r,10));}}
+    const sessionCommand=(await (await post('/privileged/batch-claim',{protocol:1},ingress())).json()).command;
+    assert.equal(sessionCommand.protocol,2);
+    await post('/privileged/batch-result',{protocol:1,batchId:session.id,attemptId:sessionCommand.attemptId,result:'not-sent'},ingress());
+    await post('/batch/stop',{},management);
+    passed.push('supervised session requires explicit bounded energy budget, reader 0.8.0 and sealed destination approval');
     const second = (await (await post('/pixel/prepare', { mode: 'real' }, management)).json()).destination;
     await post(
         '/pixel/confirm',

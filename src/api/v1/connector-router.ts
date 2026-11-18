@@ -90,17 +90,35 @@ export function createConnectorRouter(engine: EngineApi, httpChannel?: Connector
             const b = z
                 .strictObject({
                     mode: z.enum(['fake', 'real']),
-                    limit: z.number().int().min(1).max(5),
-                    execution: z.enum(['sequential', 'grouped']).default('sequential'),
+                    limit: z.number().int().min(1).max(25),
+                    execution: z.enum(['sequential', 'grouped', 'session']).default('sequential'),
+                    energyBudget: z.number().int().min(1).max(25).optional(),
+                })
+                .superRefine((b, ctx) => {
+                    if (b.execution !== 'session' && b.limit > 5)
+                        ctx.addIssue({ code: 'custom', path: ['limit'], message: 'Lot limité à cinq pixels.' });
+                    if (b.execution === 'session' && b.energyBudget === undefined)
+                        ctx.addIssue({ code: 'custom', path: ['energyBudget'], message: 'Budget de session requis.' });
+                    if (b.execution !== 'session' && b.energyBudget !== undefined)
+                        ctx.addIssue({
+                            code: 'custom',
+                            path: ['energyBudget'],
+                            message: 'Budget réservé aux sessions.',
+                        });
                 })
                 .parse(req.body);
             if (b.mode === 'real') regionControl(req);
-            if (b.mode === 'real' && b.execution === 'grouped' && httpChannel!.info().batchProtocol !== 2)
+            if (b.mode === 'real' && b.execution === 'grouped' && (httpChannel!.info().batchProtocol ?? 0) < 2)
                 throw new ConnectorError(
                     'CONNECTOR_UNAVAILABLE',
                     'Installer et coupler le lecteur 0.7.0 pour un envoi groupé.'
                 );
-            return batch.prepare(b.mode, b.limit, b.execution);
+            if (b.mode === 'real' && b.execution === 'session' && httpChannel!.info().batchProtocol !== 3)
+                throw new ConnectorError(
+                    'CONNECTOR_UNAVAILABLE',
+                    'Installer et coupler le lecteur 0.8.0 pour une session supervisée.'
+                );
+            return batch.prepare(b.mode, b.limit, b.execution, b.energyBudget);
         })
     );
     const consent = z.strictObject({
@@ -115,7 +133,9 @@ export function createConnectorRouter(engine: EngineApi, httpChannel?: Connector
                 b = consent.parse(req.body);
             if (batch.view().mode === 'real') {
                 regionControl(req);
-                if (batch.view().execution === 'grouped' && httpChannel!.info().batchProtocol !== 2)
+                if (batch.view().execution === 'session' && httpChannel!.info().batchProtocol !== 3)
+                    throw new ConnectorError('CONNECTOR_UNAVAILABLE', 'Lecteur 0.8.0 requis pour cette session.');
+                if (batch.view().execution === 'grouped' && (httpChannel!.info().batchProtocol ?? 0) < 2)
                     throw new ConnectorError('CONNECTOR_UNAVAILABLE', 'Lecteur 0.7.0 requis pour ce groupe.');
             }
             return batch.approve(b.batchId, b.digest);
@@ -128,7 +148,9 @@ export function createConnectorRouter(engine: EngineApi, httpChannel?: Connector
                 b = consent.parse(req.body);
             if (batch.view().mode === 'real') {
                 regionControl(req);
-                if (batch.view().execution === 'grouped' && httpChannel!.info().batchProtocol !== 2)
+                if (batch.view().execution === 'session' && httpChannel!.info().batchProtocol !== 3)
+                    throw new ConnectorError('CONNECTOR_UNAVAILABLE', 'Lecteur 0.8.0 requis pour cette session.');
+                if (batch.view().execution === 'grouped' && (httpChannel!.info().batchProtocol ?? 0) < 2)
                     throw new ConnectorError('CONNECTOR_UNAVAILABLE', 'Lecteur 0.7.0 requis pour ce groupe.');
             }
             return batch.resume(b.batchId, b.digest);

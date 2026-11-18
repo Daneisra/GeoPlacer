@@ -8,6 +8,7 @@ const GeoPlacerPageWriter = (() => {
         energySpent = 0,
         executionSession = null;
     const batchTargets = new Set();
+    const sessionBudgets = new Map();
     const refuse = (reason) => {
         lastReason = reason;
         return 'not-sent';
@@ -93,6 +94,7 @@ const GeoPlacerPageWriter = (() => {
         );
     }
     function validGrant(c, grant) {
+        const session = grant?.execution === 'session';
         return (
             exact(grant, [
                 'id',
@@ -101,8 +103,15 @@ const GeoPlacerPageWriter = (() => {
                 'project',
                 'writes',
                 ...(c.protocol === 2 ? ['execution'] : []),
+                ...(session ? ['budgets'] : []),
             ]) &&
-            (c.protocol !== 2 || grant.execution === 'grouped') &&
+            (c.protocol !== 2 || ['grouped', 'session'].includes(grant.execution)) &&
+            (!session ||
+                (c.protocol === 2 &&
+                    exact(grant.budgets, ['pixels', 'energy']) &&
+                    [grant.budgets.pixels, grant.budgets.energy].every(
+                        (n) => Number.isSafeInteger(n) && n >= 1 && n <= 25
+                    ))) &&
             /^[a-f0-9-]{36}$/.test(grant.id) &&
             grant.id === c.batchId &&
             /^[a-f0-9]{64}$/.test(grant.digest) &&
@@ -113,7 +122,7 @@ const GeoPlacerPageWriter = (() => {
             Object.keys(grant.project).every((k) => grant.project[k] === c.project[k]) &&
             Array.isArray(grant.writes) &&
             grant.writes.length >= 1 &&
-            grant.writes.length <= 5 &&
+            grant.writes.length <= (session ? Math.min(grant.budgets.pixels, grant.budgets.energy) : 5) &&
             grant.writes.every(
                 (w) =>
                     exact(w, ['gridX', 'gridY', 'color']) &&
@@ -127,12 +136,22 @@ const GeoPlacerPageWriter = (() => {
             ) &&
             new Set(grant.writes.map((w) => w.gridX + ',' + w.gridY)).size === grant.writes.length &&
             (c.protocol === 2
-                ? c.pixels.length === grant.writes.length &&
+                ? (session || c.pixels.length === grant.writes.length) &&
                   c.pixels.every((p) =>
                       grant.writes.some((w) => w.gridX === p.gridX && w.gridY === p.gridY && w.color === p.color)
                   )
                 : grant.writes.some((w) => w.gridX === c.gridX && w.gridY === c.gridY && w.color === c.color))
         );
+    }
+    function sessionAllowance(c, grant, commit = false) {
+        if (grant?.execution !== 'session') return true;
+        const scope = JSON.stringify([grant.digest, grant.project, grant.writes, grant.budgets]);
+        const prior = sessionBudgets.get(c.batchId);
+        if (prior && prior.scope !== scope) return false;
+        const spent = (prior?.spent ?? 0) + c.pixels.length;
+        if (spent > grant.budgets.energy || spent > grant.budgets.pixels) return false;
+        if (commit) sessionBudgets.set(c.batchId, { scope, spent });
+        return true;
     }
     function readinessReason(cost = 1) {
         if (
@@ -205,6 +224,7 @@ const GeoPlacerPageWriter = (() => {
             if (
                 batch &&
                 (!validGrant(c, grant) ||
+                    !sessionAllowance(c, grant) ||
                     pixels.some((p) => batchTargets.has(c.batchId + '/' + p.gridX + ',' + p.gridY + ':' + p.color)))
             )
                 return refuse('Pixel hors du lot autorisé ou déjà envoyé.');
@@ -242,6 +262,8 @@ const GeoPlacerPageWriter = (() => {
                 if (finalReason) return refuse(finalReason);
                 if (!pixels.every((p) => ownedColors().includes(p.color)))
                     return refuse('Cette couleur ne figure plus dans les couleurs du compte.');
+                if (batch && !sessionAllowance(c, grant))
+                    return refuse('Budget de session épuisé ou autorisation modifiée.');
                 const key = 'geoplacer-single-pixel-dispatched-v1';
                 const ids = JSON.parse(sessionStorage.getItem(key) || '[]');
                 if (!Array.isArray(ids) || ids.includes(c.attemptId) || ids.length >= 100)
@@ -252,6 +274,7 @@ const GeoPlacerPageWriter = (() => {
                 if (!batch) dispatched = true;
                 if (energyCeiling === null) energyCeiling = currentEnergy;
                 if (executionSession === null) executionSession = { user: userID, token: tokenUser, subject };
+                if (batch && !sessionAllowance(c, grant, true)) return refuse('Budget de session épuisé.');
                 energySpent += pixels.length;
                 if (batch)
                     for (const p of pixels) batchTargets.add(c.batchId + '/' + p.gridX + ',' + p.gridY + ':' + p.color);
