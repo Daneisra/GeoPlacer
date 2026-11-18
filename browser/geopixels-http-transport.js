@@ -106,9 +106,9 @@ const GeoPlacerHttpTransport = (address, request) => {
       capability = claimed.capability;
       pending(claimed.fingerprint);
       for (let i = 0; i < 60; i++) {
-        const state = await post('status', { protocol: 1, readerVersion: 5, waitMs: 5000 });
+        const state = await post('status', { protocol: 1, readerVersion: 6, waitMs: 5000 });
         if (state.approved === true && state.lastSequence === 0) {
-          if (state.pacing !== 'server-50ms' || state.regionalProtocol !== 1 || state.batchProtocol !== 1)
+          if (state.pacing !== 'server-50ms' || state.regionalProtocol !== 1 || state.batchProtocol !== 2)
             throw new Error('Serveur incompatible : installer la Phase 2G et refaire le couplage.');
           active = true;
           return;
@@ -145,7 +145,7 @@ const GeoPlacerHttpTransport = (address, request) => {
       if (!active || busy) return;
       const answer = await post('status', {
         protocol: 1,
-        readerVersion: 5,
+        readerVersion: 6,
         ...(monitoring ? { monitoring } : {}),
       });
       if (answer.approved !== true || answer.lastSequence !== sequence) {
@@ -158,7 +158,7 @@ const GeoPlacerHttpTransport = (address, request) => {
       if (!active) throw new Error('Canal non couplé');
       const answer = await post('status', {
         protocol: 1,
-        readerVersion: 5,
+        readerVersion: 6,
         waitMs: 5000,
         ...(abortedCapture ? { abortedCapture } : {}),
         ...(monitoring ? { monitoring } : {}),

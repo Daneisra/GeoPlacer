@@ -34,7 +34,7 @@ let ghostImageOriginalData = new ImageData(new Uint8ClampedArray(${JSON.stringif
 let ghostImageTopLeft = {gridX:999,gridY:1001}; let ghostActivePaletteColors = new Set();
 let tileImageCache = new Map(); let userID=7; let userData={colors:'${owned.join(',')}'}; let Colors=['#000000','#ffffff'];
 let tokenUser='synthetic-browser-fixture-only', subject='synthetic-browser-subject';
-let currentEnergy=10, queuedPixelsObjects=new Map(), isPlacingRequestInProgress=false;
+let currentEnergy=20, queuedPixelsObjects=new Map(), isPlacingRequestInProgress=false;
 function getSelectedEventId(){return null;}
 function loadFixtureTiles(){
   tileImageCache.clear();
@@ -273,9 +273,9 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
       entry.colorBitmap.getContext('2d').clearRect(999,1,1,1);
       globalThis.fixtureSiteCalls=0;globalThis.fixtureWrites=[];
       globalThis.fetch=async(url,options)=>{
-        if(url!==location.origin+'/PlacePixels' || JSON.parse(options.body).Pixels.length!==1)
+        if(url!==location.origin+'/PlacePixels' || !Array.isArray(JSON.parse(options.body).Pixels) || JSON.parse(options.body).Pixels.length<1 || JSON.parse(options.body).Pixels.length>5)
           throw new Error('Unexpected fixture site operation');
-        globalThis.fixtureSiteCalls++;globalThis.fixtureWrites.push(JSON.parse(options.body).Pixels[0]);
+        globalThis.fixtureSiteCalls++;globalThis.fixtureWrites.push(...JSON.parse(options.body).Pixels);
         return new Response('Ok',{status:200});
       };
     });
@@ -307,6 +307,7 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     await reader.getByRole('button',{name:'Observer le modèle',exact:true}).click();
     await page.locator('#observedIncorrect').filter({hasText:/^38$/}).waitFor();
     const batchPanel=page.getByRole('group',{name:/3. Dessiner un petit lot/});
+    await batchPanel.getByLabel('Mode d’envoi',{exact:true}).selectOption('sequential');
     await batchPanel.getByRole('button',{name:'Préparer le lot',exact:true}).click();
     await page.locator('[data-batch-state="prepared"]').waitFor();
     assert.equal(await batchPanel.locator('tbody tr').count(),5);
@@ -343,6 +344,33 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     assert.equal((await api('connector/status',undefined,'GET')).batch.verification.correct,5);
     record('OK five ACKs with only four observed matches: per-target discrepancy displayed, no retry; subsequent read-only observation sees the fifth');
     record('OK one dashboard authorization, five sequential native-stub sends, no per-pixel dialog, five durable confirmations, independent recapture measures progress');
+    // Native grouped mode: one approved request, all five targets; no actual GeoPixels traffic.
+    await reader.evaluate(()=>{for(const entry of tileImageCache.values())entry.colorBitmap.getContext('2d').clearRect(0,0,1000,1000);globalThis.fixtureWrites=[];});
+    await reader.getByRole('button',{name:'Observer le modèle',exact:true}).click();
+    await page.locator('#observedIncorrect').filter({hasText:/^38$/}).waitFor();
+    await batchPanel.getByLabel('Mode d’envoi',{exact:true}).selectOption('grouped');
+    await batchPanel.getByRole('button',{name:'Préparer le lot',exact:true}).click();
+    await page.locator('[data-batch-state="prepared"]').waitFor();
+    await batchPanel.getByText(/Coût maximal : 5 énergie/).waitFor();
+    reader.on('dialog',rejectDialog);
+    await batchPanel.getByRole('button',{name:'Autoriser et démarrer le lot',exact:true}).click();
+    await page.locator('[data-batch-state="completed"]').waitFor();
+    reader.off('dialog',rejectDialog);assert.equal(unexpectedDialogs,0);
+    const grouped=await api('connector/status',undefined,'GET');
+    assert.equal(grouped.batch.execution,'grouped');assert.equal(grouped.batch.acceptedRequests,1);assert.equal(grouped.batch.confirmed,5);
+    assert.equal(await reader.evaluate(()=>globalThis.fixtureSiteCalls),7);
+    assert.equal(await reader.evaluate(()=>globalThis.fixtureWrites.length),5);
+    assert.equal(grouped.progress.correct,0);
+    await reader.evaluate(()=>{for(const w of globalThis.fixtureWrites.slice(0,4)){
+      const tx=Math.floor(w.GridX/1000)*1000,ty=Math.floor(w.GridY/1000)*1000,ctx=tileImageCache.get(tx+','+ty).colorBitmap.getContext('2d');
+      ctx.fillStyle='#'+w.Color.toString(16).padStart(6,'0');ctx.fillRect(w.GridX-tx,w.GridY-ty,1,1);
+    }});
+    await reader.getByRole('button',{name:'Observer le modèle',exact:true}).click();
+    await page.locator('#observedCorrect').filter({hasText:/^4$/}).waitFor();
+    await batchPanel.getByRole('cell',{name:/Couleur différente/}).waitFor();
+    assert.equal((await api('connector/status',undefined,'GET')).batch.verification.correct,4);
+    assert.equal(await reader.evaluate(()=>globalThis.fixtureSiteCalls),7);
+    record('OK native group: one HTTP site-stub request for five targets versus five sequential requests; one accepted request stays separate from four observed matches; no retry');
     await reader.screenshot({ path: path.join(out, 'http-reader-local-fixture.png'), fullPage: true });
     await page.screenshot({ path: path.join(out, 'http-dashboard-local-fixture.png'), fullPage: true });
     await reader.getByText('Options du lecteur',{exact:true}).click();

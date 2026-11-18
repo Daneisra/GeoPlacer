@@ -163,7 +163,7 @@
                 const ack = await next.batchResult(command.batchId, command.attemptId, result);
                 status.textContent =
                   result === 'confirmed' && !['stopped', 'blocked'].includes(ack.state)
-                    ? `Lot : ${ack.confirmed} envoi(s) confirmé(s). Progression mesurée séparément.`
+                    ? `Lot : ${ack.acceptedRequests} requête(s) acceptée(s), ${ack.confirmed} cible(s) couverte(s) par cet accusé. Progression mesurée séparément.`
                     : result === 'not-sent'
                       ? 'Lot en pause : ' + (GeoPlacerPageWriter.reason?.() ?? 'pixel refusé avant envoi.')
                       : 'Lot interrompu, résultat incertain. Aucun renvoi.';

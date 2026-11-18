@@ -32,6 +32,7 @@ type View = {
     scheduler: { state: string; reason: string | null; openAttempts: number; uncertainAttempts: string[] } | null;
 };
 type HttpReaderInfo = {
+    batchProtocol?: number | null;
     enabled: boolean;
     active: boolean;
     pending: { requestId: string; fingerprint: string; originClaim: string; expires: number } | null;
@@ -373,6 +374,7 @@ export function ConnectorDashboard() {
                     view={view.batch}
                     approvalKey={approvalKey}
                     fake={view.mode === 'local-fake'}
+                    groupedReady={view.mode === 'local-fake' || httpReader?.batchProtocol === 2}
                     ready={view.connected && view.bound && !active}
                     refresh={async () => setView((await engineHttp.get<View>('/connector/status')).data)}
                 />

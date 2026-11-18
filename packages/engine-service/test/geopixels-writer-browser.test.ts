@@ -11,6 +11,11 @@ type Command = {
     color: number;
     deadline: number;
 };
+type NativeCommand = Omit<Command, 'gridX' | 'gridY' | 'color'> & {
+    protocol: 2;
+    batchId: string;
+    pixels: { gridX: number; gridY: number; color: number }[];
+};
 async function setup(
     options: {
         reply?: string;
@@ -65,7 +70,7 @@ async function setup(
     vm.runInContext(source + '\nglobalThis.writer=GeoPlacerPageWriter;', context);
     const writer = context.writer as {
         executeBatch: (
-            c: Command & { batchId: string },
+            c: (Command & { batchId: string }) | NativeCommand,
             allowed: (id: string) => Promise<boolean>,
             grant: object
         ) => Promise<string>;
@@ -275,6 +280,83 @@ describe('Browser writer with one explicit bounded batch approval', () => {
             b = lot(s);
         expect(await s.writer.executeBatch(b.commands[0]!, s.allowed, b.grant)).toBe('uncertain');
         expect(await s.writer.executeBatch(b.commands[0]!, s.allowed, b.grant)).toBe('not-sent');
+        expect(s.fetch).toHaveBeenCalledTimes(1);
+    });
+});
+
+function nativeLot(s: Awaited<ReturnType<typeof setup>>) {
+    const b = lot(s),
+        command: NativeCommand = {
+            protocol: 2,
+            batchId: b.grant.id,
+            attemptId: s.command.attemptId,
+            project: s.command.project,
+            deadline: s.command.deadline,
+            pixels: b.grant.writes,
+        };
+    return { command, grant: { ...b.grant, execution: 'grouped' } };
+}
+describe('Native grouped browser writer (site fetch is always mocked)', () => {
+    it('sends one request containing exactly five approved targets and never repeats it', async () => {
+        const s = await setup(),
+            b = nativeLot(s);
+        expect(await s.writer.executeBatch(b.command, s.allowed, b.grant)).toBe('confirmed');
+        expect(s.fetch).toHaveBeenCalledTimes(1);
+        expect(s.context.confirm).not.toHaveBeenCalled();
+        expect(s.sent[0]!.body.Pixels).toEqual(
+            b.command.pixels.map((p) => ({ GridX: p.gridX, GridY: p.gridY, Color: p.color }))
+        );
+        expect(
+            await s.writer.executeBatch(
+                { ...b.command, attemptId: '74de9aa7-8259-4f7d-98b5-5a861ca8b3fe' },
+                s.allowed,
+                b.grant
+            )
+        ).toBe('not-sent');
+        expect(s.fetch).toHaveBeenCalledTimes(1);
+    });
+    it.each(['energy', 'color', 'outside', 'duplicate', 'oversized', 'malformed', 'extra', 'revoked'])(
+        'refuses the ENTIRE group before sending: %s',
+        async (kind) => {
+            const s = await setup({ energy: kind === 'energy' ? 4 : 5 }),
+                b = nativeLot(s);
+            if (kind === 'color') s.context.userData = { colors: [] };
+            if (kind === 'outside')
+                b.command.pixels = [...b.command.pixels.slice(1), { gridX: 12345, gridY: 0, color: 0 }];
+            if (kind === 'duplicate') b.command.pixels = [...b.command.pixels.slice(1), b.command.pixels[1]!];
+            if (kind === 'oversized') b.command.pixels = [...b.command.pixels, b.command.pixels[0]!];
+            if (kind === 'malformed') Object.assign(b.command, { pixels: [null] });
+            if (kind === 'extra') Object.assign(b.command, { url: 'https://example.invalid' });
+            expect(
+                await s.writer.executeBatch(b.command, kind === 'revoked' ? async () => false : s.allowed, b.grant)
+            ).toBe('not-sent');
+            expect(s.fetch).not.toHaveBeenCalled();
+        }
+    );
+    it('retains the whole dispatch on a lost global reply with no blind retry', async () => {
+        const s = await setup({ lost: true }),
+            b = nativeLot(s);
+        expect(await s.writer.executeBatch(b.command, s.allowed, b.grant)).toBe('uncertain');
+        expect(await s.writer.executeBatch(b.command, s.allowed, b.grant)).toBe('not-sent');
+        expect(s.fetch).toHaveBeenCalledTimes(1);
+    });
+    it('aborts one in-flight native request and retains the whole attempt as uncertain', async () => {
+        const s = await setup(),
+            b = nativeLot(s);
+        s.fetch.mockImplementationOnce(
+            (_url, o) =>
+                new Promise((_resolve, reject) => {
+                    (o as { body: string; signal: AbortSignal }).signal.addEventListener('abort', () =>
+                        reject(new Error('aborted'))
+                    );
+                })
+        );
+        const result = s.writer.executeBatch(b.command, s.allowed, b.grant);
+        for (let i = 0; i < 30 && s.fetch.mock.calls.length === 0; i++) await Promise.resolve();
+        expect(s.fetch).toHaveBeenCalledTimes(1);
+        s.writer.stop();
+        expect(await result).toBe('uncertain');
+        expect(await s.writer.executeBatch(b.command, s.allowed, b.grant)).toBe('not-sent');
         expect(s.fetch).toHaveBeenCalledTimes(1);
     });
 });

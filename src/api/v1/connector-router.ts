@@ -88,10 +88,19 @@ export function createConnectorRouter(engine: EngineApi, httpChannel?: Connector
         action((req) => {
             const batch = batchControl(req);
             const b = z
-                .strictObject({ mode: z.enum(['fake', 'real']), limit: z.number().int().min(1).max(5) })
+                .strictObject({
+                    mode: z.enum(['fake', 'real']),
+                    limit: z.number().int().min(1).max(5),
+                    execution: z.enum(['sequential', 'grouped']).default('sequential'),
+                })
                 .parse(req.body);
             if (b.mode === 'real') regionControl(req);
-            return batch.prepare(b.mode, b.limit);
+            if (b.mode === 'real' && b.execution === 'grouped' && httpChannel!.info().batchProtocol !== 2)
+                throw new ConnectorError(
+                    'CONNECTOR_UNAVAILABLE',
+                    'Installer et coupler le lecteur 0.7.0 pour un envoi groupé.'
+                );
+            return batch.prepare(b.mode, b.limit, b.execution);
         })
     );
     const consent = z.strictObject({
@@ -104,7 +113,11 @@ export function createConnectorRouter(engine: EngineApi, httpChannel?: Connector
         action((req) => {
             const batch = batchControl(req),
                 b = consent.parse(req.body);
-            if (batch.view().mode === 'real') regionControl(req);
+            if (batch.view().mode === 'real') {
+                regionControl(req);
+                if (batch.view().execution === 'grouped' && httpChannel!.info().batchProtocol !== 2)
+                    throw new ConnectorError('CONNECTOR_UNAVAILABLE', 'Lecteur 0.7.0 requis pour ce groupe.');
+            }
             return batch.approve(b.batchId, b.digest);
         })
     );
@@ -113,7 +126,11 @@ export function createConnectorRouter(engine: EngineApi, httpChannel?: Connector
         action((req) => {
             const batch = batchControl(req),
                 b = consent.parse(req.body);
-            if (batch.view().mode === 'real') regionControl(req);
+            if (batch.view().mode === 'real') {
+                regionControl(req);
+                if (batch.view().execution === 'grouped' && httpChannel!.info().batchProtocol !== 2)
+                    throw new ConnectorError('CONNECTOR_UNAVAILABLE', 'Lecteur 0.7.0 requis pour ce groupe.');
+            }
             return batch.resume(b.batchId, b.digest);
         })
     );

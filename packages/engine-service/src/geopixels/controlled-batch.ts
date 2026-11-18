@@ -22,20 +22,37 @@ import { nativePoint, type GeoPixelsProvider } from './provider.js';
 import type { SinglePixelCommand } from './single-pixel-writer.js';
 
 type State = 'idle' | 'prepared' | 'running' | 'paused' | 'interrupted' | 'blocked' | 'completed' | 'stopped';
-type RecordEntry = { attemptId: AttemptId; identity: string; batchId: string; write: PixelWrite };
+type RecordEntry = {
+    attemptId: AttemptId;
+    identity: string;
+    batchId: string;
+    write: PixelWrite;
+    execution?: 'sequential' | 'grouped';
+};
 type Batch = {
     id: string;
     identity: string;
     mode: 'fake' | 'real';
+    execution?: 'sequential' | 'grouped';
     project: BrowserProject;
     origin: { x: number; y: number };
     writes: PixelWrite[];
     digest: string;
 };
 type Saved = { schema: 1; batch: Batch | null; records: RecordEntry[] };
-export type BatchCommand = SinglePixelCommand & { batchId: string };
+export type BatchCommand =
+    | (SinglePixelCommand & { batchId: string })
+    | {
+          protocol: 2;
+          attemptId: string;
+          batchId: string;
+          project: BrowserProject;
+          deadline: number;
+          pixels: { gridX: number; gridY: number; color: number }[];
+      };
 type Pending = {
     command: BatchCommand;
+    writes: readonly PixelWrite[];
     ready: boolean;
     delivered: boolean;
     resolve: (r: ApplyResult) => void;
@@ -115,6 +132,7 @@ export class ControlledBatch {
                         typeof r.batchId === 'string' &&
                         typeof r.identity === 'string' &&
                         r.identity.length < 4096 &&
+                        (r.execution === undefined || ['sequential', 'grouped'].includes(r.execution)) &&
                         validWrite(r.write)
                 ),
                 'invalid batch records'
@@ -124,6 +142,7 @@ export class ControlledBatch {
                     typeof s.batch.id === 'string' &&
                         typeof s.batch.identity === 'string' &&
                         ['fake', 'real'].includes(s.batch.mode) &&
+                        (s.batch.execution === undefined || ['sequential', 'grouped'].includes(s.batch.execution)) &&
                         Number.isSafeInteger(s.batch.origin?.x) &&
                         Number.isSafeInteger(s.batch.origin?.y) &&
                         Array.isArray(s.batch.writes) &&
@@ -137,23 +156,31 @@ export class ControlledBatch {
             this.saved = s;
             this.state = s.batch ? (s.batch.writes.every((w) => this.done(w)) ? 'completed' : 'interrupted') : 'idle'; // Neither permission nor a live scheduler survives restart.
             for (const a of this.d.attempts.open())
-                if (
-                    s.batch &&
-                    a.writes.length === 1 &&
-                    s.batch.writes.some((w) => same(w, a.writes[0]!)) &&
-                    !s.records.some((r) => r.attemptId === a.attemptId)
-                )
-                    s.records.push({
-                        attemptId: a.attemptId,
-                        identity: s.batch.identity,
-                        batchId: s.batch.id,
-                        write: a.writes[0]!,
-                    });
+                if (s.batch && a.writes.every((w) => s.batch!.writes.some((candidate) => same(w, candidate))))
+                    for (const w of a.writes)
+                        if (!s.records.some((r) => r.attemptId === a.attemptId && same(r.write, w)))
+                            s.records.push({
+                                attemptId: a.attemptId,
+                                identity: s.batch.identity,
+                                batchId: s.batch.id,
+                                execution: s.batch.execution ?? 'sequential',
+                                write: w,
+                            });
         }
     }
     private digest(b: Omit<Batch, 'digest'> | Batch) {
         return createHash('sha256')
-            .update(JSON.stringify([b.id, b.identity, b.mode, b.project, b.origin, b.writes]))
+            .update(
+                JSON.stringify([
+                    b.id,
+                    b.identity,
+                    b.mode,
+                    b.project,
+                    b.origin,
+                    b.writes,
+                    ...(b.execution === undefined ? [] : [b.execution]),
+                ])
+            )
             .digest('hex');
     }
     private identity(t: Template) {
@@ -223,7 +250,7 @@ export class ControlledBatch {
                 state.purgedClosed === 0 &&
                 state.closed
                     .filter((a) => a.state === 'finished' && !a.reconciled && a.applied > 0)
-                    .every((a) => this.saved.records.some((r) => r.attemptId === a.attemptId)),
+                    .every((a) => this.saved.records.filter((r) => r.attemptId === a.attemptId).length === a.pixels),
             'confirmation archive incomplete: restore metadata with its journal before writing'
         );
     }
@@ -244,9 +271,14 @@ export class ControlledBatch {
         }
         this.assertArchive();
     }
-    async prepare(mode: 'fake' | 'real', limit: number) {
+    async prepare(mode: 'fake' | 'real', limit: number, execution: 'sequential' | 'grouped' = 'sequential') {
         check(
-            !this.busy() && !this.controlling && Number.isInteger(limit) && limit >= 1 && limit <= 5,
+            !this.busy() &&
+                !this.controlling &&
+                Number.isInteger(limit) &&
+                limit >= 1 &&
+                limit <= 5 &&
+                ['sequential', 'grouped'].includes(execution),
             'stop/reconcile the current lot first; limit is 1..5'
         );
         this.controlling = true;
@@ -296,6 +328,7 @@ export class ControlledBatch {
                 id: randomUUID(),
                 identity,
                 mode,
+                execution,
                 project: this.d.provider.status().project!,
                 origin: { ...t.placement.topLeft },
                 writes: [...plan.writes],
@@ -391,22 +424,39 @@ export class ControlledBatch {
                 get: (target, prop) => {
                     if (prop === 'start')
                         return async (id: AttemptId, now: number) => {
+                            const leased = base.get(id),
+                                b = this.saved.batch!;
+                            check(leased?.state === 'leased', 'batch attempt must be leased');
+                            const remaining = b.writes.filter((w) => !this.done(w));
+                            if (
+                                b.execution === 'grouped' &&
+                                (leased.writes.length !== remaining.length ||
+                                    !remaining.every((w) => leased.writes.some((candidate) => same(w, candidate))))
+                            ) {
+                                await base.cancel(id, 'Group scope changed: observe and prepare again', now);
+                                throw new Error(
+                                    'Cibles modifiées ou inconnues : arrêter, réobserver et préparer un nouveau groupe.'
+                                );
+                            }
                             check(
-                                this.saved.records.length < 4096,
+                                this.saved.records.length + leased.writes.length <= 4096,
                                 'confirmation archive full; stop and preserve the journal'
                             );
-                            const a = await base.start(id, now),
-                                b = this.saved.batch!;
+                            const a = await base.start(id, now);
                             check(
-                                a.writes.length === 1 && b.writes.some((w) => same(w, a.writes[0]!)),
+                                a.writes.length >= 1 &&
+                                    a.writes.length <= 5 &&
+                                    a.writes.every((w) => b.writes.some((candidate) => same(w, candidate))),
                                 'attempt outside batch scope'
                             );
-                            this.saved.records.push({
-                                attemptId: id,
-                                write: a.writes[0]!,
-                                identity: b.identity,
-                                batchId: b.id,
-                            });
+                            for (const w of a.writes)
+                                this.saved.records.push({
+                                    attemptId: id,
+                                    write: w,
+                                    identity: b.identity,
+                                    batchId: b.id,
+                                    execution: b.execution ?? 'sequential',
+                                });
                             await this.persist();
                             return a;
                         };
@@ -422,7 +472,7 @@ export class ControlledBatch {
                     templateId: t.id,
                     agents: [this.d.agent],
                     maxActiveAgents: 1,
-                    maxBatchSize: 1,
+                    maxBatchSize: this.saved.batch!.execution === 'grouped' ? this.saved.batch!.writes.length : 1,
                     minBatchSize: 1,
                     leaseTtlMs: 30_000,
                     unknownPixels: 'skip',
@@ -451,7 +501,7 @@ export class ControlledBatch {
                             },
                         },
                         writer: {
-                            maxPixelsPerWrite: 1,
+                            maxPixelsPerWrite: this.saved.batch!.execution === 'grouped' ? 5 : 1,
                             idempotentWrites: false,
                             applyPixels: (_agent, writes, options) => this.dispatch(writes, options),
                         },
@@ -485,16 +535,31 @@ export class ControlledBatch {
         }
     }
     private dispatch(writes: readonly PixelWrite[], options: WriteOptions): Promise<ApplyResult> {
+        // Pause may arrive while the existing scheduler is awaiting a durable start.
+        // Nothing has been delivered: close as a known refusal instead of inventing uncertainty.
+        if (this.state === 'paused')
+            return Promise.resolve({
+                attemptId: options.attemptId,
+                outcomes: writes.map((w) => ({
+                    taskId: w.taskId,
+                    status: 'rejected' as const,
+                    reason: 'other' as const,
+                })),
+            });
         this.context();
         const b = this.saved.batch!;
         check(
             this.state === 'running' &&
                 this.deadline > Date.now() &&
                 !this.pending &&
-                writes.length === 1 &&
-                b.writes.some((w) => same(w, writes[0]!)) &&
-                !this.done(writes[0]!) &&
-                !this.excluded(b.identity).has(key(writes[0]!)),
+                writes.length >= 1 &&
+                writes.length <= (b.execution === 'grouped' ? 5 : 1) &&
+                writes.every(
+                    (w) =>
+                        b.writes.some((candidate) => same(w, candidate)) &&
+                        !this.done(w) &&
+                        !this.excluded(b.identity).has(key(w))
+                ),
             'write outside authorized batch'
         );
         const w = writes[0]!,
@@ -505,18 +570,37 @@ export class ControlledBatch {
             settle = resolve;
         });
         return new Promise<ApplyResult>((resolve, reject) => {
-            const command: BatchCommand = {
-                protocol: 1,
-                attemptId: options.attemptId,
-                project: b.project,
-                gridX: point.x,
-                gridY: point.y,
-                color: w.color,
-                deadline: Math.min(this.deadline, Date.now() + 30_000),
-                batchId: b.id,
-            };
+            const command: BatchCommand =
+                b.execution === 'grouped'
+                    ? {
+                          protocol: 2,
+                          attemptId: options.attemptId,
+                          project: b.project,
+                          batchId: b.id,
+                          deadline: Math.min(this.deadline, Date.now() + 30_000),
+                          pixels: writes
+                              .map((write) => ({
+                                  ...nativePoint(
+                                      b.project,
+                                      write.point.x - t.placement.topLeft.x,
+                                      write.point.y - t.placement.topLeft.y
+                                  ),
+                              }))
+                              .map((point, i) => ({ gridX: point.x, gridY: point.y, color: writes[i]!.color })),
+                      }
+                    : {
+                          protocol: 1,
+                          attemptId: options.attemptId,
+                          project: b.project,
+                          gridX: point.x,
+                          gridY: point.y,
+                          color: w.color,
+                          deadline: Math.min(this.deadline, Date.now() + 30_000),
+                          batchId: b.id,
+                      };
             const p: Pending = {
                 command,
+                writes,
                 ready: false,
                 delivered: false,
                 resolve,
@@ -542,17 +626,19 @@ export class ControlledBatch {
                         return this.cancelPending('Lot suspendu avant livraison.');
                     try {
                         this.context();
-                        const window = await this.d.provider.readWindow({
-                            minX: w.point.x,
-                            minY: w.point.y,
-                            width: 1,
-                            height: 1,
-                        });
-                        check(
-                            window.snapshot.get(w.point) !== -2 && window.validUntil > Date.now(),
-                            'target observation expired or unknown'
-                        );
-                        p.command.deadline = Math.min(p.command.deadline, window.validUntil);
+                        for (const write of writes) {
+                            const window = await this.d.provider.readWindow({
+                                minX: write.point.x,
+                                minY: write.point.y,
+                                width: 1,
+                                height: 1,
+                            });
+                            check(
+                                window.snapshot.get(write.point) !== -2 && window.validUntil > Date.now(),
+                                'target observation expired or unknown'
+                            );
+                            p.command.deadline = Math.min(p.command.deadline, window.validUntil);
+                        }
                         check(this.pending === p && this.state === 'running', 'batch changed while preparing delivery');
                         if (b.mode === 'fake') {
                             p.delivered = true;
@@ -635,7 +721,7 @@ export class ControlledBatch {
             await this.stop('Résultat incertain ou reçu après interruption. Aucun renvoi.');
             return this.view();
         }
-        const w = this.saved.records.find((r) => r.attemptId === id)!.write;
+        const writes = p.writes;
         if (status === 'not-sent') {
             this.state = 'paused';
             this.error = 'Le lecteur a refusé ce pixel avant envoi. Consulter son message avant de reprendre.';
@@ -643,11 +729,11 @@ export class ControlledBatch {
         }
         p.resolve({
             attemptId: id as AttemptId,
-            outcomes: [
+            outcomes: writes.map((w) =>
                 status === 'confirmed'
-                    ? { taskId: w.taskId, status: 'applied' }
-                    : { taskId: w.taskId, status: 'rejected', reason: 'other' },
-            ],
+                    ? { taskId: w.taskId, status: 'applied' as const }
+                    : { taskId: w.taskId, status: 'rejected' as const, reason: 'other' as const }
+            ),
         });
         await p.settled;
         return this.view();
@@ -692,10 +778,9 @@ export class ControlledBatch {
             }
             p.reject(new Error('Batch operation uncertain'));
         } else {
-            const w = this.saved.records.find((r) => r.attemptId === p.command.attemptId)!.write;
             p.resolve({
                 attemptId: p.command.attemptId as AttemptId,
-                outcomes: [{ taskId: w.taskId, status: 'rejected', reason: 'other' }],
+                outcomes: p.writes.map((w) => ({ taskId: w.taskId, status: 'rejected', reason: 'other' })),
             });
         }
         p.settle();
@@ -725,16 +810,29 @@ export class ControlledBatch {
     async reconcile() {
         this.context(true);
         const a = this.d.attempts.open()[0];
-        check(a && this.saved.records.some((r) => r.attemptId === a.attemptId), 'no batch attempt to reconcile');
-        const p = a.writes[0]!.point,
-            w = await this.d.provider.readWindow({ minX: p.x, minY: p.y, width: 1, height: 1 });
         check(
-            w.sourceRange !== null &&
-                !w.sourceUndated &&
-                w.sourceRange.oldest > (a.needsReconciliationAt ?? a.startedAt ?? 0),
-            'source freshness unverified: no reconciliation from an undated cache'
+            a?.state === 'needs-reconciliation' &&
+                !this.pending &&
+                this.saved.records.some((r) => r.attemptId === a.attemptId),
+            'no uncertain batch attempt to reconcile'
         );
-        await this.d.attempts.reconcile(a.attemptId, w.snapshot, Date.now());
+        const windows = await Promise.all(
+            a.writes.map((w) => this.d.provider.readWindow({ minX: w.point.x, minY: w.point.y, width: 1, height: 1 }))
+        );
+        check(
+            windows.every(
+                (w) =>
+                    w.sourceRange !== null &&
+                    !w.sourceUndated &&
+                    w.sourceRange.oldest > (a.needsReconciliationAt ?? a.startedAt ?? 0)
+            ),
+            'source freshness unverified: no reconciliation from an undated or partial cache'
+        );
+        await this.d.attempts.reconcile(
+            a.attemptId,
+            windows.map((w) => w.snapshot),
+            Date.now()
+        );
         await this.persist();
         this.emit();
         return this.view();
@@ -824,6 +922,15 @@ export class ControlledBatch {
             digest: b?.digest ?? null,
             state: this.state,
             mode: b?.mode ?? null,
+            execution: b?.execution ?? 'sequential',
+            energyCost: targets.length,
+            acceptedRequests: new Set(
+                this.saved.records
+                    .filter(
+                        (r) => r.batchId === b?.id && this.accounted(r) && this.excluded(r.identity).has(key(r.write))
+                    )
+                    .map((r) => r.attemptId)
+            ).size,
             targets,
             confirmed: targets.filter((t) => t.confirmed).length,
             total: targets.length,
@@ -844,6 +951,7 @@ export class ControlledBatch {
             digest: b.digest,
             expires: this.deadline,
             project: b.project,
+            ...(b.execution === 'grouped' ? { execution: 'grouped' as const } : {}),
             writes: b.writes.map((w) => {
                 const p = nativePoint(b.project, w.point.x - t.placement.topLeft.x, w.point.y - t.placement.topLeft.y);
                 return { gridX: p.x, gridY: p.y, color: w.color };

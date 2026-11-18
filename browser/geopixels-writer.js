@@ -34,6 +34,32 @@ const GeoPlacerPageWriter = (() => {
         Object.keys(o).length === keys.length &&
         keys.every((k) => Object.hasOwn(o, k));
     function valid(c, batch = false) {
+        if (c?.protocol === 2)
+            return (
+                batch &&
+                exact(c, ['protocol', 'attemptId', 'project', 'pixels', 'deadline', 'batchId']) &&
+                Array.isArray(c.pixels) &&
+                c.pixels.length >= 1 &&
+                c.pixels.length <= 5 &&
+                c.pixels.every(
+                    (p) =>
+                        exact(p, ['gridX', 'gridY', 'color']) &&
+                        valid(
+                            {
+                                protocol: 1,
+                                attemptId: c.attemptId,
+                                project: c.project,
+                                gridX: p.gridX,
+                                gridY: p.gridY,
+                                color: p.color,
+                                deadline: c.deadline,
+                                batchId: c.batchId,
+                            },
+                            true
+                        )
+                ) &&
+                new Set(c.pixels.map((p) => p.gridX + ',' + p.gridY)).size === c.pixels.length
+            );
         if (
             !exact(c, [
                 'protocol',
@@ -68,7 +94,15 @@ const GeoPlacerPageWriter = (() => {
     }
     function validGrant(c, grant) {
         return (
-            exact(grant, ['id', 'digest', 'expires', 'project', 'writes']) &&
+            exact(grant, [
+                'id',
+                'digest',
+                'expires',
+                'project',
+                'writes',
+                ...(c.protocol === 2 ? ['execution'] : []),
+            ]) &&
+            (c.protocol !== 2 || grant.execution === 'grouped') &&
             /^[a-f0-9-]{36}$/.test(grant.id) &&
             grant.id === c.batchId &&
             /^[a-f0-9]{64}$/.test(grant.digest) &&
@@ -92,10 +126,15 @@ const GeoPlacerPageWriter = (() => {
                     w.gridY > c.project.gridY - c.project.height
             ) &&
             new Set(grant.writes.map((w) => w.gridX + ',' + w.gridY)).size === grant.writes.length &&
-            grant.writes.some((w) => w.gridX === c.gridX && w.gridY === c.gridY && w.color === c.color)
+            (c.protocol === 2
+                ? c.pixels.length === grant.writes.length &&
+                  c.pixels.every((p) =>
+                      grant.writes.some((w) => w.gridX === p.gridX && w.gridY === p.gridY && w.color === p.color)
+                  )
+                : grant.writes.some((w) => w.gridX === c.gridX && w.gridY === c.gridY && w.color === c.color))
         );
     }
-    function readinessReason() {
+    function readinessReason(cost = 1) {
         if (
             typeof tokenUser !== 'string' ||
             !tokenUser ||
@@ -115,7 +154,10 @@ const GeoPlacerPageWriter = (() => {
             return 'Session de la page modifiée : recharger et refaire le couplage.';
         if (typeof currentEnergy !== 'number' || !Number.isFinite(currentEnergy))
             return 'Énergie de la page indisponible.';
-        if (currentEnergy < 1 || (energyCeiling !== null && Math.min(currentEnergy, energyCeiling - energySpent) < 1))
+        if (
+            currentEnergy < cost ||
+            (energyCeiling !== null && Math.min(currentEnergy, energyCeiling - energySpent) < cost)
+        )
             return 'Énergie insuffisante pour poursuivre ce lot.';
         if (ownedColors() === null) return 'Format des couleurs du compte non reconnu.';
         if (typeof queuedPixelsObjects === 'undefined' || typeof queuedPixelsObjects.size !== 'number')
@@ -159,9 +201,11 @@ const GeoPlacerPageWriter = (() => {
                         ? 'Autorisation expirée : préparez un nouveau pixel.'
                         : 'Commande ou modèle différent de la page observée. Refaites une observation.'
                 );
+            const pixels = c.protocol === 2 ? c.pixels : [c];
             if (
                 batch &&
-                (!validGrant(c, grant) || batchTargets.has(c.batchId + '/' + c.gridX + ',' + c.gridY + ':' + c.color))
+                (!validGrant(c, grant) ||
+                    pixels.some((p) => batchTargets.has(c.batchId + '/' + p.gridX + ',' + p.gridY + ':' + p.color)))
             )
                 return refuse('Pixel hors du lot autorisé ou déjà envoyé.');
             busy = true;
@@ -177,11 +221,11 @@ const GeoPlacerPageWriter = (() => {
                     !(await GeoPlacerPageReader.unchanged())
                 )
                     return refuse('Modèle, position, couche ou session modifié : observer et lier de nouveau.');
-                const reason = readinessReason();
+                const reason = readinessReason(pixels.length);
                 if (reason) return refuse(reason);
-                if (!ownedColors().includes(c.color))
+                if (!pixels.every((p) => ownedColors().includes(p.color)))
                     return refuse('Cette couleur ne figure pas dans les couleurs du compte.');
-                const color = '#' + c.color.toString(16).padStart(6, '0');
+                const color = batch ? '' : '#' + c.color.toString(16).padStart(6, '0');
                 if (
                     !batch &&
                     !confirm(
@@ -194,9 +238,9 @@ const GeoPlacerPageWriter = (() => {
                     return refuse('Autorisation locale retirée ou expirée : préparez un nouveau pixel.');
                 if (!(await GeoPlacerPageReader.unchanged()) || !valid(c, batch) || (batch && !validGrant(c, grant)))
                     return refuse('Modèle modifié ou autorisation expirée pendant la confirmation.');
-                const finalReason = readinessReason();
+                const finalReason = readinessReason(pixels.length);
                 if (finalReason) return refuse(finalReason);
-                if (!ownedColors().includes(c.color))
+                if (!pixels.every((p) => ownedColors().includes(p.color)))
                     return refuse('Cette couleur ne figure plus dans les couleurs du compte.');
                 const key = 'geoplacer-single-pixel-dispatched-v1';
                 const ids = JSON.parse(sessionStorage.getItem(key) || '[]');
@@ -208,10 +252,11 @@ const GeoPlacerPageWriter = (() => {
                 if (!batch) dispatched = true;
                 if (energyCeiling === null) energyCeiling = currentEnergy;
                 if (executionSession === null) executionSession = { user: userID, token: tokenUser, subject };
-                energySpent++;
-                if (batch) batchTargets.add(c.batchId + '/' + c.gridX + ',' + c.gridY + ':' + c.color);
+                energySpent += pixels.length;
+                if (batch)
+                    for (const p of pixels) batchTargets.add(c.batchId + '/' + p.gridX + ',' + p.gridY + ':' + p.color);
                 sent = true;
-                // Fixed same-origin endpoint, single pixel, no redirects, no retry. No queue or bitmap mutation.
+                // Fixed same-origin endpoint, one approved request, no redirects, no retry. No queue or bitmap mutation.
                 const response = await fetch(location.origin + '/PlacePixels', {
                     method: 'POST',
                     redirect: 'error',
@@ -221,7 +266,7 @@ const GeoPlacerPageWriter = (() => {
                         Token: tokenUser,
                         Subject: subject,
                         UserId: userID,
-                        Pixels: [{ GridX: c.gridX, GridY: c.gridY, Color: c.color }],
+                        Pixels: pixels.map((p) => ({ GridX: p.gridX, GridY: p.gridY, Color: p.color })),
                     }),
                 });
                 return response.ok && (await response.text()) === 'Ok' ? 'confirmed' : 'uncertain';

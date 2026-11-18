@@ -212,6 +212,19 @@ try {
     assert.equal(s.singlePixelWriter.batch.view().confirmed,2);
     assert.equal((await s.connectorView()).progress.correct,1);
     passed.push('bounded HTTP batch, one approval, strict scope/fields, private key/capability, at-most-once claim, durable idempotent ACK and independent progress');
+    assert.equal((await post('/batch/prepare',{mode:'real',limit:1,execution:'grouped'},management)).status,409);
+    await post('/privileged/status',{protocol:1,readerVersion:5},ingress());
+    assert.equal((await post('/batch/prepare',{mode:'real',limit:1,execution:'grouped'},management)).status,409);
+    await post('/privileged/status',{protocol:1,readerVersion:6},ingress());
+    const group=await (await post('/batch/prepare',{mode:'real',limit:1,execution:'grouped'},management)).json();
+    assert.equal(group.execution,'grouped');assert.equal(group.energyCost,1);
+    await post('/batch/approve',{batchId:group.id,digest:group.digest,approved:true},management);
+    {const end=Date.now()+5000;while(!s.singlePixelWriter.batch.view().commandReady){assert.ok(Date.now()<end);await new Promise(r=>setTimeout(r,10));}}
+    const native=(await (await post('/privileged/batch-claim',{protocol:1},ingress())).json()).command;
+    assert.equal(native.protocol,2);assert.equal(native.pixels.length,1);
+    const refused=await (await post('/privileged/batch-result',{protocol:1,batchId:group.id,attemptId:native.attemptId,result:'not-sent'},ingress())).json();
+    assert.equal(refused.state,'paused');assert.equal(refused.confirmed,0);await post('/batch/stop',{},management);
+    passed.push('native group requires negotiated reader 0.7.0; bounded command and whole-group refusal preserve sequential fallback');
     const second = (await (await post('/pixel/prepare', { mode: 'real' }, management)).json()).destination;
     await post(
         '/pixel/confirm',

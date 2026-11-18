@@ -1,6 +1,8 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { rm } from 'node:fs/promises';
+import { readFile, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
+import type { PixelWrite, WriteOptions, ApplyResult } from '@geoplacer/core';
 import { EngineService } from '../src/index.js';
 import { cleanup, demoPng, openFast, tempDir } from './helpers.js';
 const opened: EngineService[] = [];
@@ -345,5 +347,190 @@ describe('Bounded work through the existing TaskScheduler', () => {
         }
         f.s.connector.disconnect('test');
         expect((await b.observedView()).verification).toMatchObject({ correct: 0, unknown: 1 });
+    });
+    it('compares five-target native grouping with sequential execution using the same scheduler and planner', async () => {
+        const grouped = await fixture(),
+            g = grouped.s.singlePixelWriter.batch,
+            p = await g.prepare('fake', 5, 'grouped');
+        expect(p.energyCost).toBe(5);
+        await g.approve(p.id!, p.digest!);
+        await wait(() => g.view().state === 'completed');
+        expect(grouped.calls()).toBe(1);
+        expect(g.view()).toMatchObject({ confirmed: 5, acceptedRequests: 1, execution: 'grouped' });
+        const seq = await fixture(),
+            s = seq.s.singlePixelWriter.batch,
+            q = await s.prepare('fake', 5, 'sequential');
+        await s.approve(q.id!, q.digest!);
+        await wait(() => s.view().state === 'completed');
+        expect(seq.calls()).toBe(5);
+        expect(s.view().acceptedRequests).toBe(5);
+        grouped.observe();
+        seq.observe();
+        expect((await grouped.s.connectorView()).progress!.correct).toBe(
+            (await seq.s.connectorView()).progress!.correct
+        );
+    });
+    it('journals all group targets before one-shot delivery, then separates global acceptance from partial observation', async () => {
+        const f = await fixture({ real: true }),
+            b = f.s.singlePixelWriter.batch,
+            p = await b.prepare('real', 5, 'grouped');
+        await b.approve(p.id!, p.digest!);
+        await wait(() => b.view().commandReady);
+        const stored = JSON.parse(await readFile(path.join(f.dir, 'connector-batch.json'), 'utf8'));
+        expect(stored.records).toHaveLength(5);
+        expect(new Set(stored.records.map((r: { attemptId: string }) => r.attemptId)).size).toBe(1);
+        expect(await readFile(path.join(f.dir, 'providers/geopixels-writer/journal/attempts.log'), 'utf8')).toContain(
+            'started'
+        );
+        const c = b.claim()!;
+        expect(c.protocol).toBe(2);
+        if (c.protocol !== 2) throw new Error('expected group');
+        expect(c.pixels).toHaveLength(5);
+        expect(b.claim()).toBeNull();
+        await b.result(c.attemptId, 'confirmed');
+        await wait(() => b.view().state === 'completed');
+        expect(b.view()).toMatchObject({ confirmed: 5, acceptedRequests: 1, uncertain: 0 });
+        for (const w of c.pixels.slice(0, 4))
+            f.pixels[(f.project.gridY - w.gridY) * 8 + w.gridX - f.project.gridX] = w.color;
+        await new Promise((r) => setTimeout(r, 2));
+        f.observe(false);
+        expect((await b.observedView()).verification).toMatchObject({
+            correct: 4,
+            different: 1,
+            sourceUnverified: true,
+        });
+        expect(f.calls()).toBe(0);
+    });
+    it('blocks all five targets after a lost group reply, including restart and attempted sequential fallback', async () => {
+        const f = await fixture({ lost: true }),
+            b = f.s.singlePixelWriter.batch,
+            p = await b.prepare('fake', 5, 'grouped');
+        await b.approve(p.id!, p.digest!);
+        await wait(() => f.calls() === 1);
+        await b.stop();
+        expect(b.view().targets.every((t) => t.state === 'needs-reconciliation')).toBe(true);
+        await expect(b.prepare('fake', 5, 'sequential')).rejects.toThrow();
+        await f.s.close();
+        opened.splice(opened.indexOf(f.s), 1);
+        const restored = await EngineService.open({ dataDir: f.dir });
+        opened.push(restored);
+        f.connect(restored);
+        await restored.bindConnector();
+        const recovered = restored.singlePixelWriter.batch;
+        expect(recovered.view()).toMatchObject({ expires: null, uncertain: 1, commandReady: false });
+        expect(recovered.view().targets.every((t) => t.state === 'needs-reconciliation')).toBe(true);
+        f.observe(false);
+        await expect(recovered.reconcile()).rejects.toThrow(/freshness/);
+        await expect(recovered.approve(p.id!, p.digest!)).rejects.toThrow();
+        expect(f.calls()).toBe(1);
+    });
+    it('cancels an undelivered group during pause, then explicitly resumes without duplicate dispatch', async () => {
+        const f = await fixture({ real: true }),
+            b = f.s.singlePixelWriter.batch,
+            p = await b.prepare('real', 5, 'grouped');
+        await b.approve(p.id!, p.digest!);
+        await wait(() => b.view().commandReady);
+        await b.pause();
+        await wait(() => b.view().scheduler === 'paused');
+        expect(b.view()).toMatchObject({ confirmed: 0, uncertain: 0, commandReady: false });
+        b.resume(p.id!, p.digest!);
+        await wait(() => b.view().commandReady);
+        const c = b.claim()!;
+        await b.result(c.attemptId, 'not-sent');
+        await wait(() => b.view().scheduler === 'paused');
+        expect(b.view().targets.every((t) => t.state === 'failed')).toBe(true);
+        expect(b.view().acceptedRequests).toBe(0);
+    });
+    it('refuses oversized or invalid execution modes and an incomplete group before delivery', async () => {
+        const f = await fixture({ real: true }),
+            b = f.s.singlePixelWriter.batch;
+        for (const n of [0, 6, 1.5]) await expect(b.prepare('real', n, 'grouped')).rejects.toThrow();
+        await expect(b.prepare('real', 5, 'unsafe' as 'grouped')).rejects.toThrow();
+        const p = await b.prepare('real', 5, 'grouped');
+        f.pixels[0] = 0;
+        f.observe();
+        await b.approve(p.id!, p.digest!);
+        await wait(() => b.view().state === 'blocked');
+        expect(b.view()).toMatchObject({ uncertain: 0, confirmed: 0, commandReady: false });
+        expect(f.calls()).toBe(0);
+    });
+    it('preserves 2G archives without an execution field as sequential with no restored authorization', async () => {
+        const f = await fixture(),
+            b = f.s.singlePixelWriter.batch;
+        await b.prepare('fake', 1);
+        await f.s.close();
+        opened.splice(opened.indexOf(f.s), 1);
+        const filename = path.join(f.dir, 'connector-batch.json'),
+            saved = JSON.parse(await readFile(filename, 'utf8')),
+            a = saved.batch;
+        delete a.execution;
+        a.digest = createHash('sha256')
+            .update(JSON.stringify([a.id, a.identity, a.mode, a.project, a.origin, a.writes]))
+            .digest('hex');
+        await writeFile(filename, JSON.stringify(saved));
+        const restored = await EngineService.open({ dataDir: f.dir });
+        opened.push(restored);
+        expect(restored.singlePixelWriter.batch.view()).toMatchObject({
+            execution: 'sequential',
+            expires: null,
+            commandReady: false,
+        });
+    });
+    it('restores a prepared native group without permission, then executes only after a fresh explicit approval', async () => {
+        const f = await fixture(),
+            b = f.s.singlePixelWriter.batch,
+            p = await b.prepare('fake', 5, 'grouped');
+        await f.s.close();
+        opened.splice(opened.indexOf(f.s), 1);
+        const restored = await EngineService.open({ dataDir: f.dir });
+        opened.push(restored);
+        f.connect(restored);
+        await restored.bindConnector();
+        const next = restored.singlePixelWriter.batch;
+        expect(next.view()).toMatchObject({ execution: 'grouped', expires: null, confirmed: 0, commandReady: false });
+        expect(f.calls()).toBe(0);
+        await next.approve(p.id!, p.digest!);
+        await wait(() => next.view().state === 'completed');
+        expect(f.calls()).toBe(1);
+    });
+    it('honors a pause arriving after durable start but before dispatch without inventing an uncertain send', async () => {
+        const f = await fixture(),
+            b = f.s.singlePixelWriter.batch,
+            p = await b.prepare('fake', 5);
+        const port = b as unknown as { dispatch: (w: readonly PixelWrite[], o: WriteOptions) => Promise<ApplyResult> };
+        const original = port.dispatch.bind(port);
+        vi.spyOn(port, 'dispatch').mockImplementationOnce(async (w, o) => {
+            await b.pause();
+            return original(w, o);
+        });
+        await b.approve(p.id!, p.digest!);
+        await wait(() => b.view().scheduler === 'paused');
+        expect(b.view()).toMatchObject({ uncertain: 0, confirmed: 0 });
+        expect(f.calls()).toBe(0);
+        b.resume(p.id!, p.digest!);
+        await wait(() => b.view().state === 'completed');
+        expect(f.calls()).toBe(5);
+    });
+    it('requires dated post-interruption coverage of EVERY target before reconciling an uncertain group', async () => {
+        const f = await fixture({ lost: true }),
+            b = f.s.singlePixelWriter.batch,
+            p = await b.prepare('fake', 5, 'grouped');
+        await b.approve(p.id!, p.digest!);
+        await wait(() => f.calls() === 1);
+        await b.stop();
+        const missing = (p.targets[4]!.y - f.project.gridY) * -8 + p.targets[4]!.x - f.project.gridX;
+        f.pixels[missing] = -2;
+        await new Promise((r) => setTimeout(r, 2));
+        f.observe();
+        await expect(b.reconcile()).rejects.toThrow(/freshness/);
+        expect(b.view().uncertain).toBe(1);
+        expect(b.view().targets.every((t) => t.state === 'needs-reconciliation')).toBe(true);
+        f.pixels[missing] = 0;
+        await new Promise((r) => setTimeout(r, 2));
+        f.observe();
+        await b.reconcile();
+        expect(b.view()).toMatchObject({ uncertain: 0, acceptedRequests: 0, confirmed: 0 });
+        expect(b.view().targets.every((t) => t.state === 'finished')).toBe(true);
+        expect(f.calls()).toBe(1);
     });
 });

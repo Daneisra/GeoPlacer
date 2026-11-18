@@ -1,6 +1,6 @@
 # Lecteur GeoPixels HTTP — observations et petits lots contrôlés
 
-Version du lecteur : **0.6.0**, serveur Phase 2G local. Les observations restent passives par défaut et les anciens lecteurs restent compatibles en lecture. Un port écrivain séparé permet un lot explicitement autorisé de **1 à 5 pixels**, ou l’ancien essai unitaire dans les options. Aucun achat. La session du site reste dans le navigateur. Le lot réel de cinq pixels reste à valider par l’utilisateur ; seul l’essai réel unitaire 2F a été confirmé.
+Version du lecteur : **0.7.0**, serveur Phase 2H local. Les observations restent passives par défaut. Le port écrivain séparé propose un envoi **groupé natif** (une requête) ou **séquentiel** (repli), avec un lot explicitement autorisé de **1 à 5 pixels** et son coût affiché avant accord. Aucun achat. La session du site reste dans le navigateur. Le lot réel séquentiel 2G est validé visuellement après rechargement ; le premier envoi groupé réel reste à autoriser et valider. Le lecteur 0.6.0 conserve les observations et les lots séquentiels ; les plus anciens gardent leurs fonctions de lecture compatibles. Le groupé exige 0.7.0.
 
 ## Installation et lancement
 
@@ -132,3 +132,10 @@ Cette validation ne certifie ni une actualisation côté service, ni les grandes
 L’autorisation dure deux minutes maximum ; le couplage conserve sa limite absolue de dix minutes. Un délai minimal d’une seconde sépare deux envois terminés. Chaque envoi exige une observation non expirée de sa cible et les vérifications navigateur (énergie, couleur possédée, file native vide, session, modèle, position et couche inchangés). Le budget de ressources côté moteur est une autorisation locale, **pas l’énergie du compte**. Le navigateur ne crédite aucune régénération pendant ces essais ; recharger avant un nouveau lot si son budget conservateur est épuisé.
 
 Un résultat manquant ou ambigu arrête le lot et conserve la réservation incertaine. Aucun renvoi aveugle, même après redémarrage. Une réponse `Ok` confirme l’envoi, sans modifier le cache ni la progression observée. Les confirmations durables excluent ces cibles d’un nouveau lot si un ancien cache est relu. La réconciliation exige une source datée postérieure à l’interruption ; le cache réel actuellement non daté ne suffit pas. Un redémarrage ne restaure aucune autorisation : les cibles confirmées sont conservées et les restantes demandent un nouvel accord. L’arrêt ne peut pas annuler une requête déjà partie.
+
+
+## Premier envoi groupé natif (Phase 2H)
+
+Après installation du lecteur 0.7.0 et liaison du modèle, choisir **Groupé natif — une requête**, fixer **5**, puis **Préparer le lot**. Vérifier destinations, couleurs et coût maximal de cinq points d’énergie. **Attendre l’accord explicite de l’utilisateur sur ces cinq cibles avant de cliquer « Autoriser et démarrer le lot ».** Un seul appel `/PlacePixels` porte le tableau complet ; une réponse `Ok` accepte cette requête, sans prouver la couleur finale de chaque cible. Réobserver pour comparer chaque ligne, en conservant l’indication de fraîcheur source.
+
+Le séquentiel reste sélectionnable pour un nouveau lot. Un groupe incertain ne peut pas être renvoyé automatiquement dans ce mode. Après départ d’une requête groupée, pause/arrêt ne peut pas annuler son application sur le service. La borne de cinq est une limite locale conservatrice, pas une limite officielle du serveur. Voir [le rapport 2H](RAPPORT-PHASE2H.md).

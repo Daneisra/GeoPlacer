@@ -6,6 +6,9 @@ export type BatchView = {
     digest: string | null;
     state: string;
     mode: 'fake' | 'real' | null;
+    execution?: 'sequential' | 'grouped';
+    energyCost?: number;
+    acceptedRequests?: number;
     targets: {
         x: number;
         y: number;
@@ -46,18 +49,23 @@ export function BatchPanel({
     approvalKey,
     fake,
     ready,
+    groupedReady,
     refresh,
 }: {
     view: BatchView;
     approvalKey: string;
     fake: boolean;
     ready: boolean;
+    groupedReady: boolean;
     refresh: () => Promise<void>;
 }) {
     const [limit, setLimit] = useState(5);
+    const [execution, setExecution] = useState<'grouped' | 'sequential'>('grouped');
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const active = ['running', 'paused'].includes(view.state);
+    const locked = ['prepared', 'running', 'paused', 'interrupted', 'blocked'].includes(view.state);
+    const selectedExecution = locked ? (view.execution ?? 'sequential') : execution;
     const enabled = ready && !!approvalKey && !busy;
     async function command(path: string, body: object) {
         setBusy(true);
@@ -88,8 +96,11 @@ export function BatchPanel({
                     {labels[view.state] ?? view.state}
                 </strong>{' '}
                 · {view.confirmed} / {view.total}{' '}
-                {view.mode === 'fake' ? 'envois factices confirmés' : 'réponses « Ok » reçues'}
-                {view.uncertain > 0 ? ` · ${view.uncertain} incertain` : ''}.
+                {view.mode === 'fake'
+                    ? 'cibles couvertes par des résultats factices'
+                    : 'cibles couvertes par un accusé'}{' '}
+                · {view.acceptedRequests ?? 0} requête(s) acceptée(s)
+                {view.uncertain > 0 ? ` · ${view.uncertain} opération(s) incertaine(s)` : ''}.
             </p>
             {view.confirmed > 0 && (
                 <p id="batchObservedResult" role="status">
@@ -104,8 +115,23 @@ export function BatchPanel({
                         ' Un accusé ne prouve pas la couleur finale. Aucun renvoi automatique.'}
                 </p>
             )}
-            {!ready && <p>Connectez le lecteur 0.6.0, observez puis liez le modèle dans les étapes 1 et 2.</p>}
+            {!ready && <p>Connectez le lecteur 0.7.0, observez puis liez le modèle dans les étapes 1 et 2.</p>}
             {!approvalKey && <p>Saisissez la clé locale dans les réglages de connexion.</p>}
+            <label>
+                Mode d’envoi{' '}
+                <select
+                    aria-label="Mode d’envoi"
+                    value={selectedExecution}
+                    disabled={locked || busy}
+                    onChange={(e) => setExecution(e.target.value as 'grouped' | 'sequential')}
+                >
+                    <option value="grouped">Groupé natif — une requête</option>
+                    <option value="sequential">Séquentiel — solution de repli</option>
+                </select>
+            </label>
+            {selectedExecution === 'grouped' && !groupedReady && (
+                <p>Installer et coupler le lecteur 0.7.0 pour le mode groupé.</p>
+            )}
             <label>
                 Nombre maximal de pixels{' '}
                 <input
@@ -114,13 +140,14 @@ export function BatchPanel({
                     min={1}
                     max={5}
                     value={limit}
-                    disabled={active || busy}
+                    disabled={locked || busy}
                     onChange={(e) => setLimit(Number(e.target.value))}
                 />
             </label>{' '}
             <button
                 disabled={
                     !enabled ||
+                    (execution === 'grouped' && !groupedReady) ||
                     active ||
                     view.uncertain > 0 ||
                     !Number.isInteger(limit) ||
@@ -128,7 +155,7 @@ export function BatchPanel({
                     limit > 5 ||
                     ['prepared', 'interrupted', 'blocked'].includes(view.state)
                 }
-                onClick={() => void command('prepare', { mode: fake ? 'fake' : 'real', limit })}
+                onClick={() => void command('prepare', { mode: fake ? 'fake' : 'real', limit, execution })}
             >
                 Préparer le lot
             </button>
@@ -136,7 +163,12 @@ export function BatchPanel({
                 <>
                     <p>
                         Vérifiez les destinations exactes : couche de base ·{' '}
-                        {view.mode === 'fake' ? 'simulation, aucun envoi au site' : 'un envoi réel par ligne'}.
+                        {view.mode === 'fake'
+                            ? 'simulation, aucun envoi au site'
+                            : view.execution === 'grouped'
+                              ? 'une requête groupée pour toutes les lignes'
+                              : 'un envoi réel par ligne'}
+                        . Coût maximal : {view.energyCost ?? view.total} énergie (1 par pixel).
                     </p>
                     <div className="overflow-x-auto">
                         <table className="w-full text-left" aria-label="Pixels du lot">
@@ -186,7 +218,10 @@ export function BatchPanel({
                         </table>
                     </div>
                     {['prepared', 'interrupted', 'blocked'].includes(view.state) && view.uncertain === 0 && (
-                        <button disabled={!enabled} onClick={() => void command('approve', approval)}>
+                        <button
+                            disabled={!enabled || (view.execution === 'grouped' && !groupedReady)}
+                            onClick={() => void command('approve', approval)}
+                        >
                             {view.state === 'prepared'
                                 ? 'Autoriser et démarrer le lot'
                                 : 'Autoriser les pixels restants'}
@@ -199,7 +234,12 @@ export function BatchPanel({
                     )}
                     {view.state === 'paused' && (
                         <button
-                            disabled={!enabled || view.scheduler !== 'paused' || view.uncertain > 0}
+                            disabled={
+                                !enabled ||
+                                (view.execution === 'grouped' && !groupedReady) ||
+                                view.scheduler !== 'paused' ||
+                                view.uncertain > 0
+                            }
                             onClick={() => void command('resume', approval)}
                         >
                             Reprendre le lot autorisé
@@ -228,8 +268,8 @@ export function BatchPanel({
             <details>
                 <summary>Sécurité et interruptions</summary>
                 <p>
-                    Cinq pixels maximum, un à la fois, avec une seconde de pause entre envois. Aucun achat. Le
-                    navigateur vérifie l’énergie et les couleurs du compte avant chaque envoi.
+                    Cinq pixels maximum. En séquentiel : une seconde minimum entre envois. Aucun achat. Le navigateur
+                    vérifie l’énergie et les couleurs du compte avant chaque envoi.
                 </p>
                 <p>
                     Arrêter révoque le lot ; un envoi déjà parti ne peut pas être annulé. Un résultat incertain bloque
