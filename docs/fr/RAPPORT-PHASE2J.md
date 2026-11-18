@@ -33,14 +33,25 @@ Tests ciblés : modèle 20 × 20, 300 cibles distinctes puis 100 restantes malgr
 
 Recette Edge locale : modèle 20 × 20, rectangle 10 × 10, attente d’une réponse native factice puis 30 cibles distinctes en six groupes ; pause/reprise ; aucun appel externe. API GM et placements simulés, pas Tampermonkey réel.
 
-## Limites et prochain essai
+## Validation utilisateur réelle — 18 novembre 2026
 
-**Aucun placement réel 2J réalisé ; aucune validation réelle revendiquée.** Le contrat supplémentaire du worker d’énergie doit être confirmé sur la production. En son absence, le dessin attend ; aucun repli vers une régénération estimée. L’onglet GeoPixels peut devoir rester visible pour que sa synchronisation native fournisse de nouvelles réponses.
+Après accord explicite sur le rectangle natif et les budgets, l’utilisateur a exécuté la recette sur GeoPixels avec le lecteur **0.9.0**, puis confirmé « c’est tout bon ça a bien fonctionner » avec captures du dashboard et du dessin.
+
+- Modèle 20 × 20 (400 cibles opaques), zone image (0, 0) de 10 × 10, budgets **50 pixels / 50 énergie / 120 s**, surveillance du cache à cinq secondes.
+- **50 / 50 cibles couvertes par un accusé, 10 requêtes acceptées** ; historique de dix groupes et arrêt sur « Budget autorisé atteint ».
+- Après observation : **50 couleurs conformes, 0 différente, 0 à réobserver** pour les cibles envoyées. Zone autorisée : 50 correctes, 50 incorrectes, 0 inconnue (50 %). Modèle entier : **50 correctes, 350 incorrectes, 0 inconnue** (12,5 %), couverture 400 / 400. Les 350 cibles restantes sont hors du budget de cet essai et ne sont pas envoyées automatiquement.
+- Le diagnostic réel confirme des réponses natives d’énergie récentes et un solde exploitable ; la file manuelle initialement non vide a été annulée par le mode Inspection, sans cliquer Paint, avant l’essai. La capture finale indique un quota consommé/réservé de 50 et **0 tentative incertaine**. Aucun calcul de régénération n’est déduit des variations du compteur.
+
+La sélection dynamique, l’enchaînement de dix groupes après une autorisation et l’arrêt au budget sont ainsi validés par l’utilisateur pour ce cas. La fraîcheur serveur du cache reste **non vérifiée**. L’épuisement d’énergie, l’attente puis la reprise sur nouvelle réponse, les interruptions, l’expiration, les réponses perdues et le redémarrage restent couverts par les tests locaux ; ils ne sont pas présentés comme testés sur le service lors de cette recette. L’agent n’a déclenché aucun envoi supplémentaire pour documenter ce résultat.
+
+## Limites restantes
+
+Le contrat du worker d’énergie est disponible sur la production utilisée lors de cet essai ; les autres versions de frontend restent à vérifier. Sans interface compatible ou réponse exploitable, le dessin attend, sans repli vers une régénération estimée. L’onglet GeoPixels peut devoir rester visible pour que sa synchronisation native fournisse de nouvelles réponses.
 
 Le fantôme doit présenter les couleurs quantifiées exactes du modèle : le lecteur refuse une cible dont le RGB ne correspond pas ou dont l’alpha n’est pas 255. Utiliser le PNG préparé/exporté plutôt qu’une image source différente.
 
 Le registre conserve sa limite protectrice de 4 096 références ; le mode continu est borné et ne constitue pas un service de dessin illimité. Un seul modèle/agent actif. Les cibles acquittées restent exclues même si un tiers les modifie ensuite : une politique de maintenance distincte reste à définir.
 
-Recette proposée : PNG de test 20 × 20, zone 10 × 10, 50 pixels / 50 énergie / 120 s ; **faire valider les coins natifs affichés avant de cliquer Autoriser**. Voir [le guide](phase2c-lecteur-http.md#premier-essai-réel-2j--ne-pas-démarrer-avant-accord). Aucun achat, nouveau compte, push, tag, release ou nettoyage.
+Recette bornée de 50 pixels validée ci-dessus. **Tout nouvel essai exige une nouvelle validation de son périmètre avant de cliquer Autoriser**. Voir [le guide](phase2c-lecteur-http.md#premier-essai-réel-2j--ne-pas-démarrer-avant-accord). Aucun achat, nouveau compte, push, tag, release ou nettoyage.
 
-Commit de livraison : `feat(geopixels): add bounded continuous supervised drawing` ; consulter `git log -1` sur la branche 2J pour son identifiant.
+Commit applicatif : `7f142ba1dc5942dc97843d78dfb809e86300e0e1` (`feat(geopixels): add bounded continuous supervised drawing`). Cette validation ajoute seulement de la documentation ; vérification des liens et `git diff --check`, sans relancer les tests applicatifs inchangés.
