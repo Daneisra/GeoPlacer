@@ -6,10 +6,10 @@ export type BatchView = {
     digest: string | null;
     state: string;
     mode: 'fake' | 'real' | null;
-    execution?: 'sequential' | 'grouped' | 'session' | 'continuous';
+    execution?: 'sequential' | 'grouped' | 'session' | 'continuous' | 'autonomous';
     energyCost?: number;
     budgets?: { pixels: number; energy: number };
-    scope?: { region: { x: number; y: number; width: number; height: number }; durationMs: number } | null;
+    scope?: { region: { x: number; y: number; width: number; height: number }; durationMs: number | null; groupSize?: number } | null;
     spent?: number;
     resources?: { available: number; capturedAt: number } | null;
     regionProgress?: { correct: number; incorrect: number; unknown: number; percent: number | null } | null;
@@ -297,7 +297,7 @@ export function BatchPanel({
                         {project.gridX + scoped.x + scoped.width - 1}, {project.gridY - scoped.y - scoped.height + 1}).
                     </p>
                     <p>
-                        Autorisation : {view.scope.durationMs / 1000} s maximum · {view.budgets?.pixels} pixels
+                        Autorisation : {view.scope.durationMs === null ? 'jusqu’à l’arrêt ou la fin' : `${view.scope.durationMs / 1000} s maximum`} · {view.budgets?.pixels} pixels
                         distincts · {view.budgets?.energy} énergie maximum. Groupes de cinq maximum, choisis
                         dynamiquement dans cette zone.
                     </p>

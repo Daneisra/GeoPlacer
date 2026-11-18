@@ -149,6 +149,7 @@
               GeoPlacerEnergy.snapshot()
             );
             abortedCapture = null;
+            if(answer?.renewRequired){await next.renew();continue;}
             if (current !== generation) return;
             if (!observing && !(await GeoPlacerPageReader.unchanged()))
               throw new Error('Modèle, position, palette, couche ou session modifié : nouveau couplage nécessaire.');
@@ -208,19 +209,25 @@
               });
             }
           } catch (error) {
-            if (current === generation) await close(error.message);
+            if (current === generation) {
+              if(error.transient && next.connected()){status.textContent='Transport temporairement interrompu : aucun nouvel envoi, tentative de reconnexion au même canal.';await next.waitForRetry();}
+              else await close(error.message);
+            }
           } finally {
             ticking = false;
           }
         }
       }
+      const limits=next.features?.();
+      if(limits)GeoPlacerPageReader.setLimits(limits);
       void pulse();
+      if(limits?.autonomous && GeoPlacerPageReader.ready?.())void observe(false,null,true);
     } catch (error) {
       code = null;
       if (current === generation) await close(error.message);
     }
   };
-  async function observe(fromWatch = false, region = null) {
+  async function observe(fromWatch = false, region = null, initial = false) {
     if (observing || (ticking && !fromWatch) || !transport?.connected()) return;
     const current = generation,
       channel = transport,
@@ -232,7 +239,8 @@
         (o) => channel.send(o),
         () => current === generation && channel.connected(),
         region,
-        () => fromWatch && monitoring?.revision !== startedRevision
+        () => fromWatch && monitoring?.revision !== startedRevision,
+        initial
       );
       if (current === generation)
         status.textContent = `Observation confirmée${result.cacheStats ? ` : ${result.cacheStats.known} pixels connus, ${result.cacheStats.unknown} inconnus.` : '.'}`;

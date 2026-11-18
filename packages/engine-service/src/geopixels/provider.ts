@@ -1,3 +1,4 @@
+import { MAX_MODEL_PIXELS } from './capacity.js';
 import { randomUUID } from 'node:crypto';
 import { ObservationMonitor } from './monitor.js';
 import { OBSERVATION_CACHE_BYTES } from './regions.js';
@@ -260,12 +261,13 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
     }
     async readWindow(rect: CanvasRect) {
         check(
-            integer(rect.width, 1, 4096) &&
-                integer(rect.height, 1, 4096) &&
+            integer(rect.width, 1, MAX_MODEL_PIXELS) &&
+                integer(rect.height, 1, MAX_MODEL_PIXELS) &&
                 Number.isSafeInteger(rect.minX) &&
                 Number.isSafeInteger(rect.minY),
             'invalid read region'
         );
+        check(rect.width * rect.height <= MAX_MODEL_PIXELS,'read exceeds configured memory budget');
         const out = new Int32Array(rect.width * rect.height).fill(UNKNOWN);
         // This copy is synchronous: use one clock reading for the immutable window.
         const readAt = this.now();

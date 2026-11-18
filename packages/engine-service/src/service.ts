@@ -1,3 +1,5 @@
+import { BatchMetadataStore } from './geopixels/batch-store.js';
+import { MAX_MODEL_PIXELS } from './geopixels/capacity.js';
 /**
  * EngineService (Phase 1B.9, provider extension Phase 2A): the orchestration service of the server.
  *
@@ -10,7 +12,7 @@
  * guard on Windows) is taken first; a second instance is refused.
  */
 
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { rename, readFile, open } from 'node:fs/promises';
 import { SinglePixelWriter } from './geopixels/single-pixel-writer.js';
 import { GeoPixelsProvider } from './geopixels/provider.js';
@@ -44,6 +46,7 @@ import type {
 import {
   DEFAULT_AUTO_COMPACTION,
   TRANSPARENT,
+  quantizedToRgba,
   advance,
   applyConfirmedUpgrade,
   asProjectId,
@@ -338,6 +341,7 @@ export class EngineService {
   private readonly templateCache = new Map<string, Template>();
   private observationSave: Promise<void> = Promise.resolve();
   private observationStoreHealthy = true;
+    private readonly batchMetadata: BatchMetadataStore;
     private readonly regionalProgress = new RegionalProgressCache();
     private savedRegions: {
         schemaVersion: 1;
@@ -377,15 +381,17 @@ export class EngineService {
             codec: pngjsCodec,
             ids: randomIdSource,
             clock: systemClock,
+            limits: {maxWidth:MAX_MODEL_PIXELS,maxHeight:MAX_MODEL_PIXELS,maxPixels:MAX_MODEL_PIXELS},
         });
         this.simulationJournal = new FileAttemptJournal(lock);
         this.simulationHistory = new FileHistoryStore(lock);
         this.connectorJournal = new FileAttemptJournal(lock, { namespace: 'geopixels' });
         this.connectorHistory = new FileHistoryStore(lock, { namespace: 'geopixels' });
+        this.batchMetadata = new BatchMetadataStore(root, value=>this.durableConnectorJson('connector-batch.json',value));
         this.singlePixelWriter = new SinglePixelWriter(lock, this.connector,
             () => !this.closed && this.source === 'geopixels' && !this.active && !this.stopping && !this.connectorControl && !this.backingUp && this.attempts?.open().length === 0 ? this.selectedTemplate : null,
             value => this.durableConnectorJson('connector-writer-intent.json', value), Date.now,
-            value => this.durableConnectorJson('connector-batch.json', value));
+            value => this.batchMetadata.save(value));
         this.connector.monitoring.subscribe((kind) => {
             this.hub.connector();
             if (kind === 'capture') {
@@ -486,7 +492,7 @@ export class EngineService {
             let batch: unknown = null;
             try {batch=JSON.parse(await readFile(path.join(root,'connector-batch.json'),'utf8'));}
             catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
-            await service.singlePixelWriter.open(writerIntent,batch);
+            await service.singlePixelWriter.open(writerIntent,await service.batchMetadata.load(batch));
             return service;
         } catch (error) {
             await lock.release();
@@ -1160,6 +1166,31 @@ export class EngineService {
     return (await this.templates.load(ref)).template;
   }
 
+  async importDrawing(input: GhostImportInput) {
+    this.guard();this.requireIdle('importing a drawing');
+    check(!this.singlePixelWriter.view().locked,'stop the current drawing before importing');
+    const t=await importGhost(this.templates,pngjsCodec,{...input,x:0,y:0},SIMULATION_PROJECT);
+    await this.selectTemplate(t.id);return this.templateInfo(t);
+  }
+  async exportDrawing(templateId:string) {
+    const {template}=await this.templates.load(this.ref(templateId));
+    return {png:await exportGhostPng(pngjsCodec,template),filename:ghostInfo(template).filename};
+  }
+  async previewDrawing(groupSize=5,pixelBudget?:number) {
+    this.guard();const t=this.selectedTemplate,p=this.connector.status().project;
+    check(t!==null && p!==null,'Importer une image et coupler le navigateur avec son fantôme chargé.');
+    const rgba=quantizedToRgba(t.image);
+    check(t.image.width===p.width && t.image.height===p.height && createHash('sha256').update(rgba).digest('hex')===p.id,
+      'Le fantôme ne correspond pas au PNG préparé : télécharger ce PNG et le charger dans GeoPixels.');
+    const current=this.singlePixelWriter.batch.view();
+    check(!['running','paused'].includes(current.state) && current.uncertain===0,'Arrêter ou réconcilier le dessin actif avant une nouvelle prévisualisation.');
+    if(this.singlePixelWriter.batch.busy())await this.singlePixelWriter.batch.stop('Nouvelle prévisualisation demandée ; confirmations conservées.');
+    await this.bindConnector();
+    let retained=0;for(const color of t.image.pixels)if(color!==0xffffffff)retained++;
+    const budget=pixelBudget ?? retained;
+    check(Number.isSafeInteger(budget)&&budget>=1&&budget<=retained,'Budget supérieur aux pixels du modèle');
+    return this.singlePixelWriter.batch.prepare(this.connector.status().mode==='local-fake'?'fake':'real',budget,'autonomous',budget,{region:{x:0,y:0,width:t.image.width,height:t.image.height},durationMs:null,groupSize});
+  }
   async importGhost(input: GhostImportInput): Promise<GhostInfo> {
     this.guard();
     return ghostInfo(await importGhost(this.templates, pngjsCodec, input));

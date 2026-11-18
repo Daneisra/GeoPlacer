@@ -97,7 +97,7 @@ export function ghostFilename(name: string, width: number, height: number, x: nu
 }
 
 /** Creates the ghost template (resized first when asked). */
-export async function importGhost(templates: TemplateManager, codec: PngCodec, input: GhostImportInput): Promise<Template> {
+export async function importGhost(templates: TemplateManager, codec: PngCodec, input: GhostImportInput, project = GHOST_PROJECT): Promise<Template> {
   const colors = parsePalette(input.palette);
   let png = input.png;
   if (input.width !== undefined || input.height !== undefined) {
@@ -110,7 +110,7 @@ export async function importGhost(templates: TemplateManager, codec: PngCodec, i
     }
   }
   return templates.create({
-    projectId: asProjectId(GHOST_PROJECT),
+    projectId: asProjectId(project),
     name: input.name,
     sourcePng: png,
     palette: { id: 'geopixels-joueur', colors: colors.map((rgb) => ({ rgb })) },

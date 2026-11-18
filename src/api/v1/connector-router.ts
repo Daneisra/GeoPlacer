@@ -138,7 +138,7 @@ export function createConnectorRouter(engine: EngineApi, httpChannel?: Connector
                     'CONNECTOR_UNAVAILABLE',
                     'Installer et coupler le lecteur 0.8.0 pour une session supervisée.'
                 );
-            if (b.mode === 'real' && b.execution === 'continuous' && httpChannel!.info().batchProtocol !== 4)
+            if (b.mode === 'real' && b.execution === 'continuous' && (httpChannel!.info().batchProtocol ?? 0) < 4)
                 throw new ConnectorError(
                     'CONNECTOR_UNAVAILABLE',
                     'Installer et coupler le lecteur 0.9.0 pour le dessin continu.'
@@ -146,6 +146,21 @@ export function createConnectorRouter(engine: EngineApi, httpChannel?: Connector
             return batch.prepare(b.mode, b.limit, b.execution, b.energyBudget, b.scope);
         })
     );
+    router.post('/drawing/import',action(async req=>{
+        // Local image preparation grants no reader/writer authority; same-origin loopback guard above applies.
+        const b=z.strictObject({name:z.string().trim().min(1).max(100),pngBase64:z.string().min(1),palette:z.array(z.string()).min(1).max(256)}).parse(req.body);
+        return engine.importDrawing!({name:b.name,png:Buffer.from(b.pngBase64,'base64'),palette:b.palette});
+    }));
+    router.get('/drawing/:id/image',async(req,res)=>{
+        try {const {png,filename}=await engine.exportDrawing!(z.string().uuid().parse(req.params.id));res.setHeader('Content-Type','image/png');res.setHeader('Content-Disposition',`inline; filename="${filename}"`);res.send(Buffer.from(png));}
+        catch {res.status(404).json({error:'image unavailable'});}
+    });
+    router.post('/drawing/preview',action(req=>{
+        regionControl(req);batchControl(req);
+        const b=z.strictObject({groupSize:z.number().int().min(1).max(5).default(5),pixelBudget:z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional()}).parse(req.body);
+        if(engine.connector!.status().mode !== 'local-fake' && httpChannel!.info().batchProtocol !== 5)throw new ConnectorError('CONNECTOR_UNAVAILABLE','Installer et coupler le lecteur 1.0.0.');
+        return engine.previewDrawing!(b.groupSize,b.pixelBudget);
+    }));
     const consent = z.strictObject({
         batchId: z.string().uuid(),
         digest: z.string().regex(/^[a-f0-9]{64}$/),
@@ -158,7 +173,8 @@ export function createConnectorRouter(engine: EngineApi, httpChannel?: Connector
                 b = consent.parse(req.body);
             if (batch.view().mode === 'real') {
                 regionControl(req);
-                if (batch.view().execution === 'continuous' && httpChannel!.info().batchProtocol !== 4)
+                if(batch.view().execution === 'autonomous' && httpChannel!.info().batchProtocol !==5)throw new ConnectorError('CONNECTOR_UNAVAILABLE','Lecteur 1.0.0 requis.');
+                if (batch.view().execution === 'continuous' && (httpChannel!.info().batchProtocol ?? 0) < 4)
                     throw new ConnectorError('CONNECTOR_UNAVAILABLE', 'Lecteur 0.9.0 requis.');
                 if (batch.view().execution === 'session' && (httpChannel!.info().batchProtocol ?? 0) < 3)
                     throw new ConnectorError('CONNECTOR_UNAVAILABLE', 'Lecteur 0.8.0 requis pour cette session.');
@@ -175,7 +191,8 @@ export function createConnectorRouter(engine: EngineApi, httpChannel?: Connector
                 b = consent.parse(req.body);
             if (batch.view().mode === 'real') {
                 regionControl(req);
-                if (batch.view().execution === 'continuous' && httpChannel!.info().batchProtocol !== 4)
+                if(batch.view().execution === 'autonomous' && httpChannel!.info().batchProtocol !==5)throw new ConnectorError('CONNECTOR_UNAVAILABLE','Lecteur 1.0.0 requis.');
+                if (batch.view().execution === 'continuous' && (httpChannel!.info().batchProtocol ?? 0) < 4)
                     throw new ConnectorError('CONNECTOR_UNAVAILABLE', 'Lecteur 0.9.0 requis.');
                 if (batch.view().execution === 'session' && (httpChannel!.info().batchProtocol ?? 0) < 3)
                     throw new ConnectorError('CONNECTOR_UNAVAILABLE', 'Lecteur 0.8.0 requis pour cette session.');

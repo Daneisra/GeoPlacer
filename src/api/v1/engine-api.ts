@@ -32,6 +32,9 @@ export interface EngineApi {
     selectSource?(source: 'simulation' | 'geopixels'): Promise<CommandResultLike>;
     bindConnector?(): Promise<unknown>;
     connectorView?(): Promise<unknown>;
+    importDrawing?(input:import('@geoplacer/engine-service').GhostImportInput):Promise<unknown>;
+    exportDrawing?(templateId:string):Promise<{png:Uint8Array;filename:string}>;
+    previewDrawing?(groupSize?:number,pixelBudget?:number):Promise<unknown>;
     configureConnectorRegions?(regions: unknown, restore?: boolean): Promise<unknown>;
     connectorProposals?(policy: import('@geoplacer/core').UpgradePolicy): Promise<unknown>;
 

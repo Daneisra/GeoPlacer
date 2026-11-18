@@ -438,11 +438,12 @@ describe('Continuous writer browser boundaries',()=>{
         expect(await s.writer.executeBatch({...s.command,attemptId:'b6a44c06-1c32-40d6-9c68-c885d44e0cd1'},s.allowed,s.grant)).toBe('not-sent');
     });
     it.each(['outside','wrong-color','budget','duration','field'])('rejects altered continuous authority: %s',async kind=>{
-        const s=await continuous();
+        const s=await continuous(),now=Date.now();
+        s.context.Date={now:()=>now}; // Freeze the boundary under test; asynchronous verification must not consume the extra millisecond.
         if(kind==='outside')s.command.pixels[0]!.gridX=1001;
         if(kind==='wrong-color')s.command.pixels[0]!.color=1;
         if(kind==='budget')s.grant.budgets.energy=1001;
-        if(kind==='duration')s.grant.expires=Date.now()+600001;
+        if(kind==='duration')s.grant.expires=now+600001;
         if(kind==='field')Object.assign(s.grant,{endpoint:'https://example.invalid'});
         expect(await s.writer.executeBatch(s.command,s.allowed,s.grant)).toBe('not-sent');expect(s.fetch).not.toHaveBeenCalled();
     });
@@ -453,4 +454,16 @@ describe('Continuous writer browser boundaries',()=>{
     it('checks energy again after the asynchronous channel check',async()=>{
         const s=await continuous();expect(await s.writer.executeBatch(s.command,async()=>{s.setAvailable(0);return true;},s.grant)).toBe('waiting-resources');expect(s.fetch).not.toHaveBeenCalled();
     });
+    it('accepts autonomous short command grants with many older receipts, rejects altered group size and preserves replay protection',async()=>{
+        const s=await continuous();
+        const grant={...s.grant,execution:'autonomous',budgets:{pixels:4,energy:4},groupSize:2,expires:Date.now()+20000};
+        s.store.set('geoplacer-single-pixel-dispatched-v1',JSON.stringify(Array.from({length:5000},(_,i)=>'old-'+i)));
+        expect(await s.writer.executeBatch(s.command,s.allowed,grant)).toBe('confirmed');
+        expect(await s.writer.executeBatch(s.command,s.allowed,grant)).toBe('not-sent');
+        const another={...s.command,attemptId:'b6a44c06-1c32-40d6-9c68-c885d44e0cd1',pixels:[{gridX:1000,gridY:1001,color:0}]};
+        expect(await s.writer.executeBatch(another,s.allowed,{...grant,groupSize:1})).toBe('not-sent');
+        expect(s.fetch).toHaveBeenCalledTimes(1);
+        expect(s.store.get('geoplacer-single-pixel-dispatched-v1')).toContain('old-4999');
+    });
+
 });

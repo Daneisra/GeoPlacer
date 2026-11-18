@@ -15,6 +15,7 @@ export async function runHttpReaderRecipe({ browser, page, api, base, approvalKe
   await api('connector/source', { source: 'geopixels' });
   await page.reload();
   await page.getByLabel('Source de toile').selectOption('geopixels');
+  await page.getByLabel('Réglages avancés',{exact:true}).check();
   await page.getByLabel('Clé locale d’approbation', { exact: true }).fill(approvalKey);
   await page.getByRole('button',{name:'Utiliser le modèle de test 8 × 5',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('select[aria-label="Modèle local"]')?.selectedOptions[0]?.textContent.includes('Test GeoPixels'));
@@ -158,7 +159,7 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
       const confirm = page.getByRole('button', { name: 'Confirmer la demande HTTP', exact: true });
       await confirm.waitFor();
       await confirm.click();
-      await reader.getByText('Couplé par HTTP privilégié, en lecture seule', { exact: true }).waitFor();
+      await reader.waitForFunction(()=>document.querySelector('aside')?.textContent.match(/Couplé par HTTP|Observation confirmée/));
       reader.off('dialog', handle);
     }
     await pair();
@@ -489,6 +490,35 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     assert.equal(continuous.progress.correct,0); // ACK never mutates the cache.
     record('OK continuous 20x20 model: rectangle preview, one approval, native-energy wait, 30 unique targets in six groups <=5, pause/resume, bounded stop; no real service requests');
     await page.screenshot({path:path.join(out,'continuous-dashboard-local-fixture.png'),fullPage:true});
+    await page.getByRole('button',{name:'Révoquer le canal',exact:true}).click();
+
+    // Default simple workflow: genuine PNG import/hash match, no manual binding or monitor start.
+    await page.getByLabel('Réglages avancés',{exact:true}).uncheck();
+    const simple=page.locator('#simpleDrawing');
+    await simple.getByLabel('Image à dessiner',{exact:true}).setInputFiles(path.join(repo,'public/fixtures/geoplacer-20x20.png'));
+    await simple.getByRole('button',{name:'Importer l’image',exact:true}).click();
+    await simple.getByText('Options du dessin',{exact:true}).click();
+    await simple.getByLabel('Budget du dessin',{exact:true}).fill('20');
+    await page.waitForFunction(()=>![...document.querySelectorAll('#simpleDrawing button')].find(b=>b.textContent==='Importer l’image')?.disabled);
+    await reader.evaluate(()=>{currentEnergy=100;globalThis.fixtureWrites=[];});
+    await pair(); // Auto-observation after approved coupling must match the imported PNG hash.
+    await simple.getByRole('button',{name:'Lancer le dessin',exact:true}).waitFor();
+    await page.waitForFunction(()=>![...document.querySelectorAll('#simpleDrawing button')].find(b=>b.textContent==='Lancer le dessin')?.disabled);
+    const beforeSimple=await reader.evaluate(()=>globalThis.fixtureSiteCalls);
+    await reader.evaluate(()=>{
+      syncWorker.postMessage({type:'sync-delta'});
+      for(const fn of fixtureEnergyListeners)fn({data:{ok:true,userData:{energy:100,colors:'0,16777215'}}});
+    });
+    await simple.getByRole('button',{name:'Lancer le dessin',exact:true}).click();
+    await simple.getByText('Envois terminés — vérifier les observations',{exact:true}).waitFor();
+    const autonomous=await api('connector/status',undefined,'GET');
+    assert.equal(autonomous.batch.execution,'autonomous');assert.equal(autonomous.batch.confirmed,20);
+    assert.equal(autonomous.batch.acceptedRequests,4);assert.equal(autonomous.monitoring.state,'stopped');
+    assert.equal(await reader.evaluate(()=>globalThis.fixtureSiteCalls),beforeSimple+4);
+    assert.equal(new Set((await reader.evaluate(()=>globalThis.fixtureWrites)).map(p=>p.GridX+','+p.GridY)).size,20);
+    assert.equal(autonomous.progress.correct,0); // Acceptances are not synthesized into observations.
+    await page.screenshot({path:path.join(out,'simple-drawing-local-fixture.png'),fullPage:true});
+    record('OK DEFAULT simple workflow: PNG import, exact image match and automatic binding, one launch, automatic regional monitoring, 20 targets / four native groups, no service requests');
     await page.getByRole('button',{name:'Révoquer le canal',exact:true}).click();
 
     assert.deepEqual(external, []);

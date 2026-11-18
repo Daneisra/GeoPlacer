@@ -377,8 +377,9 @@ describe('Bounded work through the existing TaskScheduler', () => {
         await b.approve(p.id!, p.digest!);
         await wait(() => b.view().commandReady);
         const stored = JSON.parse(await readFile(path.join(f.dir, 'connector-batch.json'), 'utf8'));
-        expect(stored.records).toHaveLength(5);
-        expect(new Set(stored.records.map((r: { attemptId: string }) => r.attemptId)).size).toBe(1);
+        expect(stored.recordCount).toBe(5);
+        const records=JSON.parse(await readFile(path.join(f.dir,'connector-confirmations','segment-0000000000000001.json'),'utf8')).records;
+        expect(new Set(records.map((r: { attemptId: string }) => r.attemptId)).size).toBe(1);
         expect(await readFile(path.join(f.dir, 'providers/geopixels-writer/journal/attempts.log'), 'utf8')).toContain(
             'started'
         );

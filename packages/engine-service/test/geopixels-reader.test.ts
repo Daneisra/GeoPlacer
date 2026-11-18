@@ -48,7 +48,7 @@ async function setup(hashPending = false) {
   const reader = context.reader as {
     contract: () => Promise<{ id: string; layer: string }>;
     inspect: () => Promise<string>;
-    observe: (send: (v: unknown) => Promise<void>, connected: () => boolean, region?:unknown, cancelled?:()=>boolean) => Promise<unknown>;
+    observe: (send: (v: unknown) => Promise<void>, connected: () => boolean, region?:unknown, cancelled?:()=>boolean,initial?:boolean) => Promise<unknown>;
     unchanged: () => Promise<boolean>;
   };
   return { context, reader, project, finish: () => release!(project) };
@@ -61,6 +61,13 @@ describe('Versioned read-only page contracts', () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({rect:{x:1002,y:998,width:2,height:3},capture:{region},observedAt:null});
     expect((sent[0]!.pixels as unknown[]).length).toBe(6);
+  });
+  it('bootstraps only 256 positions of a very wide model without claiming complete coverage',async()=>{
+    const s=await setup(),sent:Record<string,unknown>[]=[];
+    s.context.ghostImageOriginalData={width:100000,height:1};s.project.width=100000;s.project.height=1;
+    await s.reader.observe(async o=>{sent.push(o as Record<string,unknown>);},()=>true,null,()=>false,true);
+    expect(sent).toHaveLength(1);expect(sent[0]).toMatchObject({project:{width:100000,height:1},rect:{width:256,height:1},observedAt:null});
+    expect(sent[0]!.capture).toBeUndefined();expect((sent[0]!.pixels as number[]).length).toBe(256);
   });
   it('aborts a large capture between acknowledged bands without reporting completion',async()=>{
     const s=await setup();s.context.ghostImageOriginalData={width:2000,height:2000};s.project.width=2000;s.project.height=2000;

@@ -5,6 +5,7 @@ const GeoPlacerPageReader = (() => {
       new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text.replace(/\r\n/g, '\n')))),
       (n) => n.toString(16).padStart(2, '0')
     ).join('');
+  let maxModelPixels=16777216;
   let previousIdentity = null,
     session = crypto.randomUUID(),
     lastCapture = null,
@@ -100,7 +101,7 @@ const GeoPlacerPageReader = (() => {
       cacheInfo
     );
   }
-  async function observe(send, connected, region = null, cancelled = () => false) {
+  async function observe(send, connected, region = null, cancelled = () => false, initial = false) {
     const c = await contract();
     if (c.layer !== 'base')
       throw new Error(
@@ -118,7 +119,7 @@ const GeoPlacerPageReader = (() => {
     const data = ghostImageOriginalData,
       topLeft = { ...ghostImageTopLeft },
       palette = filters();
-    if (data.width > 4096 || data.height > 4096) throw new Error('Limite : 4096 × 4096');
+    if (!Number.isSafeInteger(data.width*data.height) || data.width*data.height > maxModelPixels) throw new Error('Image au-delà du budget mémoire négocié avec GeoPlacer.');
     const project = await GeoPlacerCapture.identity(data, topLeft, palette);
     const unchanged = () =>
       available() &&
@@ -132,7 +133,8 @@ const GeoPlacerPageReader = (() => {
       typeof Colors === 'undefined' ? null : Colors
     );
     const cacheStats = { known: 0, unknown: 0, transparent: 0 };
-    const area=region ?? {x:0,y:0,width:project.width,height:project.height};
+    const area=region ?? {x:0,y:0,width:initial?Math.min(256,project.width):project.width,height:initial?Math.min(256,project.height):project.height};
+    if(area.width>65536)throw new Error('Lecture complète trop large pour un paquet : utiliser le mode autonome par régions.');
     if(![area.x,area.y,area.width,area.height].every(Number.isSafeInteger) || area.x<0 || area.y<0 || area.width<1 || area.height<1 || area.x+area.width>project.width || area.y+area.height>project.height)
       throw new Error('Région hors du modèle');
     const cacheIdentity=JSON.stringify([project,session,c.id]);
@@ -163,7 +165,8 @@ const GeoPlacerPageReader = (() => {
         session,
         project,
         capturedAt,
-        capture: { id: captureId, index: bandIndex++, count: bandCount, ...(region ? {region} : {}) },
+        // Initial bootstrap is a partial observation, never a claim of a complete image capture.
+        ...(initial ? {} : {capture: { id: captureId, index: bandIndex++, count: bandCount, ...(region ? {region} : {}) }}),
         observedAt: null,
         rect,
         pixels,
@@ -177,6 +180,8 @@ const GeoPlacerPageReader = (() => {
     return { project, contract: c.id, cacheStats };
   }
   return {
+    ready: available,
+    setLimits: (limits) => {if(!Number.isSafeInteger(limits?.maxModelPixels)||limits.maxModelPixels<1||limits.maxModelPixels>=2**32)throw new Error('Budget mémoire invalide');maxModelPixels=limits.maxModelPixels;},
     targetColor: (x, y) => {
       if (!Number.isInteger(x) || !Number.isInteger(y) || typeof ghostImageOriginalData === 'undefined') return null;
       const d = ghostImageOriginalData;

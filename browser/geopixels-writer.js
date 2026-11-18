@@ -94,23 +94,24 @@ const GeoPlacerPageWriter = (() => {
         );
     }
     function continuousGrant(c,g) {
-        const r=g.region;
-        return c.protocol === 2 && exact(g,['id','digest','expires','project','writes','execution','budgets','region']) &&
+        const r=g.region, autonomous=g.execution==='autonomous';
+        return c.protocol === 2 && exact(g,['id','digest','expires','project','writes','execution','budgets','region',...(autonomous?['groupSize']:[])]) &&
             g.id === c.batchId && /^[a-f0-9-]{36}$/.test(g.id) && /^[a-f0-9]{64}$/.test(g.digest) &&
-            Number.isSafeInteger(g.expires) && g.expires > Date.now() && g.expires <= Date.now()+600000 &&
+            Number.isSafeInteger(g.expires) && g.expires > Date.now() && g.expires <= Date.now()+(autonomous?30000:600000) &&
             exact(g.project,['id','generation','width','height','gridX','gridY','layer']) &&
             Object.keys(g.project).every(k=>g.project[k] === c.project[k]) &&
             Array.isArray(g.writes) && g.writes.length === 0 &&
-            exact(g.budgets,['pixels','energy']) && [g.budgets.pixels,g.budgets.energy].every(n=>Number.isSafeInteger(n)&&n>=1&&n<=1000) &&
+            exact(g.budgets,['pixels','energy']) && [g.budgets.pixels,g.budgets.energy].every(n=>Number.isSafeInteger(n)&&n>=1&&n<=(autonomous?c.project.width*c.project.height:1000)) &&
             exact(r,['x','y','width','height']) && [r.x,r.y,r.width,r.height].every(Number.isSafeInteger) &&
             r.x>=0 && r.y>=0 && r.width>0 && r.height>0 && r.x+r.width<=c.project.width && r.y+r.height<=c.project.height &&
+            (!autonomous || (Number.isInteger(g.groupSize) && g.groupSize>=1 && g.groupSize<=5 && c.pixels.length<=g.groupSize)) &&
             c.pixels.every(p=> {
                 const x=p.gridX-c.project.gridX, y=c.project.gridY-p.gridY;
                 return x>=r.x && x<r.x+r.width && y>=r.y && y<r.y+r.height && GeoPlacerPageReader.targetColor(x,y)===p.color;
             });
     }
     function validGrant(c, grant) {
-        if (grant?.execution === 'continuous') return continuousGrant(c,grant);
+        if (['continuous','autonomous'].includes(grant?.execution)) return continuousGrant(c,grant);
         const session = grant?.execution === 'session';
         return (
             exact(grant, [
@@ -161,8 +162,8 @@ const GeoPlacerPageWriter = (() => {
         );
     }
     function sessionAllowance(c, grant, commit = false) {
-        if (!['session','continuous'].includes(grant?.execution)) return true;
-        const scope = JSON.stringify([grant.digest, grant.project, grant.writes, grant.budgets, grant.region]);
+        if (!['session','continuous','autonomous'].includes(grant?.execution)) return true;
+        const scope = JSON.stringify([grant.digest, grant.project, grant.writes, grant.budgets, grant.region, grant.groupSize]);
         const prior = sessionBudgets.get(c.batchId);
         if (prior && prior.scope !== scope) return false;
         const spent = (prior?.spent ?? 0) + c.pixels.length;
@@ -258,7 +259,7 @@ const GeoPlacerPageWriter = (() => {
                     !(await GeoPlacerPageReader.unchanged())
                 )
                     return refuse('Modèle, position, couche ou session modifié : observer et lier de nouveau.');
-                const continuous = grant?.execution === 'continuous';
+                const continuous = ['continuous','autonomous'].includes(grant?.execution);
                 if (continuous && (GeoPlacerEnergy.snapshot()?.available ?? 0) < pixels.length) {
                     lastReason = 'En attente d’une nouvelle réponse native confirmant l’énergie disponible.';
                     return 'waiting-resources';
@@ -290,11 +291,13 @@ const GeoPlacerPageWriter = (() => {
                     return refuse('Cette couleur ne figure plus dans les couleurs du compte.');
                 if (batch && !sessionAllowance(c, grant))
                     return refuse('Budget de session épuisé ou autorisation modifiée.');
-                const key = 'geoplacer-single-pixel-dispatched-v1';
-                const ids = JSON.parse(sessionStorage.getItem(key) || '[]');
-                if (!Array.isArray(ids) || ids.includes(c.attemptId) || ids.length >= 2048)
-                    return refuse('Registre anti-doublon indisponible ou opération déjà enregistrée. Aucun renvoi.');
-                sessionStorage.setItem(key, JSON.stringify([...ids, c.attemptId]));
+                // Keep legacy receipts; new receipts use one key per immutable attempt rather than rewriting a capped array.
+                const legacy = JSON.parse(sessionStorage.getItem('geoplacer-single-pixel-dispatched-v1') || '[]');
+                const receipt = 'geoplacer-dispatched-v2/' + c.attemptId;
+                if (!Array.isArray(legacy) || legacy.includes(c.attemptId) || sessionStorage.getItem(receipt))
+                    return refuse('Opération déjà enregistrée ou registre anti-doublon invalide. Aucun renvoi.');
+                // Quota/storage errors fail before fetch, without deleting any old receipt.
+                sessionStorage.setItem(receipt, '1');
                 controller = new AbortController();
                 timer = setTimeout(() => controller?.abort(), 10000);
                 if (!batch) dispatched = true;

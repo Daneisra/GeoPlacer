@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import type { SinglePixelWriter } from '../src/geopixels/single-pixel-writer.js';
 import { describe, it, expect } from 'vitest';
 import { ConnectorHttpChannel, HTTP_IDLE_MS, HTTP_LIFETIME_MS, type ChannelDiagnostic } from '../src/geopixels/http-channel.js';
 import { ConnectorPairing } from '../src/geopixels/pairing.js';
@@ -197,4 +199,52 @@ describe('Precise coupling diagnostics without changing lifetime or authority',(
     const c=h.claim(ORIGIN,h.issue(KEY,ORIGIN).token);h.approve(KEY,c.requestId);now+=HTTP_IDLE_MS;h.tick();
     expect(p.status().connected).toBe(false);expect(h.info().lastTermination?.code).toBe('HTTP_IDLE_EXPIRED');
   });
+});
+
+describe('Transport renewal is separate from drawing authority',()=>{
+  function renewable(){
+    let now=100000,authorized=true;
+    const pairing=new ConnectorPairing(()=>now),provider=new GeoPixelsProvider(()=>now),events:ChannelDiagnostic[]=[];
+    const writer={batch:{subscribe:()=>()=>{},transportRenewable:()=>authorized,view:()=>({commandReady:false}),grant:()=>null}} as unknown as SinglePixelWriter;
+    const http=new ConnectorHttpChannel(pairing,provider,KEY,()=>now,writer,e=>events.push(e));
+    const c=http.claim(ORIGIN,http.issue(KEY,ORIGIN).token);http.approve(KEY,c.requestId);http.status(c.capability,9);
+    return {http,provider,c,events,advance:(ms:number)=>{now+=ms;},stop:()=>{authorized=false;}};
+  }
+  it('retries a lost rotation reply idempotently, commits possession, preserves epoch/sequence and rejects the old capability',()=>{
+    const s=renewable(),epoch=s.provider.channelEpoch,nonce=randomUUID(),before=s.http.info().expires;
+    const a=s.http.renew(s.c.capability,nonce);expect(s.http.renew(s.c.capability,nonce)).toEqual(a);
+    expect(s.http.info().expires).toBe(before);s.advance(1000);
+    expect(s.http.status(a.capability,9)).toMatchObject({lastSequence:0,approved:true});
+    expect(s.provider.channelEpoch).toBe(epoch);expect(s.http.info().expires).toBe(before!+1000);
+    expect(()=>s.http.status(s.c.capability,9)).toThrow();expect(s.events.at(-1)?.code).toBe('HTTP_RENEWED');
+  });
+  it('keeps an authorized connection for an hour by rotating transport leases, without reconnecting the provider',()=>{
+    const s=renewable(),epoch=s.provider.channelEpoch;let capability=s.c.capability,rotations=0;
+    for(let step=0;step<180;step++){
+      s.advance(20000);const state=s.http.status(capability,9);
+      if(state.renewRequired){capability=s.http.renew(capability,randomUUID()).capability;s.http.status(capability,9);rotations++;}
+    }
+    expect(rotations).toBeGreaterThan(5);expect(s.provider.channelEpoch).toBe(epoch);expect(s.http.info().active).toBe(true);
+  });
+  it('cannot renew stopped/revoked work, commit a rotation after stop, or revive an expired/idle lease',()=>{
+    const stopped=renewable(),rotation=stopped.http.renew(stopped.c.capability,randomUUID());stopped.stop();
+    expect(()=>stopped.http.renew(stopped.c.capability,randomUUID())).toThrow();expect(()=>stopped.http.status(rotation.capability,9)).toThrow();
+    const revoked=renewable(),r=revoked.http.renew(revoked.c.capability,randomUUID());revoked.http.revoke();
+    expect(()=>revoked.http.status(r.capability,9)).toThrow();expect(()=>revoked.http.renew(revoked.c.capability,randomUUID())).toThrow();
+    const expired=renewable();expired.advance(HTTP_LIFETIME_MS+1);expect(()=>expired.http.renew(expired.c.capability,randomUUID())).toThrow();
+    const idle=renewable();idle.advance(HTTP_IDLE_MS+1);expect(()=>idle.http.renew(idle.c.capability,randomUUID())).toThrow();
+  });
+  it('cannot rotate an unapproved pairing or a legacy read-only session',()=>{
+    const s=setup(),c=s.claim();expect(()=>s.http.renew(c.capability,randomUUID())).toThrow();
+    s.http.approve(KEY,c.requestId);s.http.status(c.capability,8);expect(()=>s.http.renew(c.capability,randomUUID())).toThrow();
+  });
+});
+
+it('keeps command/ACK replies bounded independently of drawing history size',async()=>{
+  const pairing=new ConnectorPairing(),provider=new GeoPixelsProvider();
+  const verbose={id:'drawing',state:'running',confirmed:50000,acceptedRequests:10000,uncertain:0,commandReady:false,targets:Array(50000).fill({x:1,y:2,color:0})};
+  const writer={batch:{subscribe:()=>()=>{},transportRenewable:()=>true,view:()=>verbose,grant:()=>null,result:async()=>verbose}} as unknown as SinglePixelWriter;
+  const http=new ConnectorHttpChannel(pairing,provider,KEY,Date.now,writer),c=http.claim(ORIGIN,http.issue(KEY,ORIGIN).token);http.approve(KEY,c.requestId);
+  expect(JSON.stringify(http.status(c.capability,9)).length).toBeLessThan(8192);
+  const reply=await http.batchResult(c.capability,'drawing','attempt','confirmed');expect(JSON.stringify(reply).length).toBeLessThan(200);expect(reply.confirmed).toBe(50000);
 });

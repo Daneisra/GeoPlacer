@@ -104,6 +104,7 @@ try {
   if (!process.argv.includes('--http-only')) {
   await page.getByLabel('Source de toile').selectOption('geopixels');
   await page.locator('#connectorDashboard').waitFor();
+  await page.getByLabel('Réglages avancés',{exact:true}).check();
   await page.getByRole('button', { name: 'Coupler un navigateur factice' }).click();
   const capability = await page.getByLabel('Code de couplage', { exact: true }).inputValue();
   assert.match(capability, /^[0-9a-f]{64}$/);
@@ -135,7 +136,7 @@ try {
   // Transport connection can precede the first observation; wait for the observed project.
   await page.getByText('Modèle du navigateur : 64 × 64, origine (-1001, 1001)', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Lier ce modèle' }).click();
-  await page.getByText('Modèle lié', { exact: true }).waitFor();
+  await page.getByText('Modèle lié ✓', { exact: true }).waitFor();
   record('OK controlled pairing, model binding, native negative coordinates');
   await page.getByRole('button', { name: 'Démarrer le fournisseur factice' }).click();
   await page.locator('#connectorState[data-state=completed]').waitFor({ timeout: 120_000 });
@@ -168,7 +169,7 @@ try {
     .waitFor();
   await page.getByText('Modèle du navigateur : 64 × 64, origine (-1001, 1001)', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Lier ce modèle' }).click();
-  await page.getByText('Modèle lié', { exact: true }).waitFor();
+  await page.getByText('Modèle lié ✓', { exact: true }).waitFor();
   assert.equal((await page.locator('#observedIncorrect').textContent()).trim(), '0');
   record('OK browser reload preserves durable fake pixels and operation results');
   await fixture.locator('#damage').click();

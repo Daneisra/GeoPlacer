@@ -1,7 +1,8 @@
+import { MAX_MODEL_PIXELS } from './capacity.js';
 /** Phase 2A wire contract. No service credentials or arbitrary network operations. */
 export const CONNECTOR_PROTOCOL = 1;
 export const CONNECTOR_MAX_PIXELS = 65_536;
-export const CONNECTOR_MAX_AREA = 4096 * 4096;
+export const CONNECTOR_MAX_AREA = MAX_MODEL_PIXELS;
 export const CONNECTOR_MAX_AGE_MS = 30_000;
 export type ConnectorMode = 'read-only' | 'local-fake';
 export interface BrowserProject {
@@ -84,17 +85,17 @@ export function parseObservation(value: unknown, now: number): BrowserObservatio
         const regional = typeof v.capture === 'object' && v.capture !== null && Object.hasOwn(v.capture, 'region');
         const c = object(v.capture, ['id', 'index', 'count', ...(regional ? ['region'] : [])]);
         check(
-            label(c.id) && integer(c.count, 1, 4096) && integer(c.index, 0, (c.count as number) - 1),
+            label(c.id) && integer(c.count, 1, MAX_MODEL_PIXELS) && integer(c.index, 0, (c.count as number) - 1),
             'invalid capture identity'
         );
         if (regional) {
             const r = object(c.region, ['id', 'x', 'y', 'width', 'height', 'revision']);
             check(
                 label(r.id) &&
-                    integer(r.x, 0, 4095) &&
-                    integer(r.y, 0, 4095) &&
-                    integer(r.width, 1, 4096) &&
-                    integer(r.height, 1, 4096) &&
+                    integer(r.x, 0, MAX_MODEL_PIXELS - 1) &&
+                    integer(r.y, 0, MAX_MODEL_PIXELS - 1) &&
+                    integer(r.width, 1, MAX_MODEL_PIXELS) &&
+                    integer(r.height, 1, MAX_MODEL_PIXELS) &&
                     integer(r.revision, 0, Number.MAX_SAFE_INTEGER),
                 'invalid capture region'
             );
@@ -113,8 +114,8 @@ export function parseObservation(value: unknown, now: number): BrowserObservatio
     const p = object(v.project, ['id', 'generation', 'width', 'height', 'gridX', 'gridY', 'layer']);
     check(label(p.id) && label(p.generation) && p.layer === 'base', 'unsupported project or layer');
     check(
-        integer(p.width, 1, 4096) && integer(p.height, 1, 4096) && p.width * p.height <= CONNECTOR_MAX_AREA,
-        'project exceeds 4096 x 4096'
+        integer(p.width, 1, MAX_MODEL_PIXELS) && integer(p.height, 1, MAX_MODEL_PIXELS) && p.width * p.height <= CONNECTOR_MAX_AREA,
+        'project exceeds configured model memory budget'
     );
     check(
         integer(p.gridX, -1_000_000_000, 1_000_000_000) && integer(p.gridY, -1_000_000_000, 1_000_000_000),
@@ -124,8 +125,8 @@ export function parseObservation(value: unknown, now: number): BrowserObservatio
     check(
         integer(r.x, -1_000_000_000, 1_000_000_000) &&
             integer(r.y, -1_000_000_000, 1_000_000_000) &&
-            integer(r.width, 1, 4096) &&
-            integer(r.height, 1, 4096),
+            integer(r.width, 1, MAX_MODEL_PIXELS) &&
+            integer(r.height, 1, MAX_MODEL_PIXELS),
         'invalid observation region'
     );
     check(

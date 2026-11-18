@@ -253,3 +253,17 @@ describe('Regional observations: one project, independent pixel expiration', () 
         expect(() => s.p.monitoring.requestRegion('left')).toThrow();
     });
 });
+
+it('automatically partitions a wide model, rotates only complete captures, and keeps old regions expired',async()=>{
+    const f=setup(600,2),m=f.p.monitoring;m.automaticRegions(600,2);m.command('start',5000);
+    expect(m.automaticRegionCount()).toBe(3);
+    const first=m.control().region!;expect(first).toMatchObject({id:'auto-0',x:0,width:256});
+    f.capture({...region(first.id),...first});
+    expect(m.control().region).toMatchObject({id:'auto-1',x:256,width:256});
+    f.advance(30001);
+    const second=m.control().region!;f.capture({...region(second.id),...second});
+    const result=await f.view();expect(result.progress).toMatchObject({correct:512,unknown:688});
+    const third=m.control().region!;expect(third).toMatchObject({id:'auto-2',x:512,width:88});
+    f.capture({...region(third.id),...third});expect(m.control().region?.id).toBe('auto-0');
+    m.stopObserving('done');expect(m.view().regionalSupported).toBe(true);m.automaticRegions(600,2);expect(m.automaticRegionCount()).toBe(3);
+});

@@ -253,10 +253,12 @@ export function createScheduler(config: SchedulerConfig, deps: SchedulerDependen
     if (report.damaged) recordError('JOURNAL_DAMAGED', `journal damaged (${report.corruptLines.length} line(s), ${report.sequenceGaps} gap(s)): leases need covering canvas reads`);
   }
 
+  // A regional view keeps the real revision/task identity, but needs new strategy keys when its bounds move.
+  const sameWorkView = (a:Template,b:Template) => a.revision===b.revision && a.image.width===b.image.width && a.image.height===b.image.height && a.placement.topLeft.x===b.placement.topLeft.x && a.placement.topLeft.y===b.placement.topLeft.y;
   async function ensureTemplate(now: Timestamp): Promise<Template> {
     const current = await deps.templates.current(ref);
     if (current.projectId !== config.projectId || current.id !== config.templateId) throw new SchedulerConfigError('the template source returned another template');
-    if (prepared === null || prepared.template.revision !== current.revision) {
+    if (prepared === null || !sameWorkView(prepared.template,current)) {
       if (prepared !== null && current.revision > prepared.template.revision) await attempts.revisionChanged(config.projectId, config.templateId, current.revision, now);
       prepared = deps.hasher === undefined ? prepareTemplateSync(current) : await prepareTemplate(current, { hasher: deps.hasher, ...(deps.orderCache === undefined ? {} : { orderCache: deps.orderCache }) });
     }
@@ -381,7 +383,7 @@ export function createScheduler(config: SchedulerConfig, deps: SchedulerDependen
       if (cooperative !== undefined) {
         // The host ran other work during this cycle: a template moved meanwhile is not complete.
         const latest = await deps.templates.current(ref);
-        if (latest.revision !== current.revision) return { kind: 'continue' };
+        if (!sameWorkView(latest,current)) return { kind: 'continue' };
       }
       if (config.watchOnIdle) {
         setState('waiting-observation', 'waiting for changed or newly covered pixels');
@@ -462,7 +464,7 @@ export function createScheduler(config: SchedulerConfig, deps: SchedulerDependen
           // template (new revision) made meanwhile must win over this plan, never be leased past.
           if (await breathe()) return { kind: 'continue' };
           const latest = await deps.templates.current(ref);
-          if (latest.revision !== current.revision) return { kind: 'continue' };
+          if (!sameWorkView(latest,current)) return { kind: 'continue' };
         }
         setState('running', null);
         return execute(plan, snapshot, now);

@@ -18,12 +18,13 @@ const GeoPlacerHttpTransport = (address, request) => {
   let capability = null,
     active = false,
     sequence = 0,
-    busy = false;
+    busy = false, features = null;
   let latencyMs = null;
   async function post(operation, body, authenticated = true) {
     if (
       ![
         'claim',
+        'renew',
         'status',
         'observations',
         'disconnect',
@@ -48,7 +49,10 @@ const GeoPlacerHttpTransport = (address, request) => {
         if (completed) return;
         completed = true;
         clearTimeout(timer);
-        if (error) reject(error);
+        if (error) {
+          error.transient = /locale absente|privilégié indisponible|Transport GM_xmlhttpRequest/.test(error.message);
+          reject(error);
+        }
         else {
           latencyMs = Math.round(performance.now() - start);
           resolve(result);
@@ -106,10 +110,11 @@ const GeoPlacerHttpTransport = (address, request) => {
       capability = claimed.capability;
       pending(claimed.fingerprint);
       for (let i = 0; i < 60; i++) {
-        const state = await post('status', { protocol: 1, readerVersion: 8, waitMs: 5000 });
+        const state = await post('status', { protocol: 1, readerVersion: 9, waitMs: 5000 });
         if (state.approved === true && state.lastSequence === 0) {
-          if (state.pacing !== 'server-50ms' || state.regionalProtocol !== 1 || state.batchProtocol !== 4)
-            throw new Error('Serveur incompatible : installer la Phase 2J et refaire le couplage.');
+          if (state.pacing !== 'server-50ms' || state.regionalProtocol !== 1 || state.batchProtocol !== 5)
+            throw new Error('Serveur incompatible : mettre à jour GeoPlacer et refaire le couplage.');
+          features = state.limits;
           active = true;
           return;
         }
@@ -135,7 +140,7 @@ const GeoPlacerHttpTransport = (address, request) => {
         if (answer.accepted !== true || answer.sequence !== next) throw new Error('Observation non confirmée');
         sequence = next;
       } catch (error) {
-        active = false;
+        active = false; // Two missing observation ACKs leave the sequence uncertain: fail closed.
         throw error;
       } finally {
         busy = false;
@@ -145,7 +150,7 @@ const GeoPlacerHttpTransport = (address, request) => {
       if (!active || busy) return;
       const answer = await post('status', {
         protocol: 1,
-        readerVersion: 8,
+        readerVersion: 9,
         ...(monitoring ? { monitoring } : {}),
       });
       if (answer.approved !== true || answer.lastSequence !== sequence) {
@@ -158,7 +163,7 @@ const GeoPlacerHttpTransport = (address, request) => {
       if (!active) throw new Error('Canal non couplé');
       const answer = await post('status', {
         protocol: 1,
-        readerVersion: 8,
+        readerVersion: 9,
         waitMs: 5000,
         ...(writerResources ? { writerResources } : {}),
         ...(abortedCapture ? { abortedCapture } : {}),
@@ -175,6 +180,15 @@ const GeoPlacerHttpTransport = (address, request) => {
       }
       return answer;
     },
+    features: () => features,
+    async renew() {
+      const nonce=crypto.randomUUID();let answer;
+      try {answer=await post('renew',{protocol:1,nonce});}
+      catch(error){if(!error.transient)throw error;answer=await post('renew',{protocol:1,nonce});}
+      if(answer.nonce!==nonce || !/^[a-f0-9]{64}$/.test(answer.capability))throw new Error('Rotation de capacité invalide');
+      capability=answer.capability; // The next authenticated request commits possession; no work permission changes.
+    },
+    waitForRetry: () => new Promise(resolve=>setTimeout(resolve,1000)),
     // Single delivery. In particular, NEVER retry a command claim or a site operation.
     async claimPixel() {
       if (!active) throw new Error('Canal non couplé');

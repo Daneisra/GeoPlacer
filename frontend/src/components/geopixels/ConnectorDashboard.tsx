@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { SimpleDrawingPanel } from './SimpleDrawingPanel';
+import { useCallback, useEffect, useState } from 'react';
 import './ConnectorDashboard.css';
 import { BatchPanel, type BatchView } from './BatchPanel';
 import { SinglePixelPanel, type SinglePixelView } from './SinglePixelPanel';
@@ -55,6 +56,7 @@ const kindLabels: Record<string, string> = {
 const number = (n: number | null | undefined) => (n == null ? 'Indisponible' : n.toLocaleString('fr-FR'));
 
 export function ConnectorDashboard() {
+    const [advanced,setAdvanced]=useState(()=>sessionStorage.getItem('geoplacer.advanced')==='true');
     const [approvalKey, setApprovalKey] = useState('');
     const [httpReader, setHttpReader] = useState<HttpReaderInfo | null>(null);
     const [readerOrigin, setReaderOrigin] = useState('https://geopixels.net');
@@ -106,6 +108,7 @@ export function ConnectorDashboard() {
             unsubscribe();
         };
     }, []);
+    const refresh = useCallback(async () => setView((await engineHttp.get<View>('/connector/status')).data), []);
     async function action(fn: () => Promise<unknown>) {
         setBusy(true);
         setError('');
@@ -120,7 +123,8 @@ export function ConnectorDashboard() {
             setBusy(false);
         }
     }
-    const active = !!view?.scheduler && !['stopped', 'completed', 'error'].includes(view.scheduler.state);
+    const engineActive = !!view?.scheduler && !['stopped', 'completed', 'error'].includes(view.scheduler.state);
+    const active = engineActive || ['running','paused'].includes(view?.batch.state ?? '');
     async function pair(mode: 'local-fake' | 'read-only') {
         setCapability('');
         const origin = mode === 'local-fake' ? location.origin : readerOrigin;
@@ -172,8 +176,10 @@ export function ConnectorDashboard() {
                 {httpReader?.active && httpReader.expires != null && (
                     <p id="connectorCouplingTime">
                         Couplage navigateur : {Math.ceil((httpReader.remainingMs ?? 0) / 1000)} s
-                        restantes, expiration à {new Date(httpReader.expires).toLocaleTimeString('fr-FR')}. Dix minutes
-                        depuis l’approbation du couplage ; démarrer un dessin ne renouvelle pas ce délai.
+                        restantes pour cette capacité, expiration à {new Date(httpReader.expires).toLocaleTimeString('fr-FR')}.
+                        {view?.batch.execution==='autonomous' && ['running','paused'].includes(view.batch.state)
+                          ? ' Rotation sécurisée possible pendant ce travail autorisé ; arrêt et révocation restent prioritaires.'
+                          : ' Hors dessin autonome autorisé, un nouveau couplage est requis à l’expiration.'}
                     </p>
                 )}
                 {!httpReader?.active && httpReader?.lastTermination && (
@@ -188,6 +194,8 @@ export function ConnectorDashboard() {
                     {error}
                 </p>
             )}
+            <label className="flex items-center gap-2"><input type="checkbox" aria-label="Réglages avancés" checked={advanced} onChange={e=>{setAdvanced(e.target.checked);sessionStorage.setItem('geoplacer.advanced',String(e.target.checked));}}/>Réglages avancés et anciens parcours</label>
+            {(!advanced || view?.batch.execution==='autonomous')&&<SimpleDrawingPanel view={view} approvalKey={approvalKey} refresh={refresh}/>}
             <details className="connector-setup" open={!view?.connected || !!httpReader?.pending}>
                 <summary>1. Connexion {view?.connected ? 'établie ✓ — réglages' : 'au navigateur'}</summary>
                 <label>
@@ -256,11 +264,11 @@ export function ConnectorDashboard() {
                     )}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                    <button disabled={busy || active} onClick={() => void action(() => pair('local-fake'))}>
+                    <button hidden={!advanced} disabled={busy || active} onClick={() => void action(() => pair('local-fake'))}>
                         Coupler un navigateur factice
                     </button>
 
-                    <a href="/connector-fixture.html" target="_blank" rel="noreferrer">
+                    <a hidden={!advanced} href="/connector-fixture.html" target="_blank" rel="noreferrer">
                         Ouvrir la page factice
                     </a>
                     <button
@@ -312,6 +320,7 @@ export function ConnectorDashboard() {
             <a href="/geopixels-connector.user.js" download>
                 Télécharger le lecteur Tampermonkey
             </a>
+            <div hidden={!advanced}>
             <div className="rounded border p-4 space-y-2">
                 <h3 className="font-semibold">2. Choisir le modèle</h3>
                 <p>
@@ -386,16 +395,16 @@ export function ConnectorDashboard() {
                     </p>
                 </details>
             </div>
-            {view?.batch && (
+            {view?.batch && view.batch.execution!=='autonomous' && (
                 <BatchPanel
                     view={view.batch}
                     approvalKey={approvalKey}
                     fake={view.mode === 'local-fake'}
                     groupedReady={view.mode === 'local-fake' || (httpReader?.batchProtocol ?? 0) >= 2}
                     sessionReady={view.mode === 'local-fake' || (httpReader?.batchProtocol ?? 0) >= 3}
-                    continuousReady={view.mode === 'local-fake' || httpReader?.batchProtocol === 4}
+                    continuousReady={view.mode === 'local-fake' || (httpReader?.batchProtocol ?? 0) >= 4}
                     project={view.project}
-                    ready={view.connected && view.bound && !active}
+                    ready={view.connected && view.bound && !engineActive}
                     refresh={async () => setView((await engineHttp.get<View>('/connector/status')).data)}
                 />
             )}
@@ -629,6 +638,7 @@ export function ConnectorDashboard() {
                     ))}
                 </ul>
             </details>
+            </div>
             {view?.error && <p role="status">Canal : {view.error}</p>}
         </section>
     );

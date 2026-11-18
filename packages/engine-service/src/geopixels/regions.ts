@@ -1,3 +1,4 @@
+import { MAX_MODEL_PIXELS } from './capacity.js';
 import { check, integer } from './protocol.js';
 
 export interface ImageRegion {
@@ -19,8 +20,8 @@ export interface CaptureRegion {
     readonly revision: number;
 }
 export const MAX_REGIONS = 16;
-export const MAX_PROJECT_SIDE = 4096;
-export const OBSERVATION_CACHE_BYTES = 384 * 1024 * 1024;
+export const MAX_PROJECT_SIDE = MAX_MODEL_PIXELS;
+export const OBSERVATION_CACHE_BYTES = MAX_MODEL_PIXELS * 20;
 export function parseRegions(value: unknown, width: number, height: number): ImageRegion[] {
     check(Array.isArray(value) && value.length <= MAX_REGIONS, 'at most 16 observation regions');
     const ids = new Set<string>();
@@ -56,7 +57,7 @@ export function parseRegions(value: unknown, width: number, height: number): Ima
         );
         area += v.width * v.height;
     }
-    check(area <= MAX_PROJECT_SIDE ** 2, 'combined region area exceeds the 4096 squared observation budget');
+    check(area <= MAX_MODEL_PIXELS, 'combined region area exceeds the configured observation memory budget');
     return structuredClone(value) as ImageRegion[];
 }
 

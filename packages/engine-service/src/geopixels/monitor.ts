@@ -1,3 +1,4 @@
+import { MAX_MODEL_PIXELS } from './capacity.js';
 import type { PixelCounts } from '@geoplacer/core';
 import { check, integer, type BrowserObservation } from './protocol.js';
 import { chooseRegion, parseRegions, type ImageRegion, type CaptureRegion } from './regions.js';
@@ -30,6 +31,7 @@ type Assembly = CaptureSummary & { next: number; count: number; nextY: number; s
 
 /** Bounded session observation service, never a painting scheduler. No timers or network access. */
 export class ObservationMonitor {
+  private automatic: {width:number;height:number;cursor:number} | null = null;
   private desired: WatchState = 'stopped';
   private acknowledged: WatchState = 'stopped';
   private revision = 0;
@@ -69,6 +71,7 @@ export class ObservationMonitor {
             this.regionalSupported && this.desired !== 'running' && this.assembly === null,
             'pause and finish the capture before configuring regions'
         );
+        this.automatic=null;
         this.regionValues = parseRegions(value, width, height);
         this.regionRevision++;
         this.revision++;
@@ -89,7 +92,18 @@ export class ObservationMonitor {
         this.revision++;
         this.event('region-once', 'Observation régionale demandée.');
     }
+    automaticRegions(width:number,height:number) {
+        check(this.regionalSupported && this.desired === 'stopped' && !this.assembly,'stop observations before changing automatic regions');
+        this.automatic={width,height,cursor:0};this.regionValues=[];this.regionRevision++;this.revision++;
+    }
+    automaticRegionCount() {return this.automatic ? Math.ceil(this.automatic.width/256)*Math.ceil(this.automatic.height/256) : 0;}
+    private automaticRegion() {
+        const a=this.automatic;if(!a)return null;
+        const columns=Math.ceil(a.width/256),x=(a.cursor%columns)*256,y=Math.floor(a.cursor/columns)*256;
+        return {id:'auto-'+a.cursor,name:'Région '+(a.cursor+1),x,y,width:Math.min(256,a.width-x),height:Math.min(256,a.height-y),priority:'primary' as const,enabled:true};
+    }
     private selectedRegion() {
+        if(this.automatic)return this.automaticRegion();
         return this.requested
             ? (this.regionValues.find((r) => r.id === this.requested!.id) ?? null)
             : chooseRegion(this.regionValues, this.served);
@@ -143,6 +157,11 @@ export class ObservationMonitor {
     this.acknowledged = state;
     this.emit('state');
   }
+    stopObserving(reason: string) {
+        this.desired = 'stopped'; this.revision++; this.assembly=null;
+        this.automatic=null; this.requested=null; this.reason=reason;
+        this.event('stop',reason);
+    }
     stop(reason: string) {
         const changed = this.supported || this.assembly !== null || this.desired !== 'stopped';
         this.desired = this.acknowledged = 'stopped';
@@ -151,6 +170,7 @@ export class ObservationMonitor {
         this.supported = false;
         this.regionalSupported = false;
         this.regionValues = [];
+        this.automatic=null;
         this.served.clear();
         this.requested = null;
         this.regionRevision++;
@@ -174,7 +194,7 @@ export class ObservationMonitor {
             revision: 0,
         };
         if (c.region) {
-            const registered = this.regionValues.find((r) => r.id === area.id);
+            const registered = this.automatic ? this.automaticRegion() : this.regionValues.find((r) => r.id === area.id);
             check(
                 this.regionalSupported &&
                     registered?.enabled &&
@@ -282,6 +302,7 @@ export class ObservationMonitor {
         // History stores aggregate coverage, never 120 copies of large region lists or pixel arrays.
         this.points = [...this.points, { ...this.last, regions: [], templateId: null, progress: null }].slice(-120);
         this.usage.completed++;
+        if (this.automatic && a.regionId) this.automatic.cursor=(this.automatic.cursor+1)%this.automaticRegionCount();
         if (a.regionId) this.served.set(a.regionId, (this.served.get(a.regionId) ?? 0) + 1);
         if (this.requested?.id === a.regionId) {
             this.requested = null;
@@ -310,6 +331,7 @@ export class ObservationMonitor {
                 ? { id: r.id, x: r.x, y: r.y, width: r.width, height: r.height, revision: this.regionRevision }
                 : null,
             customRegions: this.regionValues.length > 0,
+            automaticRegions: this.automaticRegionCount(),
             once: this.requested,
         };
     }
@@ -395,11 +417,11 @@ export function parseObservationHistory(value: unknown): ObservationPoint[] {
             'becameUnknown',
             'unchanged',
         ] as const)
-            check(integer(p[key], 0, 4096 ** 2), 'invalid history count');
+            check(integer(p[key], 0, MAX_MODEL_PIXELS), 'invalid history count');
         check(
             p.total === p.known + p.unknown &&
                 p.transparent <= p.known &&
-                integer(p.regionCount, 1, 4096) &&
+                integer(p.regionCount, 1, MAX_MODEL_PIXELS) &&
                 Array.isArray(p.regions) &&
                 p.regions.length === 0,
             'invalid history coverage'
@@ -412,10 +434,10 @@ export function parseObservationHistory(value: unknown): ObservationPoint[] {
                     c &&
                     c.id === p.regionId &&
                     Object.keys(c).length === 6 &&
-                    integer(c.x, 0, 4095) &&
-                    integer(c.y, 0, 4095) &&
-                    integer(c.width, 1, 4096 - c.x) &&
-                    integer(c.height, 1, 4096 - c.y) &&
+                    integer(c.x, 0, MAX_MODEL_PIXELS-1) &&
+                    integer(c.y, 0, MAX_MODEL_PIXELS-1) &&
+                    integer(c.width, 1, MAX_MODEL_PIXELS - c.x) &&
+                    integer(c.height, 1, MAX_MODEL_PIXELS - c.y) &&
                     integer(c.revision, 0, Number.MAX_SAFE_INTEGER),
                 'invalid history region'
             );
@@ -427,7 +449,7 @@ export function parseObservationHistory(value: unknown): ObservationPoint[] {
         if (p.progress !== null) {
             check(typeof p.progress === 'object' && Object.keys(p.progress).length === 6, 'invalid history progress');
             for (const key of ['total', 'correct', 'incorrect', 'unknown', 'wrongColor', 'missing'] as const)
-                check(integer(p.progress[key], 0, 4096 ** 2), 'invalid history progress count');
+                check(integer(p.progress[key], 0, MAX_MODEL_PIXELS), 'invalid history progress count');
             check(
                 p.progress.total === p.progress.correct + p.progress.incorrect + p.progress.unknown &&
                     p.progress.incorrect === p.progress.wrongColor + p.progress.missing,

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import vm from 'node:vm';
+import {webcrypto} from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
 type Options = {
@@ -11,9 +12,9 @@ type Options = {
   onload: (v: unknown) => void;
   onerror: () => void;
 };
-async function setup(failures = 0) {
+async function setup(failures = 0, rotationFailures = 0) {
   const sent: Options[] = [];
-  const context = vm.createContext({ URL, TextEncoder, setTimeout, clearTimeout, performance });
+  const context = vm.createContext({ crypto:webcrypto, URL, TextEncoder, setTimeout, clearTimeout, performance });
   const source = await readFile(new URL('../../../browser/geopixels-http-transport.js', import.meta.url), 'utf8');
   vm.runInContext(source + '\nglobalThis.factory = GeoPlacerHttpTransport;', context);
   const request = (o: Options) => {
@@ -23,11 +24,12 @@ async function setup(failures = 0) {
       o.onerror();
       return { abort: () => {} };
     }
+    if (path === 'renew' && rotationFailures-- > 0) {o.onerror();return {abort:()=>{}};}
     const body =
-      path === 'claim'
+      path === 'renew' ? {nonce:JSON.parse(o.data).nonce,capability:'e'.repeat(64)} : path === 'claim'
         ? { capability: 'a'.repeat(64), requestId: 'b'.repeat(64), fingerprint: 'c'.repeat(12) }
         : path === 'status'
-          ? { approved: true, lastSequence: 0, pacing: 'server-50ms', regionalProtocol:1, batchProtocol:4 }
+          ? { approved: true, lastSequence: 0, pacing: 'server-50ms', regionalProtocol:1, batchProtocol:5 }
           : path === 'observations'
             ? { accepted: true, sequence: JSON.parse(o.data).observations[0].sequence }
             : { disconnected: true };
@@ -38,11 +40,18 @@ async function setup(failures = 0) {
     context.factory(address, gm) as {
       pair: (code: string, origin: string, pending: (fp: string) => void) => Promise<void>;
       send: (o: unknown) => Promise<void>;
+      renew: () => Promise<void>;
+      poll: () => Promise<unknown>;
       disconnect: () => Promise<void>;
       connected: () => boolean;
     };
   return { sent, make };
 }
+it('retries a lost renewal reply with the identical nonce, using the new capability only after receiving it',async()=>{
+  const s=await setup(0,1),t=s.make();await t.pair('d'.repeat(64),'https://geopixels.net',()=>{});await t.renew();await t.poll();
+  const rotations=s.sent.filter(o=>o.url.endsWith('/renew'));expect(rotations).toHaveLength(2);expect(rotations[0]!.data).toBe(rotations[1]!.data);expect(s.sent.at(-1)!.headers.Authorization).toBe('Bearer '+'e'.repeat(64));
+});
+
 describe('Actual GM privileged transport, mocked extension API only', () => {
   it.each([
     'http://localhost:3921',

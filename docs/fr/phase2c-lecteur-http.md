@@ -1,6 +1,8 @@
 # Lecteur GeoPixels HTTP — observations et petits lots contrôlés
 
-Version du lecteur : **0.9.0**, serveur Phase 2J local. Les observations restent passives par défaut. Le dessin continu autorise un modèle lié, un rectangle en coordonnées image, une durée de **30 à 600 secondes** et des budgets plafonnés à **1 000 pixels / énergie**, par groupes natifs de cinq maximum. Les cibles sont choisies dynamiquement dans la zone. Les sessions fixes de 25 et les lots groupés/séquentiels restent disponibles. Aucun achat ni transfert de session du site. Les validations réelles 2H et 2I restent acquises ; **le premier essai réel 2J de 50 pixels est validé par l’utilisateur le 18 novembre 2026**. Chaque nouvelle autorisation doit être examinée avant son démarrage.
+Version actuelle : **1.0.0**, avec un parcours simple par défaut et dessin du modèle entier explicitement autorisé. Voir [le guide du mode autonome](MODE-AUTONOME.md) pour l’import, la correspondance automatique du fantôme, le lancement et la séparation entre autorisation de travail et renouvellement du transport.
+
+Les parcours historiques décrits ci-dessous restent disponibles sous « Réglages avancés ». Le dessin continu 2J conserve ses anciennes limites 30–600 s / 1 000 pixels ; ces limites ne décrivent pas le nouveau mode autonome. Les validations réelles 2H–2J restent acquises, sans valider par avance le lecteur 1.0.0.
 
 ## Installation et lancement
 
@@ -17,7 +19,7 @@ Taper directement l'adresse locale dans la barre d'adresse d'un nouvel onglet (p
 
 1. Choisir « GeoPixels — connecteur expérimental ».
 2. Saisir la clé privée dans « Clé locale d'approbation ». Elle reste dans la mémoire du formulaire pendant ce montage.
-3. Télécharger et installer le lecteur Tampermonkey proposé. Vérifier **0.9.0**, désactiver les anciens lecteurs GeoPlacer, puis recharger GeoPixels. Un seul lecteur doit être actif.
+3. Télécharger et installer le lecteur Tampermonkey proposé. Vérifier **1.0.0**, désactiver les anciens lecteurs GeoPlacer, puis recharger GeoPixels. Un seul lecteur doit être actif.
 4. Les seules pages autorisées sont `https://geopixels.net/*` et `https://www.geopixels.net/*`. La permission réseau GM est **127.0.0.1**, sans `*` et sans permission de récupération sur le service. Si Tampermonkey demande l'autorisation locale, contrôler cette destination précise.
 5. Garder tous les bots de placement arrêtés. Ouvrir/recharger la page GeoPixels et conserver une copie de son fantôme et de sa position avant de changer d'image.
 
@@ -29,7 +31,7 @@ Taper directement l'adresse locale dans la barre d'adresse d'un nouvel onglet (p
 4. Comparer les empreintes courtes de la demande dans les deux panneaux, puis cliquer « Confirmer la demande HTTP » dans le dashboard avant expiration. L'origine est **déclarée**, pas attestée cryptographiquement par HTTP.
 5. Attendre « Couplé par HTTP privilégié, en lecture seule ». Aucun cookie, identifiant Google ou token GeoPixels n'est demandé.
 
-La capacité reste en mémoire. Inactivité maximale : **30 secondes** ; durée absolue : **10 minutes**, jamais renouvelée silencieusement. Les échanges de statut maintiennent le canal, sans renouveler les pixels. Après rechargement, redémarrage, expiration ou révocation : nouveau code et confirmation.
+La capacité reste en mémoire. Inactivité maximale : **30 secondes** ; bail de **10 minutes**. Le nouveau mode autonome permet une rotation sécurisée avant expiration uniquement pendant un travail explicitement autorisé ; elle ne rétablit jamais un travail révoqué. Les anciens modes ne renouvellent pas leur bail. Les échanges de statut ne rafraîchissent pas les pixels. Après rechargement, redémarrage, expiration effective ou révocation : nouveau code et confirmation.
 
 Le statut utilise une attente HTTP côté serveur de 5 secondes au plus, interrompue par une commande. Les réponses de statut et d'observation sont cadencées côté serveur (50 ms minimum). Aucune cadence de capture ne dépend d'un setInterval ou d'un petit setTimeout de la page. Cela traite le ralentissement des temporisateurs d'un onglet masqué ; cela ne garantit pas l'exécution d'une page gelée ou abandonnée par le navigateur. Si le navigateur suspend réellement le lecteur, le canal expire normalement. Ne pas désactiver les protections ou l'économie d'énergie globale pour ce test.
 
@@ -68,7 +70,7 @@ Pour contrôler couleurs et orientation : utiliser une zone déjà colorée, com
 Les régions sont des rectangles **dans l’image du même modèle**, pas de nouveaux modèles. X augmente vers la droite, Y vers le bas, origine (0, 0) au coin supérieur gauche. Le lecteur convertit explicitement ces coordonnées vers la grille GeoPixels Y vers le haut.
 
 1. Surveiller un seul modèle lié. Mettre la surveillance en pause ou l'arrêter et attendre qu'aucune bande ne soit en cours.
-2. Dans « Régions d’observation », ajouter un rectangle : nom, X, Y, largeur, hauteur. Jusqu'à **16 régions**, entièrement à l'intérieur du modèle ; somme des surfaces au plus 4096² (les chevauchements comptent dans ce budget de travail).
+2. Dans « Régions d’observation », ajouter un rectangle : nom, X, Y, largeur, hauteur. Jusqu'à **16 régions**, entièrement à l'intérieur du modèle ; somme des surfaces limitée par le budget mémoire négocié (les chevauchements comptent dans ce budget de travail).
 3. Choisir principale ou secondaire ; désactiver une région la suspend. Enregistrer applique et sauvegarde la configuration. « Observer cette région » demande une capture unique pendant la pause/l'arrêt.
 4. Démarrer la surveillance. À coût égal, la rotation attribue trois captures à une principale pour une à une secondaire ; les captures terminées servent de mesure d'équité. Une région secondaire activée n'est pas ignorée indéfiniment. Cette rotation n'est pas un second scheduler de peinture et n'a aucun accès aux placements.
 5. Le panneau distingue capture propre expirée, couverture actuelle des cibles, valeurs correctes/incorrectes/inconnues, fenêtre des dates de capture encore valides, date source lorsqu'elle est connue et durée de réception des bandes. Une région peut bénéficier d'un chevauchement récent sans avoir été recapturée elle-même.
@@ -84,7 +86,7 @@ Le lecteur parcourt les intersections des tuiles au lieu de rechercher la même 
 
 Un cache décodé de **32 Mio** réutilise seulement les objets **ImageBitmap natifs**, dont les pixels ne disposent pas d'API de mutation. Le remplacement d'objet, une fermeture/transfert (dimensions nulles), la disparition d'une tuile, une nouvelle identité de modèle/couche/position/session invalident ces données. Les objets de type canvas, mutables, sont redécodés à chaque bande. Cette optimisation découle du [contrat ImageBitmap du standard HTML](https://html.spec.whatwg.org/multipage/imagebitmap-and-animations.html#imagebitmap) ; elle ne date pas le contenu du cache GeoPixels et n'atteste pas la bonne foi de la page.
 
-Limite du modèle : **4096 × 4096**. Le fournisseur réserve 20 octets par position pour couleur, date de validité et date de capture, dans un budget de 384 Mio ; ce budget ne représente pas la mémoire totale de l'application, du navigateur ou des modèles. Le benchmark de processus fixe séparément 768 Mio et abandonne proprement si la mesure dépasse ce budget. Une petite région réduit lecture/envoi mais le hachage d'identité porte encore sur l'image entière et le cache moteur reste dimensionné pour le modèle.
+Limite du modèle : budget mémoire configurable, sans plafond indépendant de 4 096 pixels par côté ; voir [le mode autonome](MODE-AUTONOME.md#régions-ressources-et-persistance). Les paquets restent bornés à 65 536 valeurs. Les benchmarks historiques 2E ne caractérisent pas toutes les nouvelles dimensions admissibles. Une petite région réduit lecture/envoi, mais le hachage d’identité porte encore sur l’image entière et le cache moteur reste dimensionné pour le modèle.
 
 Aucune date source n'est inventée : une lecture récente du même bitmap reste de fraîcheur source non vérifiée. Les ressources non datées restent signalées. Aucune récupération automatique de tuiles, de cookies, de token du site ou d'achat n'est ajoutée. Les règles Host/boucle locale, origine du contrôle, clé privée, confirmation volontaire et capacité éphémère restent appliquées.
 
@@ -168,7 +170,7 @@ Pause/reprise conserve l’échéance initiale. Arrêt, expiration de l’autori
 
 ### Premier essai réel 2J — ne pas démarrer avant accord
 
-1. Installer **0.9.0**, coupler comme précédemment ; dans le dashboard, choisir Simulation locale → Importer un PNG → [le PNG 20 × 20](../../public/fixtures/geoplacer-20x20.png), laisser X/Y à 0 et cliquer Importer et sélectionner. Charger le même fichier dans le fantôme GeoPixels, puis repasser sur le connecteur GeoPixels. Vérifier l’image, sa position et la liaison. Garder les autres bots arrêtés et la file native vide.
+1. Utiliser le lecteur **1.0.0** en mode continu hérité, coupler comme précédemment ; dans le dashboard, choisir Simulation locale → Importer un PNG → [le PNG 20 × 20](../../public/fixtures/geoplacer-20x20.png), laisser X/Y à 0 et cliquer Importer et sélectionner. Charger le même fichier dans le fantôme GeoPixels, puis repasser sur le connecteur GeoPixels. Vérifier l’image, sa position et la liaison. Garder les autres bots arrêtés et la file native vide.
 2. Choisir **Dessin continu**, zone image **X=0, Y=0, largeur=10, hauteur=10**, **50 pixels / 50 énergie / 120 s**. Cliquer **Prévisualiser la session**. Vérifier le modèle, la couche et les deux coins natifs affichés. **S’arrêter ici et faire valider explicitement ce rectangle et ces budgets par l’utilisateur.** Aucun envoi n’est encore autorisé.
 3. Après cet accord seulement : démarrer la surveillance du cache, puis **Autoriser et démarrer la session**. Les groupes de cinq maximum avancent automatiquement ; si l’énergie n’est pas exploitable, ils attendent une nouvelle réponse native. Ne pas augmenter le budget pour contourner cette attente.
 4. Observer les compteurs et l’historique ; tester pause/reprise puis arrêt et révocation. Vérifier ensuite les couleurs séparément des accusés, éventuellement après rechargement du site. Rapporter le résultat sans transmettre de code, clé ou donnée de session.

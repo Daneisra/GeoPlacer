@@ -63,6 +63,10 @@ export function createPrivilegedReaderRouter(channel: ConnectorHttpChannel): Rou
             res.status(403).json({ error: 'reader capability refused' });
         }
     });
+    router.post('/renew',small,(req,res)=>{
+        try {const b=z.strictObject({protocol:z.literal(1),nonce:z.string().uuid()}).parse(req.body);res.json(channel.renew(res.locals.capability as string,b.nonce));}
+        catch {fail(res);}
+    });
     const pace = (start: number) =>
         new Promise((resolve) => setTimeout(resolve, Math.max(0, 50 - (Date.now() - start))));
     router.post('/pixel-claim', small, async (req, res) => {
@@ -142,7 +146,7 @@ export function createPrivilegedReaderRouter(channel: ConnectorHttpChannel): Rou
                 .strictObject({
                     protocol: z.literal(1),
                     readerVersion: z
-                        .union([z.literal(3), z.literal(4), z.literal(5), z.literal(6), z.literal(7), z.literal(8)])
+                        .union([z.literal(3), z.literal(4), z.literal(5), z.literal(6), z.literal(7), z.literal(8), z.literal(9)])
                         .optional(),
                     waitMs: z.literal(5000).optional(),
                     writerResources: z.custom(validWriterResources).optional(),
@@ -158,9 +162,9 @@ export function createPrivilegedReaderRouter(channel: ConnectorHttpChannel): Rou
                         .optional(),
                 })
                 .parse(req.body);
-            if ((b.monitoring || b.waitMs || b.abortedCapture) && ![3, 4, 5, 6, 7, 8].includes(b.readerVersion ?? 0))
+            if ((b.monitoring || b.waitMs || b.abortedCapture) && ![3, 4, 5, 6, 7, 8, 9].includes(b.readerVersion ?? 0))
                 throw new Error('reader version required');
-            if (b.writerResources !== undefined && b.readerVersion !== 8) throw new Error('resource protocol required');
+            if (b.writerResources !== undefined && ![8,9].includes(b.readerVersion ?? 0)) throw new Error('resource protocol required');
             const abort = new AbortController();
             res.once('close', () => abort.abort());
             const answer = b.waitMs
