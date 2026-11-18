@@ -1,3 +1,4 @@
+import { CONNECTOR_MAX_GROUP_PIXELS } from './batch-limits.js';
 import { MAX_MODEL_PIXELS } from './capacity.js';
 import { randomUUID } from 'node:crypto';
 import { ObservationMonitor } from './monitor.js';
@@ -63,7 +64,7 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
   readonly mode = 'read-write' as const;
   readonly reader = { coordinateSystem: { yAxis: 'down' as const }, readRegion: (rect: CanvasRect) => this.readRegion(rect) };
   readonly writer = {
-    maxPixelsPerWrite: 256,
+    maxPixelsPerWrite: CONNECTOR_MAX_GROUP_PIXELS,
     idempotentWrites: false,
     applyPixels: (agent: AgentId, writes: readonly PixelWrite[], options: WriteOptions) => this.applyPixels(agent, writes, options),
   };
@@ -86,6 +87,7 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
   private closed = false;
   channelEpoch = 0;
   private dated = false;
+  private tileEvidence=new Map<string,NonNullable<import('./protocol.js').BrowserObservation['tiles']>[number]>();
 
   constructor(
     private readonly now: () => number = Date.now,
@@ -105,7 +107,7 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
         this.observationRevision++;
         this.monitoring.stop(reason);
         this.channelEpoch++;
-        this.dated = false;
+        this.dated = false; this.tileEvidence.clear();
         this.send = null;
         this.channelMode = null;
         this.session = null;
@@ -166,8 +168,9 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
             this.dates = new Float64Array(this.pixels.length);
             this.captures = new Float64Array(this.pixels.length);
             this.cells = new Float64Array(Math.ceil(o.project.width / 256) * Math.ceil(o.project.height / 256));
-            this.resourceValue = null;
+            this.resourceValue = null; this.tileEvidence.clear();
         }
+        for(const t of o.tiles??[])this.tileEvidence.set(t.key,structuredClone(t));
         this.project = project;
         this.session = o.session;
         this.sequence = o.sequence;
@@ -371,7 +374,7 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
     check(
       this.pending === null &&
         writes.length > 0 &&
-        writes.length <= 256 &&
+        writes.length <= CONNECTOR_MAX_GROUP_PIXELS &&
         !this.dispatched.has(options.attemptId) &&
         !options.signal?.aborted,
       'concurrent, repeated, empty or aborted write'
@@ -484,6 +487,7 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
       monitoring: this.monitoring.view(),
       captureAgeMs: this.lastCapture === null ? null : Math.max(0, this.now() - this.lastCapture),
       captureExpired: this.lastCapture !== null && this.now() - this.lastCapture > CONNECTOR_MAX_AGE_MS,
+      tileEvidence: {total:this.tileEvidence.size, nativeUpdated:[...this.tileEvidence.values()].filter(t=>t.state==='native-updated' && t.nativeReceivedAt!==null && this.now()-t.nativeReceivedAt<=30000).length, nativeChecked:[...this.tileEvidence.values()].filter(t=>t.state==='native-checked' && t.nativeReceivedAt!==null && this.now()-t.nativeReceivedAt<=30000).length, missing:[...this.tileEvidence.values()].filter(t=>t.state==='missing').length, sourceDateKnown:this.dated},
       freshness: this.dated ? 'dated' : 'unverified',
       resources: r,
       resourcesStale: r === null || r.observedAt === null || this.now() - r.observedAt > CONNECTOR_MAX_AGE_MS,

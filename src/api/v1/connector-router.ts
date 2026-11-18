@@ -1,6 +1,6 @@
 import { Router, type Request } from 'express';
 import { z } from 'zod';
-import { ConnectorError, type ConnectorHttpChannel } from '@geoplacer/engine-service';
+import { ConnectorError, CONNECTOR_MAX_GROUP_PIXELS, type ConnectorHttpChannel } from '@geoplacer/engine-service';
 import { asRgb } from '@geoplacer/core';
 import type { EngineApi } from './engine-api.js';
 import { hostnameFromHostHeader } from '../../middleware/local-access.js';
@@ -157,9 +157,9 @@ export function createConnectorRouter(engine: EngineApi, httpChannel?: Connector
     });
     router.post('/drawing/preview',action(req=>{
         regionControl(req);batchControl(req);
-        const b=z.strictObject({groupSize:z.number().int().min(1).max(5).default(5),pixelBudget:z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional()}).parse(req.body);
-        if(engine.connector!.status().mode !== 'local-fake' && httpChannel!.info().batchProtocol !== 5)throw new ConnectorError('CONNECTOR_UNAVAILABLE','Installer et coupler le lecteur 1.0.0.');
-        return engine.previewDrawing!(b.groupSize,b.pixelBudget);
+        const b=z.strictObject({groupSize:z.number().int().min(0).max(CONNECTOR_MAX_GROUP_PIXELS).default(0),pixelBudget:z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),upgrades:z.strictObject({maxBudget:z.number().int().nonnegative().max(1e9),minimumReserve:z.number().int().nonnegative().max(1e9),targetCapacity:z.number().int().nonnegative().max(1e9),energyBelow:z.number().int().nonnegative().max(1e9),priority:z.array(z.enum(['energy-pack','max-energy','regen-speed','color-unlock'])).max(4)}).optional()}).parse(req.body);
+        if(engine.connector!.status().mode !== 'local-fake' && (httpChannel!.info().batchProtocol ?? 0) < (b.groupSize===0 || b.groupSize>5 ? 6 : 5))throw new ConnectorError('CONNECTOR_UNAVAILABLE','Installer et coupler le lecteur 1.1.0 pour les groupes adaptatifs.');
+        return engine.previewDrawing!(b.groupSize,b.pixelBudget,b.upgrades);
     }));
     const consent = z.strictObject({
         batchId: z.string().uuid(),
@@ -173,7 +173,7 @@ export function createConnectorRouter(engine: EngineApi, httpChannel?: Connector
                 b = consent.parse(req.body);
             if (batch.view().mode === 'real') {
                 regionControl(req);
-                if(batch.view().execution === 'autonomous' && httpChannel!.info().batchProtocol !==5)throw new ConnectorError('CONNECTOR_UNAVAILABLE','Lecteur 1.0.0 requis.');
+                if(batch.view().execution === 'autonomous' && (httpChannel!.info().batchProtocol ?? 0) < (batch.view().scope?.groupSize===0 || (batch.view().scope?.groupSize ?? 0)>5 ? 6 : 5))throw new ConnectorError('CONNECTOR_UNAVAILABLE','Lecteur 1.0.0 requis.');
                 if (batch.view().execution === 'continuous' && (httpChannel!.info().batchProtocol ?? 0) < 4)
                     throw new ConnectorError('CONNECTOR_UNAVAILABLE', 'Lecteur 0.9.0 requis.');
                 if (batch.view().execution === 'session' && (httpChannel!.info().batchProtocol ?? 0) < 3)
@@ -191,7 +191,7 @@ export function createConnectorRouter(engine: EngineApi, httpChannel?: Connector
                 b = consent.parse(req.body);
             if (batch.view().mode === 'real') {
                 regionControl(req);
-                if(batch.view().execution === 'autonomous' && httpChannel!.info().batchProtocol !==5)throw new ConnectorError('CONNECTOR_UNAVAILABLE','Lecteur 1.0.0 requis.');
+                if(batch.view().execution === 'autonomous' && (httpChannel!.info().batchProtocol ?? 0) < (batch.view().scope?.groupSize===0 || (batch.view().scope?.groupSize ?? 0)>5 ? 6 : 5))throw new ConnectorError('CONNECTOR_UNAVAILABLE','Lecteur 1.0.0 requis.');
                 if (batch.view().execution === 'continuous' && (httpChannel!.info().batchProtocol ?? 0) < 4)
                     throw new ConnectorError('CONNECTOR_UNAVAILABLE', 'Lecteur 0.9.0 requis.');
                 if (batch.view().execution === 'session' && (httpChannel!.info().batchProtocol ?? 0) < 3)

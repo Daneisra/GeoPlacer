@@ -34,7 +34,7 @@ export interface EngineApi {
     connectorView?(): Promise<unknown>;
     importDrawing?(input:import('@geoplacer/engine-service').GhostImportInput):Promise<unknown>;
     exportDrawing?(templateId:string):Promise<{png:Uint8Array;filename:string}>;
-    previewDrawing?(groupSize?:number,pixelBudget?:number):Promise<unknown>;
+    previewDrawing?(groupSize?:number,pixelBudget?:number,upgrades?:import('@geoplacer/engine-service').AutomaticUpgradePolicy):Promise<unknown>;
     configureConnectorRegions?(regions: unknown, restore?: boolean): Promise<unknown>;
     connectorProposals?(policy: import('@geoplacer/core').UpgradePolicy): Promise<unknown>;
 

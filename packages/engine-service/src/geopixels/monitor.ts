@@ -32,6 +32,9 @@ type Assembly = CaptureSummary & { next: number; count: number; nextY: number; s
 /** Bounded session observation service, never a painting scheduler. No timers or network access. */
 export class ObservationMonitor {
   private automatic: {width:number;height:number;cursor:number} | null = null;
+  private cacheCoverage: {keys:Set<string>;complete:boolean;gridX:number;gridY:number}|null=null;
+  private captureCount=0;
+  private probeCursor=0;
   private desired: WatchState = 'stopped';
   private acknowledged: WatchState = 'stopped';
   private revision = 0;
@@ -94,9 +97,24 @@ export class ObservationMonitor {
     }
     automaticRegions(width:number,height:number) {
         check(this.regionalSupported && this.desired === 'stopped' && !this.assembly,'stop observations before changing automatic regions');
-        this.automatic={width,height,cursor:0};this.regionValues=[];this.regionRevision++;this.revision++;
+        this.cacheCoverage=null;this.captureCount=0;this.probeCursor=0;this.automatic={width,height,cursor:0};this.regionValues=[];this.regionRevision++;this.revision++;
     }
     automaticRegionCount() {return this.automatic ? Math.ceil(this.automatic.width/256)*Math.ceil(this.automatic.height/256) : 0;}
+    private loadedRegion(index:number) {
+        if(!this.automatic || !this.cacheCoverage)return true;
+        const a=this.automatic,c=this.cacheCoverage,cols=Math.ceil(a.width/256),rx=(index%cols)*256,ry=Math.floor(index/cols)*256;
+        const x=c.gridX+rx,y=c.gridY-ry-Math.min(256,a.height-ry)+1;
+        for(let ty=Math.floor(y/1000)*1000;ty<=c.gridY-ry;ty+=1000)
+            for(let tx=Math.floor(x/1000)*1000;tx<x+Math.min(256,a.width-rx);tx+=1000)if(c.keys.has(`${tx},${ty}`))return true;
+        return !c.complete;
+    }
+    private nextAutomatic() {
+        const a=this.automatic!,count=this.automaticRegionCount();
+        // One fair probe in eight; presence hints never prove an unloaded region incorrect.
+        if(this.cacheCoverage && (this.captureCount+1)%8===0)return {index:this.probeCursor%count,probe:true,wrapped:true};
+        for(let n=1;n<=count;n++){const index=(a.cursor+n)%count;if(this.loadedRegion(index))return {index,probe:false,wrapped:index<=a.cursor};}
+        return {index:(a.cursor+1)%count,probe:false,wrapped:true};
+    }
     private automaticRegion() {
         const a=this.automatic;if(!a)return null;
         const columns=Math.ceil(a.width/256),x=(a.cursor%columns)*256,y=Math.floor(a.cursor/columns)*256;
@@ -260,6 +278,7 @@ export class ObservationMonitor {
         delta: Pick<CaptureSummary, 'changedKnown' | 'newlyKnown' | 'becameUnknown' | 'unchanged'>
     ) {
         this.lastReceivedAt = this.now();
+        if(o.cacheCoverage)this.cacheCoverage={keys:new Set(o.cacheCoverage.keys),complete:o.cacheCoverage.complete,gridX:o.project.gridX,gridY:o.project.gridY};
         const a = this.assembly;
         if (!a || !o.capture) return;
         a.total += o.pixels.length;
@@ -302,7 +321,7 @@ export class ObservationMonitor {
         // History stores aggregate coverage, never 120 copies of large region lists or pixel arrays.
         this.points = [...this.points, { ...this.last, regions: [], templateId: null, progress: null }].slice(-120);
         this.usage.completed++;
-        if (this.automatic && a.regionId) this.automatic.cursor=(this.automatic.cursor+1)%this.automaticRegionCount();
+        if (this.automatic && a.regionId) {const next=this.nextAutomatic();this.automatic.cursor=next.index;if(next.probe)this.probeCursor++;this.captureCount++;}
         if (a.regionId) this.served.set(a.regionId, (this.served.get(a.regionId) ?? 0) + 1);
         if (this.requested?.id === a.regionId) {
             this.requested = null;
@@ -332,6 +351,7 @@ export class ObservationMonitor {
                 : null,
             customRegions: this.regionValues.length > 0,
             automaticRegions: this.automaticRegionCount(),
+            sweepMore: !!this.automatic && !this.nextAutomatic().wrapped,
             once: this.requested,
         };
     }

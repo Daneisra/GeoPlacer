@@ -7,6 +7,7 @@ const GeoPlacerPageWriter = (() => {
         energyCeiling = null,
         energySpent = 0,
         executionSession = null;
+    let maxGroupPixels=5;
     const batchTargets = new Set();
     const sessionBudgets = new Map();
     const refuse = (reason) => {
@@ -41,7 +42,7 @@ const GeoPlacerPageWriter = (() => {
                 exact(c, ['protocol', 'attemptId', 'project', 'pixels', 'deadline', 'batchId']) &&
                 Array.isArray(c.pixels) &&
                 c.pixels.length >= 1 &&
-                c.pixels.length <= 5 &&
+                c.pixels.length <= maxGroupPixels &&
                 c.pixels.every(
                     (p) =>
                         exact(p, ['gridX', 'gridY', 'color']) &&
@@ -104,7 +105,7 @@ const GeoPlacerPageWriter = (() => {
             exact(g.budgets,['pixels','energy']) && [g.budgets.pixels,g.budgets.energy].every(n=>Number.isSafeInteger(n)&&n>=1&&n<=(autonomous?c.project.width*c.project.height:1000)) &&
             exact(r,['x','y','width','height']) && [r.x,r.y,r.width,r.height].every(Number.isSafeInteger) &&
             r.x>=0 && r.y>=0 && r.width>0 && r.height>0 && r.x+r.width<=c.project.width && r.y+r.height<=c.project.height &&
-            (!autonomous || (Number.isInteger(g.groupSize) && g.groupSize>=1 && g.groupSize<=5 && c.pixels.length<=g.groupSize)) &&
+            (!autonomous || (Number.isInteger(g.groupSize) && g.groupSize>=1 && g.groupSize<=maxGroupPixels && c.pixels.length<=g.groupSize)) &&
             c.pixels.every(p=> {
                 const x=p.gridX-c.project.gridX, y=c.project.gridY-p.gridY;
                 return x>=r.x && x<r.x+r.width && y>=r.y && y<r.y+r.height && GeoPlacerPageReader.targetColor(x,y)===p.color;
@@ -192,7 +193,7 @@ const GeoPlacerPageWriter = (() => {
         if (typeof currentEnergy !== 'number' || !Number.isFinite(currentEnergy))
             return 'Énergie de la page indisponible.';
         if (
-            currentEnergy < cost ||
+            (!continuous && currentEnergy < cost) ||
             (!continuous && energyCeiling !== null && Math.min(currentEnergy, energyCeiling - energySpent) < cost)
         )
             return 'Énergie insuffisante pour poursuivre ce lot.';
@@ -206,6 +207,7 @@ const GeoPlacerPageWriter = (() => {
         return null;
     }
     const api = {
+        setLimits(limits){if(!Number.isSafeInteger(limits?.groupMax)||limits.groupMax<1||limits.groupMax>Math.floor((128*1024-4096)/160))throw new Error('Limite de transport invalide');maxGroupPixels=limits.groupMax;},
         executeBatch: (c, allowed, grant) => api.execute(c, allowed, false, grant),
         stop: () => controller?.abort(),
         reason: () => lastReason,
@@ -266,7 +268,7 @@ const GeoPlacerPageWriter = (() => {
                 }
                 const reason = readinessReason(pixels.length,continuous);
                 if (reason) return refuse(reason);
-                if (!pixels.every((p) => ownedColors().includes(p.color)))
+                if (!pixels.every((p) => (continuous ? GeoPlacerEnergy.snapshot()?.colors ?? [] : ownedColors()).includes(p.color)))
                     return refuse('Cette couleur ne figure pas dans les couleurs du compte.');
                 const color = batch ? '' : '#' + c.color.toString(16).padStart(6, '0');
                 if (
@@ -287,7 +289,7 @@ const GeoPlacerPageWriter = (() => {
                 }
                 const finalReason = readinessReason(pixels.length,continuous);
                 if (finalReason) return refuse(finalReason);
-                if (!pixels.every((p) => ownedColors().includes(p.color)))
+                if (!pixels.every((p) => (continuous ? GeoPlacerEnergy.snapshot()?.colors ?? [] : ownedColors()).includes(p.color)))
                     return refuse('Cette couleur ne figure plus dans les couleurs du compte.');
                 if (batch && !sessionAllowance(c, grant))
                     return refuse('Budget de session épuisé ou autorisation modifiée.');
@@ -322,6 +324,11 @@ const GeoPlacerPageWriter = (() => {
                         Pixels: pixels.map((p) => ({ GridX: p.gridX, GridY: p.gridY, Color: p.color })),
                     }),
                 });
+                if(response.status===413 && grant?.execution==='autonomous'){
+                    for(const p of pixels)batchTargets.delete(c.batchId+'/'+p.gridX+','+p.gridY+':'+p.color);
+                    const local=sessionBudgets.get(c.batchId);if(local)local.spent-=pixels.length;
+                    return 'rejected-size'; // Definitive HTTP refusal, original attempt receipt remains immutable.
+                }
                 return response.ok && (await response.text()) === 'Ok' ? 'confirmed' : 'uncertain';
             } catch {
                 // No error bodies or session details are sent to GeoPlacer or written to the console.

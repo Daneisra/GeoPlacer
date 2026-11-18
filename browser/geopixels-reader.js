@@ -167,6 +167,8 @@ const GeoPlacerPageReader = (() => {
         capturedAt,
         // Initial bootstrap is a partial observation, never a claim of a complete image capture.
         ...(initial ? {} : {capture: { id: captureId, index: bandIndex++, count: bandCount, ...(region ? {region} : {}) }}),
+        ...(typeof GeoPlacerTiles==='undefined'?{}:{cacheCoverage:GeoPlacerTiles.coverage(project)}),
+        tiles: typeof GeoPlacerTiles === 'undefined' ? [] : GeoPlacerTiles.inspect(rect),
         observedAt: null,
         rect,
         pixels,

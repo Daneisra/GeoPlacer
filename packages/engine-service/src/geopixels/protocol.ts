@@ -34,6 +34,8 @@ export interface BrowserObservation {
     /** Native grid order: increasing X, then increasing Y. -2 unknown, -1 transparent. */
     readonly pixels: readonly number[];
     readonly resources: ObservedResources | null;
+    readonly cacheCoverage?:{keys:readonly string[];complete:boolean};
+    readonly tiles?: readonly {key:string;state:'cache-only'|'missing'|'native-updated'|'native-checked';nativeReceivedAt:number|null}[];
     readonly capture?: {
         readonly id: string;
         readonly index: number;
@@ -79,7 +81,9 @@ export function parseObservation(value: unknown, now: number): BrowserObservatio
         'rect',
         'pixels',
         'resources',
+        ...(typeof value==='object' && value!==null && Object.hasOwn(value,'cacheCoverage') ? ['cacheCoverage'] : []),
         ...(hasCapture ? ['capture'] : []),
+        ...(typeof value==='object' && value!==null && Object.hasOwn(value,'tiles') ? ['tiles'] : []),
     ]);
     if (hasCapture) {
         const regional = typeof v.capture === 'object' && v.capture !== null && Object.hasOwn(v.capture, 'region');
@@ -143,6 +147,23 @@ export function parseObservation(value: unknown, now: number): BrowserObservatio
             r.y + r.height <= p.gridY + 1,
         'region outside selected ghost'
     );
+    if(v.cacheCoverage!==undefined) {
+        const c=object(v.cacheCoverage,['keys','complete']);
+        check(typeof c.complete==='boolean' && Array.isArray(c.keys) && c.keys.length<=128 && new Set(c.keys).size===c.keys.length,'invalid cache coverage');
+        for(const key of c.keys) {check(typeof key==='string' && /^-?\d{1,10},-?\d{1,10}$/.test(key),'invalid coverage key');const [x,y]=key.split(',').map(Number);check(x!%1000===0 && y!%1000===0 && x!<p.gridX+p.width && x!+1000>p.gridX && y!<=p.gridY && y!+1000>p.gridY-p.height,'coverage outside project');}
+    }
+    if(v.tiles !== undefined) {
+        check(Array.isArray(v.tiles) && v.tiles.length<=128,'invalid tile evidence');
+        const seen=new Set<string>();
+        for(const value of v.tiles) {const t=object(value,['key','state','nativeReceivedAt']);
+            check(typeof t.key==='string' && /^-?\d{1,10},-?\d{1,10}$/.test(t.key) && !seen.has(t.key),'invalid tile key');seen.add(t.key);
+            check(['cache-only','missing','native-updated','native-checked'].includes(t.state as string),'invalid tile state');
+            check(t.nativeReceivedAt===null || integer(t.nativeReceivedAt,0,v.capturedAt as number),'invalid native receipt time');
+            check((t.state==='cache-only'||t.state==='missing') === (t.nativeReceivedAt===null),'invalid native evidence');
+            const [x,y]=(t.key as string).split(',').map(Number);const rect=v.rect as BrowserObservation['rect'];
+            check(x!%1000===0 && y!%1000===0 && x!<rect.x+rect.width && x!+1000>rect.x && y!<rect.y+rect.height && y!+1000>rect.y,'tile outside capture');
+        }
+    }
     if (v.resources !== null) {
         const res = object(v.resources, ['observedAt', 'energy', 'capacity', 'currency', 'regenIntervalMs', 'colors']);
         check(

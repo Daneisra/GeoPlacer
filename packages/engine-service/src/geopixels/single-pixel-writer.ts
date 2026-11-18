@@ -17,6 +17,7 @@ import {
     nodeSha256Hasher,
     type DataDirectoryLock,
 } from '@geoplacer/adapters-node';
+import { AutomaticUpgrades } from './automatic-upgrades.js';
 import { ControlledBatch } from './controlled-batch.js';
 import { check, type BrowserProject } from './protocol.js';
 import { nativePoint, type GeoPixelsProvider } from './provider.js';
@@ -76,6 +77,7 @@ const INITIAL: ResourceRules = {
 /** One-shot coordinator over the shared core planner/journal. No paint loop or retry queue. */
 export class SinglePixelWriter {
     readonly batch: ControlledBatch;
+    readonly upgrades:AutomaticUpgrades;
     private readonly journal: FileAttemptJournal;
     private readonly history: FileHistoryStore;
     private resources = createResourceManager(INITIAL);
@@ -101,7 +103,8 @@ export class SinglePixelWriter {
         private readonly now = Date.now,
         saveBatch: (value: unknown) => Promise<void> = async () => {
             throw new Error('batch storage unavailable');
-        }
+        },
+        saveUpgrades:(v:unknown)=>Promise<void>=async()=>{throw new Error('upgrade storage unavailable');}
     ) {
         this.journal = new FileAttemptJournal(lock, { namespace: 'geopixels-writer' });
         this.history = new FileHistoryStore(lock, { namespace: 'geopixels-writer' });
@@ -158,13 +161,14 @@ export class SinglePixelWriter {
                 };
             },
         });
+        this.upgrades=new AutomaticUpgrades({save:saveUpgrades,active:()=>this.batch.upgradeAuthority(),resources:()=>this.batch.upgradeResources(),lock:()=>this.batch.lockUpgrades(),unlock:()=>this.batch.unlockUpgrades(),progress:()=>this.batch.upgradeProgress()});
     }
     private serial<T>(fn: () => Promise<T>): Promise<T> {
         const task = this.queue.then(fn);
         this.queue = task.catch(() => undefined);
         return task;
     }
-    async open(saved: unknown, savedBatch: unknown = null): Promise<void> {
+    async open(saved: unknown, savedBatch: unknown = null, savedUpgrades:unknown=null): Promise<void> {
         await this.attempts.recover(this.now());
         if (saved !== null) {
             const s = saved as Intent;
@@ -179,6 +183,7 @@ export class SinglePixelWriter {
             this.intent = s;
         }
         await this.batch.open(savedBatch);
+        await this.upgrades.open(savedUpgrades);
         check(
             this.attempts.open().length === 0 || this.intent !== null || savedBatch !== null,
             'missing writer identity; journal preserved'
@@ -187,6 +192,7 @@ export class SinglePixelWriter {
         this.timer = setInterval(() => {
             void this.serial(async () => {
                 await this.batch.tick();
+                await this.upgrades.tick();
                 if (!this.batch.busy()) await this.expire();
             }).catch(() => {
                 this.error = 'Journal du placement indisponible ; redémarrer avant toute nouvelle opération.';

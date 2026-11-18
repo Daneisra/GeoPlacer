@@ -56,7 +56,7 @@ export function createPrivilegedReaderRouter(channel: ConnectorHttpChannel): Rou
         try {
             const value = req.headers.authorization;
             if (!value?.startsWith('Bearer ')) throw new Error();
-            channel.verify(value.slice(7));
+            channel.verify(value.slice(7),true);
             res.locals.capability = value.slice(7);
             next();
         } catch {
@@ -100,6 +100,9 @@ export function createPrivilegedReaderRouter(channel: ConnectorHttpChannel): Rou
             fail(res);
         }
     });
+    router.post('/upgrade-claim',small,async(req,res)=>{try{z.strictObject({protocol:z.literal(1)}).parse(req.body);res.json({command:await channel.claimUpgrade(res.locals.capability as string)});}catch{fail(res);}});
+    router.post('/upgrade-check',small,(req,res)=>{try{const b=z.strictObject({protocol:z.literal(1),id:z.string().uuid()}).parse(req.body);res.json(channel.upgradeAllowed(res.locals.capability as string,b.id));}catch{fail(res);}});
+    router.post('/upgrade-result',small,async(req,res)=>{try{const b=z.strictObject({protocol:z.literal(1),id:z.string().uuid(),result:z.enum(['accepted','not-sent','uncertain'])}).parse(req.body);res.json(await channel.upgradeResult(res.locals.capability as string,b.id,b.result));}catch{fail(res);}});
     router.post('/batch-claim', small, async (req, res) => {
         try {
             z.strictObject({ protocol: z.literal(1) }).parse(req.body);
@@ -125,7 +128,7 @@ export function createPrivilegedReaderRouter(channel: ConnectorHttpChannel): Rou
                     protocol: z.literal(1),
                     batchId: z.string().uuid(),
                     attemptId: z.string().uuid(),
-                    result: z.enum(['confirmed', 'not-sent', 'uncertain', 'waiting-resources']),
+                    result: z.enum(['confirmed', 'not-sent', 'uncertain', 'waiting-resources', 'rejected-size']),
                 })
                 .parse(req.body);
             const view = await channel.batchResult(res.locals.capability as string, b.batchId, b.attemptId, b.result);
@@ -139,14 +142,14 @@ export function createPrivilegedReaderRouter(channel: ConnectorHttpChannel): Rou
             fail(res);
         }
     });
-    router.post('/status', small, async (req, res) => {
+    router.post('/status', express.json({limit:8192,strict:true}), async (req, res) => {
         try {
             const start = Date.now();
             const b = z
                 .strictObject({
                     protocol: z.literal(1),
                     readerVersion: z
-                        .union([z.literal(3), z.literal(4), z.literal(5), z.literal(6), z.literal(7), z.literal(8), z.literal(9)])
+                        .union([z.literal(3), z.literal(4), z.literal(5), z.literal(6), z.literal(7), z.literal(8), z.literal(9), z.literal(10)])
                         .optional(),
                     waitMs: z.literal(5000).optional(),
                     writerResources: z.custom(validWriterResources).optional(),
@@ -162,9 +165,9 @@ export function createPrivilegedReaderRouter(channel: ConnectorHttpChannel): Rou
                         .optional(),
                 })
                 .parse(req.body);
-            if ((b.monitoring || b.waitMs || b.abortedCapture) && ![3, 4, 5, 6, 7, 8, 9].includes(b.readerVersion ?? 0))
+            if ((b.monitoring || b.waitMs || b.abortedCapture) && ![3, 4, 5, 6, 7, 8, 9, 10].includes(b.readerVersion ?? 0))
                 throw new Error('reader version required');
-            if (b.writerResources !== undefined && ![8,9].includes(b.readerVersion ?? 0)) throw new Error('resource protocol required');
+            if (b.writerResources !== undefined && ![8,9,10].includes(b.readerVersion ?? 0)) throw new Error('resource protocol required');
             const abort = new AbortController();
             res.once('close', () => abort.abort());
             const answer = b.waitMs

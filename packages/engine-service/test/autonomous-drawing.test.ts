@@ -106,9 +106,9 @@ async function fixture(lost = false, width = 20, height = 20) {
         current.connector.monitoring.capabilities(true, true);
         observe();
     }
-    function energy(n: number) {
+    function energy(n: number,shop?:import('../src/geopixels/upgrade-policy.js').ShopObservation) {
         const now = Date.now();
-        current.singlePixelWriter.batch.observeResources({
+        const frame={
             source: 'native-worker-response',
             sequence: ++resourceSequence,
             requestStartedAt: now,
@@ -116,7 +116,9 @@ async function fixture(lost = false, width = 20, height = 20) {
             energy: n,
             available: n,
             colors: [0],
-        });
+            ...(shop?{shop}:{}),
+        };
+        current.singlePixelWriter.batch.observeResources(frame);return frame;
     }
     connect();
     return {
@@ -141,7 +143,7 @@ describe('Autonomous drawing: same scheduler, explicit whole-image authority', (
         const f = await fixture(),
             b = f.s.singlePixelWriter.batch;
         f.energy(400);
-        const p = await f.s.previewDrawing(5);
+        const p = await f.s.previewDrawing();
         expect(p).toMatchObject({
             execution: 'autonomous',
             state: 'prepared',
@@ -155,7 +157,7 @@ describe('Autonomous drawing: same scheduler, explicit whole-image authority', (
             () => b.view().state === 'completed',
             () => b.view().confirmed
         );
-        expect(b.view()).toMatchObject({ confirmed: 400, acceptedRequests: 80, uncertain: 0 });
+        expect(b.view()).toMatchObject({ confirmed: 400, acceptedRequests: 5, uncertain: 0 });
         expect(f.s.connector.monitoring.control().state).toBe('stopped');
         expect(new Set(f.writes.map((w) => w.x + ',' + w.y)).size).toBe(400);
         expect((await f.s.connectorView()).progress).toMatchObject({ correct: 0, incorrect: 400, unknown: 0 });
@@ -167,7 +169,7 @@ describe('Autonomous drawing: same scheduler, explicit whole-image authority', (
         const next = await f.s.previewDrawing(3);
         await b.approve(next.id!, next.digest!);
         await wait(() => b.view().state === 'completed');
-        expect(f.calls()).toBe(80);
+        expect(f.calls()).toBe(5);
     });
     it('draws across three regional views of one 600-pixel model without changing revision or selecting a target twice', async () => {
         const f = await fixture(false, 600, 1),
@@ -190,8 +192,39 @@ describe('Autonomous drawing: same scheduler, explicit whole-image authority', (
             () => b.view().state === 'completed',
             () => b.view().confirmed
         );
-        expect(b.view()).toMatchObject({ confirmed: 600, acceptedRequests: 122, uncertain: 0 });
+        expect(b.view()).toMatchObject({ confirmed: 600, acceptedRequests: 8, uncertain: 0 });
         expect(new Set(f.writes.map((w) => w.x + ',' + w.y)).size).toBe(600);
+    });
+    it('reduces a known HTTP 413 refusal, requires NEW resource proof and never redelivers the original attempt',async()=>{
+        const f=await fixture(),b=f.s.singlePixelWriter.batch;
+        f.s.connector.connect('read-only',()=>{throw new Error('no generic writer');});f.s.connector.monitoring.capabilities(true,true);f.observe();
+        const old=f.energy(100),p=await f.s.previewDrawing(100,40);await b.approve(p.id!,p.digest!);
+        await wait(()=>b.view().commandReady);const first=b.claim()!;expect(first.protocol===2 && first.pixels.length).toBe(16);
+        await b.result(first.attemptId,'rejected-size');expect(b.claim()).toBeNull();b.observeResources(old);expect(b.view().resources).toBeNull();
+        await new Promise(r=>setTimeout(r,5));f.energy(100);await wait(()=>b.view().commandReady);const next=b.claim()!;
+        expect(next.attemptId).not.toBe(first.attemptId);expect(next.protocol===2 && next.pixels.length).toBe(8);
+        await b.result(next.attemptId,'confirmed');expect(b.view().adaptiveGroupSize).toBeLessThanOrEqual(8);await b.stop('test complete');expect(b.view().uncertain).toBe(0);
+    });
+    it('serializes a budgeted upgrade with the existing scheduler and resumes only on an observed balance',async()=>{
+        const f=await fixture(),b=f.s.singlePixelWriter.batch,u=f.s.singlePixelWriter.upgrades;
+        const shop={catalog:'geopixels-shop-74783af-v1',currency:100,capacity:100,intervalMs:20000};
+        f.energy(0,shop);
+        const p=await f.s.previewDrawing(0,20,{maxBudget:10,minimumReserve:50,targetCapacity:100,energyBelow:5,priority:['energy-pack']});
+        await b.approve(p.id!,p.digest!);await u.tick();
+        expect(u.view().commandReady).toBe(true);expect(f.calls()).toBe(0);
+        const c=await u.claim();await u.result(c!.id,'accepted');
+        await new Promise(r=>setTimeout(r,5));f.energy(20,{...shop,currency:90});await u.tick();
+        expect(u.view().history[0]!.state).toBe('verified');
+        await new Promise(r=>setTimeout(r,5));f.energy(20,{...shop,currency:90});
+        await wait(()=>b.view().state==='completed',()=>b.view().confirmed);
+        expect(b.view().confirmed).toBe(20);expect(u.view().history).toHaveLength(1);
+    });
+    it.each([1,5,20,100,300])('keeps configurable group size %s below transport and observed energy',async(size)=>{
+        const f=await fixture(false,25,1),b=f.s.singlePixelWriter.batch;f.energy(25);
+        const p=await f.s.previewDrawing(size);await b.approve(p.id!,p.digest!);
+        await wait(()=>b.view().state==='completed',()=>b.view().confirmed);
+        expect(b.view().confirmed).toBe(25);expect(b.view().history.every(h=>h.pixels<=size)).toBe(true);
+        expect(new Set(f.writes.map(w=>w.x+','+w.y)).size).toBe(25);
     });
     it('waits for measured energy, pauses/stops and restores without permission or duplicate targets', async () => {
         const f = await fixture(),

@@ -16,7 +16,7 @@ globalThis.GeoPlacerCapture = (() => {
       begin(source) {
         for (const [key, e] of entries) {
           const bitmap = source.get(key)?.colorBitmap;
-          if (!(typeof ImageBitmap === 'function' && e.bitmap instanceof ImageBitmap) || bitmap !== e.bitmap || bitmap.width !== TILE || bitmap.height !== TILE)
+          if (!(typeof ImageBitmap === 'function' && e.bitmap instanceof ImageBitmap) || bitmap !== e.bitmap || source.get(key)?.timestamp !== e.cursor || bitmap.width !== TILE || bitmap.height !== TILE)
             remove(key);
         }
       },
@@ -40,7 +40,7 @@ globalThis.GeoPlacerCapture = (() => {
       for(let tx=Math.floor(rect.x/TILE)*TILE;tx<rect.x+rect.width;tx+=TILE) {
         const key = `${tx},${ty}`, bitmap = cache.get(key)?.colorBitmap;
         let entry = decoded.get(key);
-        if (!entry || entry.bitmap !== bitmap || entry.width !== bitmap?.width || entry.height !== bitmap?.height) {
+        if (!entry || entry.bitmap !== bitmap || entry.width !== bitmap?.width || entry.height !== bitmap?.height || entry.cursor !== cache.get(key)?.timestamp) {
           let data = null;
           if(bitmap?.width===TILE && bitmap?.height===TILE) {
             try {
@@ -48,7 +48,7 @@ globalThis.GeoPlacerCapture = (() => {
               ctx.drawImage(bitmap,0,0);data=ctx.getImageData(0,0,TILE,TILE).data;
             } catch(error) { report(`decode-error:${error.name}`); }
           } else report(bitmap?'invalid-bitmap-size':'missing-bitmap');
-          entry={bitmap,width:bitmap?.width,height:bitmap?.height,data};decoded.set(key,entry);
+          entry={bitmap,cursor:cache.get(key)?.timestamp,width:bitmap?.width,height:bitmap?.height,data};decoded.set(key,entry);
         }
         const data=entry.data;if(!data)continue;
         const x0=Math.max(rect.x,tx,project.gridX),x1=Math.min(rect.x+rect.width,tx+TILE,project.gridX+project.width);
@@ -70,7 +70,7 @@ globalThis.GeoPlacerCapture = (() => {
       observedAt: Number.isSafeInteger(src.checkedTick) && src.checkedTick >= 0 ? src.checkedTick * 1000 : null,
       energy: safe(src.energy),
       capacity: safe(src.maxEnergy),
-      currency: safe(src.pixels),
+      currency: safe(Number.isSafeInteger(src.pixels) ? Math.floor(src.pixels/5) : null),
       regenIntervalMs: safe(src.energyRate * 1000),
       colors: parsed?.length <= 256 ? parsed : null,
     };

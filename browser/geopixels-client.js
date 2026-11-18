@@ -95,6 +95,7 @@
   document.body.append(panel);
   async function close(message = 'Déconnecté') {
     GeoPlacerPageWriter.stop();
+    GeoPlacerShop.stop();
     generation++;
     const previous = transport;
     transport = null;
@@ -153,6 +154,18 @@
             if (current !== generation) return;
             if (!observing && !(await GeoPlacerPageReader.unchanged()))
               throw new Error('Modèle, position, palette, couche ou session modifié : nouveau couplage nécessaire.');
+            await GeoPlacerEnergy.refresh(!!answer?.workAuthorized);
+            if(!observing && answer?.upgrades?.commandReady){
+              const command=await next.claimUpgrade();
+              if(command){
+                const result=await GeoPlacerShop.execute(command,id=>current===generation && next.connected()?next.upgradeAllowed(id):false);
+                await next.upgradeResult(command.id,result);
+                status.textContent=result==='accepted'
+                  ? 'Amélioration acceptée : vérification du solde et de l’effet en attente.'
+                  : result==='uncertain' ? 'Achat incertain : aucun renvoi.' : 'Achat refusé avant exécution ou par le service.';
+              }
+              continue;
+            }
             const batch = answer?.batch;
             if (!observing && batch?.commandReady && batch.grant) {
               const command = await next.claimBatch();
@@ -166,7 +179,7 @@
                 status.textContent =
                   result === 'confirmed' && !['stopped', 'blocked'].includes(ack.state)
                     ? `Lot : ${ack.acceptedRequests} requête(s) acceptée(s), ${ack.confirmed} cible(s) couverte(s) par cet accusé. Progression mesurée séparément.`
-                    : result === 'waiting-resources'
+                    : result === 'rejected-size' ? 'Groupe refusé (HTTP 413) : taille réduite ; attente de ressources natives.' : result === 'waiting-resources'
                       ? 'Dessin suspendu : attente d’une nouvelle observation native de l’énergie.'
                     : result === 'not-sent'
                       ? 'Lot en pause : ' + (GeoPlacerPageWriter.reason?.() ?? 'pixel refusé avant envoi.')
@@ -204,8 +217,9 @@
             ) {
               if (once) lastOnce = once.serial;
               // Held control polling stays active during large captures; two captures never overlap.
+              const captureDelay = monitoring?.sweepMore ? 0 : monitoring?.intervalMs ?? 5000;
               void observe(true, monitoring?.region ?? null).finally(() => {
-                if (current === generation && monitoring) nextDue = Date.now() + monitoring.intervalMs;
+                if (current === generation && monitoring) nextDue = Date.now() + captureDelay;
               });
             }
           } catch (error) {
@@ -219,7 +233,7 @@
         }
       }
       const limits=next.features?.();
-      if(limits)GeoPlacerPageReader.setLimits(limits);
+      if(limits){GeoPlacerPageReader.setLimits(limits);GeoPlacerPageWriter.setLimits?.(limits);}
       void pulse();
       if(limits?.autonomous && GeoPlacerPageReader.ready?.())void observe(false,null,true);
     } catch (error) {

@@ -153,11 +153,17 @@ describe('Privileged HTTP reader capability and sequence protocol', () => {
     s.http.revoke();
     expect(s.provider.status().mode).toBe('local-fake');
   });
+  it('polls protocol 10 without rebuilding the drawing or purchase history',()=>{
+    const pairing=new ConnectorPairing(),provider=new GeoPixelsProvider();
+    const writer={batch:{subscribe:()=>()=>{},control:()=>({commandReady:false}),view:()=>{throw new Error('full history on hot path');},grant:()=>null,upgradeAuthority:()=>null,transportRenewable:()=>false},upgrades:{commandReady:()=>false,view:()=>{throw new Error('purchase history on hot path');}}} as unknown as SinglePixelWriter;
+    const http=new ConnectorHttpChannel(pairing,provider,KEY,Date.now,writer),claim=http.claim(ORIGIN,http.issue(KEY,ORIGIN).token);
+    http.approve(KEY,claim.requestId);expect(http.status(claim.capability,10)).toMatchObject({batchProtocol:6,batch:{commandReady:false},upgrades:{commandReady:false}});provider.close();
+  });
   it('bounds authenticated message frequency and never returns capabilities from status', () => {
     const s = setup(),
       c = s.ready();
-    for (let i = 0; i < 25; i++) s.http.status(c.capability);
-    expect(() => s.http.status(c.capability)).toThrow();
+    for (let i = 0; i < 25; i++) {s.http.verify(c.capability,true);s.http.status(c.capability);s.http.verify(c.capability);}
+    expect(() => s.http.verify(c.capability,true)).toThrow();
     expect(JSON.stringify(s.http.info())).not.toContain(c.capability);
     expect(JSON.stringify(s.http.info())).not.toContain(KEY);
   });
@@ -205,7 +211,7 @@ describe('Transport renewal is separate from drawing authority',()=>{
   function renewable(){
     let now=100000,authorized=true;
     const pairing=new ConnectorPairing(()=>now),provider=new GeoPixelsProvider(()=>now),events:ChannelDiagnostic[]=[];
-    const writer={batch:{subscribe:()=>()=>{},transportRenewable:()=>authorized,view:()=>({commandReady:false}),grant:()=>null}} as unknown as SinglePixelWriter;
+    const writer={batch:{subscribe:()=>()=>{},transportRenewable:()=>authorized,control:()=>({commandReady:false}),view:()=>({commandReady:false}),grant:()=>null}} as unknown as SinglePixelWriter;
     const http=new ConnectorHttpChannel(pairing,provider,KEY,()=>now,writer,e=>events.push(e));
     const c=http.claim(ORIGIN,http.issue(KEY,ORIGIN).token);http.approve(KEY,c.requestId);http.status(c.capability,9);
     return {http,provider,c,events,advance:(ms:number)=>{now+=ms;},stop:()=>{authorized=false;}};
@@ -243,7 +249,7 @@ describe('Transport renewal is separate from drawing authority',()=>{
 it('keeps command/ACK replies bounded independently of drawing history size',async()=>{
   const pairing=new ConnectorPairing(),provider=new GeoPixelsProvider();
   const verbose={id:'drawing',state:'running',confirmed:50000,acceptedRequests:10000,uncertain:0,commandReady:false,targets:Array(50000).fill({x:1,y:2,color:0})};
-  const writer={batch:{subscribe:()=>()=>{},transportRenewable:()=>true,view:()=>verbose,grant:()=>null,result:async()=>verbose}} as unknown as SinglePixelWriter;
+  const writer={batch:{subscribe:()=>()=>{},transportRenewable:()=>true,control:()=>verbose,view:()=>verbose,grant:()=>null,result:async()=>verbose}} as unknown as SinglePixelWriter;
   const http=new ConnectorHttpChannel(pairing,provider,KEY,Date.now,writer),c=http.claim(ORIGIN,http.issue(KEY,ORIGIN).token);http.approve(KEY,c.requestId);
   expect(JSON.stringify(http.status(c.capability,9)).length).toBeLessThan(8192);
   const reply=await http.batchResult(c.capability,'drawing','attempt','confirmed');expect(JSON.stringify(reply).length).toBeLessThan(200);expect(reply.confirmed).toBe(50000);

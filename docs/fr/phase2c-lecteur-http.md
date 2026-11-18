@@ -1,8 +1,8 @@
 # Lecteur GeoPixels HTTP — observations et petits lots contrôlés
 
-Version actuelle : **1.0.0**, avec un parcours simple par défaut et dessin du modèle entier explicitement autorisé. Voir [le guide du mode autonome](MODE-AUTONOME.md) pour l’import, la correspondance automatique du fantôme, le lancement et la séparation entre autorisation de travail et renouvellement du transport.
+Version actuelle : **1.1.0**, avec un parcours simple par défaut et dessin du modèle entier explicitement autorisé. Voir [le guide du mode autonome](MODE-AUTONOME.md) pour l’import, la correspondance automatique du fantôme, le lancement et la séparation entre autorisation de travail et renouvellement du transport.
 
-Les parcours historiques décrits ci-dessous restent disponibles sous « Réglages avancés ». Le dessin continu 2J conserve ses anciennes limites 30–600 s / 1 000 pixels ; ces limites ne décrivent pas le nouveau mode autonome. Les validations réelles 2H–2J restent acquises, sans valider par avance le lecteur 1.0.0.
+Les parcours historiques décrits ci-dessous restent disponibles sous « Réglages avancés ». Le dessin continu 2J conserve ses anciennes limites 30–600 s / 1 000 pixels ; ces limites ne décrivent pas le nouveau mode autonome. Les validations réelles 2H–2J restent acquises, sans valider par avance le lecteur 1.1.0.
 
 ## Installation et lancement
 
@@ -19,7 +19,7 @@ Taper directement l'adresse locale dans la barre d'adresse d'un nouvel onglet (p
 
 1. Choisir « GeoPixels — connecteur expérimental ».
 2. Saisir la clé privée dans « Clé locale d'approbation ». Elle reste dans la mémoire du formulaire pendant ce montage.
-3. Télécharger et installer le lecteur Tampermonkey proposé. Vérifier **1.0.0**, désactiver les anciens lecteurs GeoPlacer, puis recharger GeoPixels. Un seul lecteur doit être actif.
+3. Télécharger et installer le lecteur Tampermonkey proposé. Vérifier **1.1.0**, désactiver les anciens lecteurs GeoPlacer, puis recharger GeoPixels. Un seul lecteur doit être actif.
 4. Les seules pages autorisées sont `https://geopixels.net/*` et `https://www.geopixels.net/*`. La permission réseau GM est **127.0.0.1**, sans `*` et sans permission de récupération sur le service. Si Tampermonkey demande l'autorisation locale, contrôler cette destination précise.
 5. Garder tous les bots de placement arrêtés. Ouvrir/recharger la page GeoPixels et conserver une copie de son fantôme et de sa position avant de changer d'image.
 
@@ -86,7 +86,7 @@ Le lecteur parcourt les intersections des tuiles au lieu de rechercher la même 
 
 Un cache décodé de **32 Mio** réutilise seulement les objets **ImageBitmap natifs**, dont les pixels ne disposent pas d'API de mutation. Le remplacement d'objet, une fermeture/transfert (dimensions nulles), la disparition d'une tuile, une nouvelle identité de modèle/couche/position/session invalident ces données. Les objets de type canvas, mutables, sont redécodés à chaque bande. Cette optimisation découle du [contrat ImageBitmap du standard HTML](https://html.spec.whatwg.org/multipage/imagebitmap-and-animations.html#imagebitmap) ; elle ne date pas le contenu du cache GeoPixels et n'atteste pas la bonne foi de la page.
 
-Limite du modèle : budget mémoire configurable, sans plafond indépendant de 4 096 pixels par côté ; voir [le mode autonome](MODE-AUTONOME.md#régions-ressources-et-persistance). Les paquets restent bornés à 65 536 valeurs. Les benchmarks historiques 2E ne caractérisent pas toutes les nouvelles dimensions admissibles. Une petite région réduit lecture/envoi, mais le hachage d’identité porte encore sur l’image entière et le cache moteur reste dimensionné pour le modèle.
+Limite du modèle : budget mémoire configurable, sans plafond indépendant de 4 096 pixels par côté ; voir [le mode autonome](MODE-AUTONOME.md#garanties-et-limites). Les paquets restent bornés à 65 536 valeurs. Les benchmarks historiques 2E ne caractérisent pas toutes les nouvelles dimensions admissibles. Une petite région réduit lecture/envoi, mais le hachage d’identité porte encore sur l’image entière et le cache moteur reste dimensionné pour le modèle.
 
 Aucune date source n'est inventée : une lecture récente du même bitmap reste de fraîcheur source non vérifiée. Les ressources non datées restent signalées. Aucune récupération automatique de tuiles, de cookies, de token du site ou d'achat n'est ajoutée. Les règles Host/boucle locale, origine du contrôle, clé privée, confirmation volontaire et capacité éphémère restent appliquées.
 

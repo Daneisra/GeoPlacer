@@ -1,4 +1,4 @@
-# Dessin autonome supervisé — lecteur 1.0.0
+# Dessin autonome supervisé — lecteur 1.1.0
 
 Branche locale `feat/autonomous-drawing`, issue de `e38998f`. Aucun nouvel envoi réel effectué pendant ce développement.
 
@@ -12,7 +12,9 @@ Branche locale `feat/autonomous-drawing`, issue de `e38998f`. Aucun nouvel envoi
 
 L’import affiche sa progression puis son résultat juste sous le bouton. Un ancien brouillon ou travail interrompu sans opération ouverte est retiré automatiquement, en conservant ses confirmations. Un dessin actif/pausé ou une opération incertaine bloque toujours le changement de modèle. Le couplage n’est pas nécessaire pour importer.
 
-**Options du dessin** permet de réduire le budget et de régler les groupes entre **1 et 5** pixels. Sans budget personnalisé, le maximum correspond aux cibles opaques. La palette proposée reprend la liste personnelle de 28 couleurs, sans présumer des couleurs débloquées ; la modifier avant l’import si nécessaire. **Réglages avancés** retrouve les anciens parcours et diagnostics.
+**Options du dessin** permet de réduire le budget et de choisir la taille cible des groupes. **0 = automatique** : départ à 16, hausse progressive après acceptation, dans la limite de l’énergie observée, du budget et du transport local. Une valeur positive fixe le maximum souhaité. Le transport négocié réserve 128 Kio par commande, soit au maximum 793 cibles avec sa marge de métadonnées ; ce nombre n’est pas présenté comme une limite du serveur GeoPixels. Les anciens parcours séquentiels/groupés restent disponibles avec leurs limites historiques. Un travail déjà autorisé conserve son plafond ; arrêter puis préparer un nouveau travail pour le changer.
+
+Sans budget personnalisé, le maximum correspond aux cibles opaques. La palette proposée reprend la liste personnelle de 28 couleurs, sans présumer des couleurs débloquées ; la modifier avant l’import si nécessaire. **Réglages avancés** retrouve les anciens parcours et diagnostics.
 
 Pause, reprise, arrêt et révocation restent disponibles. **Préparer la suite** crée une nouvelle prévisualisation après arrêt/terminaison, sans autoriser d’envoi.
 
@@ -22,14 +24,49 @@ Pause, reprise, arrêt et révocation restent disponibles. **Préparer la suite*
 - **Canal renouvelable.** Inactivité maximale : 30 s ; bail de capacité : 10 min. Pendant un travail autonome autorisé ou sa pause, une rotation avant expiration utilise un nonce idempotent, puis une preuve de possession de la nouvelle capacité. Elle conserve contexte, séquences, ressources et accord de travail. Elle ne réactive jamais un accord arrêté/révoqué ou un résultat incertain. Les anciens modes conservent leurs limites.
 - **Interruptions.** Les erreurs temporaires de statut peuvent être retentées pendant un bail valide. Aucune prise de commande ni écriture ambiguë n’est renvoyée. Deux accusés d’observation manquants ferment le canal pour séquence incertaine. Coupure longue, rechargement ou redémarrage : nouveau couplage et nouvel accord, avec conservation des confirmations de la même identité. La temporisation du navigateur peut provoquer cet arrêt sûr.
 - **Un seul moteur.** Le TaskScheduler existant travaille par vues de 256 × 256 du même modèle. Le lecteur utilise uniquement les tuiles déjà chargées ; aucune récupération automatique. Les pixels absents/expirés restent inconnus, avec expiration à 30 s. Une capture récente d’un cache non daté ne prouve pas sa fraîcheur serveur ; plusieurs régions ne constituent pas un instantané atomique.
-- **Énergie observée.** Seules les réponses natives reçues dans le navigateur fournissent un solde exploitable, diminué des envois. Énergie indisponible/expirée/insuffisante : attente d’une preuve utilisable. Aucune régénération estimée, achat ou transmission de session.
-- **Taille des groupes.** Cinq reste le maximum réellement validé par les essais utilisateurs 2H–2J. Le tableau `Pixels` du frontend ne prouve pas une capacité serveur supérieure.
+- **Énergie observée.** Réponses du worker natif et, seulement pendant un travail autorisé, lecture du point fixe `/GetUserData`, au plus une fois toutes les dix secondes. Aucun téléchargement de tuiles. Le solde brut reçu est diminué des envois ; l’horloge et le compteur animé de la page ne créent aucun crédit. Si le service renvoie un solde non recalculé, GeoPlacer attend une preuve exploitable. Les identifiants restent dans le navigateur.
+- **Taille des groupes.** Les tailles supérieures à cinq sont vérifiées localement, pas encore sur le service. Le frontend public envoie un tableau sans plafond de cinq ; la limite serveur exacte n’est pas publiée dans les sources examinées. Le plafond de 5 000 du bot communautaire n’est pas repris comme une garantie. Un HTTP 413 explicite réduit la fenêtre et exige une nouvelle preuve de ressources. Toute réponse ambiguë bloque les placements concernés sans renvoi automatique.
+
+## Cache et grandes images
+
+Les cellules de 256 × 256 restent des vues du même modèle. Le lecteur 1.1.0 parcourt les régions d’une passe sans attendre cinq secondes entre chacune ; la pause s’applique entre les passes. Les indications de présence des bitmaps privilégient les régions chargées, avec une sonde équitable toutes les huit captures. Une présence ne garantit ni la lisibilité ni la fraîcheur. Afficher manuellement les zones manquantes sur GeoPixels reste nécessaire : le connecteur ne télécharge pas de tuiles.
+
+Le cache décodé est invalidé si le bitmap, ses dimensions ou son curseur natif changent. Seuls les bitmaps immuables peuvent être réutilisés entre captures. Les preuves natives sont corrélées au bitmap installé : remplacement complet, réponse sans changement ou fusion unique identifiée. Des fusions concurrentes/ambiguës restent non vérifiées. L’âge de cette preuve ne change pas lors d’une relecture locale. Le dashboard distingue couverture, conformité, tuiles mises à jour/vérifiées et tuiles absentes. Les détails expliquent séparément l’absence de date serveur : `ServerTimestamp` est un curseur opaque, jamais converti en date.
+
+L’expiration des pixels reste de 30 secondes. Une grande image peut donc conserver des régions inconnues ou expirées ; aucun pourcentage global complet n’est inventé et aucune observation composite n’est présentée comme atomique. Les accusés ne modifient pas les pixels observés et leurs cibles restent exclues d’un nouvel envoi automatique.
+
+## Améliorations automatiques facultatives
+
+Désactivées par défaut. Dans les options, choisir les catégories et leur priorité, le budget maximal de monnaie du jeu, la réserve, la capacité ciblée et le seuil de recharge. La prévisualisation inclut cette politique dans l’autorisation signée du dessin. **Lancer le dessin** autorise ensemble ce périmètre et son budget ; changer les options ne modifie jamais un travail actif.
+
+Tarifs du frontend public : recharge **10 → +20 énergie**, capacité **50 → +5**, récupération **500 → −1 s** (minimum 15 s), couleur **100**. Le profil prévoit aussi la gratuité des premières couleurs (`Colors.length < 35`, transparence comprise). Le déblocage automatique nécessite une palette native concordante et une condition de prix identifiable ; sinon il est indisponible. Seules les couleurs effectivement utilisées dans l’image sont proposées.
+
+`ResourceManager` et `UpgradePlanner` établissent les propositions ; leurs états simulés ne deviennent jamais un solde réel. Les achats sont sérialisés avec le scheduler existant, à un point sans placement en vol et avec un solde natif postérieur aux placements précédents. Ils peuvent attendre un point d’inactivité énergétique. Chaque intention est enregistrée durablement dans `connector-upgrades.json` avant sa livraison unique. Après acceptation HTTP 200, une nouvelle réponse doit confirmer **le débit exact et l’effet** avant un autre achat. Perte de réponse, interruption ou effet/débit discordant : achats du type concerné bloqués, sans nouvel envoi automatique. Aucun achat n’est restauré actif au redémarrage.
+
+Le navigateur vérifie à nouveau boutique, modèle, session, file manuelle, prix, réserve et budget. Seul `/MakePurchase` est accessible pour les quatre améliorations de jeu ; aucun paiement, abonnement, compte ou proxy générique. Les prix proviennent du frontend, sans transaction conditionnelle côté serveur : tout écart observé suspend les achats. Une validation réelle reste nécessaire. Sauvegarder **tout le répertoire de données**, journal d’améliorations compris.
+
+Contrats consultés : [frontend 74783af](https://github.com/AntCDev/GeoPixelsFront/tree/74783afc5b7e3064a43eed20b0f6638007853324) (`wwwroot/js/index.js`, `sync-worker.js`, `userProfile.js`, `wwwroot/index.html`) ; [bot communautaire 756472d](https://github.com/Fox3225/GeoPixelsBotClean/tree/756472d3ac90f1b72c5fc8354aa6e89b53b7ac85). Leur code de planification n’a pas été importé.
+
+`MakePurchase` est également identique dans [la révision historique 8367389](https://github.com/AntCDev/GeoPixelsFront/blob/83673896886c016a3d23bd46a2309570194a19da/wwwroot/js/userProfile.js) ; le profil y contient déjà la condition des couleurs gratuites. Cela ne dispense pas des vérifications du navigateur.
+
+## Validation locale de l’optimisation
+
+- Fournisseur factice : 400 cibles en 5 requêtes adaptatives, contre 80 avec le plafond précédent ; 600 cibles sur trois régions en 8 requêtes, contre 122. Comparaison de nombres de requêtes, sans promesse de latence réelle.
+- Writer navigateur : groupes de 16, 50, 100, 300 et 793, budgets, interruption, anti-rejeu ; HTTP 413 réduit la fenêtre et impose une preuve de ressources postérieure.
+- Cache : bitmap remplacé/fermé, curseur modifié, fusion native corrélée ou ambiguë, régions manquantes et expiration inchangée. Sélection de régions sur une image 2048 × 2731 ; conversions et progression complètes sur 64², 595 × 894 et 2000².
+- Achats factices : budget, réserve, gratuité, plancher de récupération, intention durable, effet/débit, réponse perdue, reprise et refus de redélivrer. La lecture des ressources ne copie aucune session vers le serveur.
+- Edge et Firefox, pages factices uniquement : import/couplage/lancement, groupes adaptatifs, recharge de 10 monnaies puis 20 cibles, arrêt/révocation ; aucune erreur de page ni requête externe. Journaux : `test-logs/optimization-edge-final.log`, `test-logs/optimization-firefox-delivery.log`. Le shim GM ne valide pas Tampermonkey réel.
+- Sécurité HTTP locale : dix scénarios réussis, journal `test-logs/optimization-privileged-security.log`. Le quota reste de 25 messages authentifiés/s ; les revérifications internes d’une même réponse ne sont plus comptées comme de nouveaux messages. Le statut compact ne reconstruit pas l’historique à chaque poll.
+- Contrôle complet : **1 126 tests réussis, un facultatif ignoré**, types et lints sans erreur (47 avertissements backend préexistants). Journal `test-logs/2026-11-18T23-36-44-927Z-check.log`. Build réussi : `test-logs/2026-11-18T23-43-45-136Z-build.log`.
+- Trois vérifications finales ciblées : HTTP 413 avec maintien du plafond réduit, poll sans reconstruction de l’historique et bundle reproductible en LF ; `test-logs/optimization-last-regressions.log`. Le plafond réduit reste conservateur jusqu’à un nouvel accord de travail.
+
+Ces résultats ne constituent ni un essai réel de nouveaux groupes ni une validation des achats sur GeoPixels. Dépendances, installation et packaging inchangés : aucun clone supplémentaire.
 
 Les plafonds 600 s / 1 000 cibles / 4 096 confirmations ne s’appliquent pas au nouveau mode. Les dimensions sont admises selon `GEOPLACER_MODEL_MEMORY_MIB` : au moins 64 MiB, au plus la moitié de la RAM ; défaut au plus 1 GiB et un quart de la RAM. L’estimation réserve 64 octets par pixel, sans garantir la mémoire totale du processus. Cache et index restent en RAM ; mémoire/disque insuffisants arrêtent les nouvelles réservations. Ce n’est pas un stockage entièrement paginé. Les paquets restent limités à 65 536 valeurs ; les réponses du lecteur restent bornées. Le dashboard présente les 200 dernières destinations avec compteurs cumulés.
 
 Les confirmations sont enregistrées en segments immuables chaînés SHA-256, à côté du journal existant. La migration conserve `connector-confirmations/legacy-v1.json`. Sauvegarder/restaurer ensemble **tout le dossier `connector-confirmations`, `connector-batch.json` et le journal**. Une chaîne incohérente bloque l’écriture. Les anciennes versions ne lisent pas le manifeste v2 : un retour arrière exige une copie indépendante d’une sauvegarde compatible, sans mélanger ancien manifeste et journal récent.
 
-## Vérifications locales
+## Vérifications antérieures — lecteur 1.0.0
 
 | Contrôle | Résultat |
 |---|---|
@@ -47,6 +84,8 @@ Correctif d’import : 11 tests du dessin autonome réussis, dont quatre cas de 
 
 Aucun clone supplémentaire : installation, dépendances et archives Windows inchangées. Les données de votre serveur n’ont pas été utilisées ni migrées pendant les tests.
 
-## Prochain essai réel
+## Prochain essai réel — lecteur 1.1.0
 
-Garder un petit modèle connu, limiter le budget à **20 pixels**, groupes de cinq, puis vérifier l’image, ses couleurs et le rectangle affiché. **Attendre l’accord explicite de l’utilisateur sur cette destination avant de lancer.** Après quatre requêtes maximum, observer à nouveau et distinguer accusés reçus et couleurs réellement présentes dans le cache. Tester ensuite arrêt et révocation.
+Arrêter le travail précédent, redémarrer GeoPlacer et remplacer l’ancien lecteur par le 1.1.0, puis refaire le couplage. Garder une petite zone connue, fixer **16 pixels maximum**, taille cible **16**, améliorations **désactivées**. Vérifier le PNG, le rectangle et les couleurs. **Attendre l’accord explicite de l’utilisateur sur ces destinations avant de lancer.** Relever requêtes acceptées, pixels observés et preuves de tuiles ; tester arrêt/révocation. Ne passer à des groupes plus grands qu’après ce retour.
+
+Les achats feront l’objet d’un essai distinct : une seule recharge, budget 10 monnaies et réserve vérifiée, avec accord préalable explicite. Ni cet achat ni les groupes supérieurs à cinq n’ont été exécutés pendant le développement.

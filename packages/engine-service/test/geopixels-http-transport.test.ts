@@ -29,7 +29,7 @@ async function setup(failures = 0, rotationFailures = 0) {
       path === 'renew' ? {nonce:JSON.parse(o.data).nonce,capability:'e'.repeat(64)} : path === 'claim'
         ? { capability: 'a'.repeat(64), requestId: 'b'.repeat(64), fingerprint: 'c'.repeat(12) }
         : path === 'status'
-          ? { approved: true, lastSequence: 0, pacing: 'server-50ms', regionalProtocol:1, batchProtocol:5 }
+          ? { approved: true, lastSequence: 0, pacing: 'server-50ms', regionalProtocol:1, batchProtocol:6 }
           : path === 'observations'
             ? { accepted: true, sequence: JSON.parse(o.data).observations[0].sequence }
             : { disconnected: true };
@@ -42,6 +42,9 @@ async function setup(failures = 0, rotationFailures = 0) {
       send: (o: unknown) => Promise<void>;
       renew: () => Promise<void>;
       poll: () => Promise<unknown>;
+      claimUpgrade:()=>Promise<unknown>;
+      upgradeAllowed:(id:string)=>Promise<boolean>;
+      upgradeResult:(id:string,result:string)=>Promise<unknown>;
       disconnect: () => Promise<void>;
       connected: () => boolean;
     };
@@ -53,6 +56,14 @@ it('retries a lost renewal reply with the identical nonce, using the new capabil
 });
 
 describe('Actual GM privileged transport, mocked extension API only', () => {
+  it('admits only the three fixed purchase protocol operations, without a proxy URL or site credentials',async()=>{
+    const s=await setup(),t=s.make(),id='64de9aa7-8259-4f7d-98b5-5a861ca8b3fe';
+    await t.pair('d'.repeat(64),'https://geopixels.net',()=>{});
+    await t.claimUpgrade();await t.upgradeAllowed(id);await t.upgradeResult(id,'accepted');
+    expect(s.sent.slice(-3).map(o=>new URL(o.url).pathname.split('/').at(-1))).toEqual(['upgrade-claim','upgrade-check','upgrade-result']);
+    expect(s.sent.slice(-3).map(o=>JSON.parse(o.data))).toEqual([{protocol:1},{protocol:1,id},{protocol:1,id,result:'accepted'}]);
+    expect(s.sent.every(o=>o.anonymous)).toBe(true);
+  });
   it.each([
     'http://localhost:3921',
     'https://127.0.0.1:3921',

@@ -10,7 +10,7 @@ async function fixture() {
         addEventListener: (_k: string, fn: (e: { data: unknown }) => void) => listeners.add(fn),
         removeEventListener: (_k: string, fn: (e: { data: unknown }) => void) => listeners.delete(fn),
     };
-    const context = vm.createContext({ Date: { now: () => now }, syncWorker: worker, userID: 123, currentEnergy: 10 });
+    const context = vm.createContext({ Date: { now: () => now }, syncWorker: worker, userID: 123, currentEnergy: 10, AbortController,setTimeout,clearTimeout });
     vm.runInContext(
         (await readFile(new URL('../../../browser/geopixels-energy.js', import.meta.url), 'utf8')) +
             ';globalThis.api=GeoPlacerEnergy',
@@ -20,6 +20,7 @@ async function fixture() {
         snapshot: () => Record<string, unknown> | null;
         spend: (n: number) => void;
         settled: () => void;
+        refresh:(authorized:boolean)=>Promise<void>;
     };
     const advance = (ms = 1) => {
         now += ms;
@@ -36,6 +37,19 @@ async function fixture() {
     return { api, worker, context, request, reply, advance, original, listeners };
 }
 describe('Passive native resource evidence, no service request or token export', () => {
+    it('refreshes only the fixed resource endpoint during authorized work, without exporting credentials or estimating regeneration',async()=>{
+        const f=await fixture();f.context.tokenUser='browser-only';
+        f.context.GeoPlacerShop={catalog:()=> 'geopixels-shop-74783af-v1',colorPrice:()=>null};
+        f.context.fetch=vi.fn(async(url:string,o:{body:string;redirect:string})=>{
+            expect(url).toBe('/GetUserData');expect(o.redirect).toBe('error');expect(JSON.parse(o.body)).toEqual({userId:123,token:'browser-only'});
+            return {ok:true,json:async()=>({energy:5,colors:'0,16777215',pixels:500,maxEnergy:100,energyRate:20})};
+        });
+        await f.api.refresh(false);expect(f.context.fetch).not.toHaveBeenCalled();
+        await f.api.refresh(true);expect(f.api.snapshot()).toMatchObject({source:'native-user-response',energy:5,available:5,shop:{currency:100}});
+        expect(JSON.stringify(f.api.snapshot())).not.toMatch(/browser-only|token|userID/);
+        f.context.currentEnergy=999;f.advance(20000);expect(f.api.snapshot()?.available).toBe(5);
+        f.advance(10001);expect(f.api.snapshot()).toBeNull();
+    });
     it('forwards native arguments unchanged and exports only seven safe fields', async () => {
         const f = await fixture(),
             message = { type: 'sync-delta', userID: 123, tokenUser: 'synthetic-private-browser-value' },

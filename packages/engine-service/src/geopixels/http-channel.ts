@@ -1,3 +1,4 @@
+import { CONNECTOR_COMMAND_BYTES, CONNECTOR_MAX_GROUP_PIXELS } from './batch-limits.js';
 import { MAX_MODEL_PIXELS, MODEL_MEMORY_BYTES } from './capacity.js';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { ConnectorPairing } from './pairing.js';
@@ -32,7 +33,7 @@ type Session = {
   lastDigest: string | null;
   requests: number[];
   releasePoll?: () => void;
-  batchProtocol?: 1 | 2 | 3 | 4 | 5;
+  batchProtocol?: 1 | 2 | 3 | 4 | 5 | 6;
   rotation?: {nonce:string;capability:string;until:number};
 };
 
@@ -100,10 +101,8 @@ export class ConnectorHttpChannel {
     s.releasePoll?.();
     return { approved: true };
   }
-  verify(capability: string): void {
-    this.activateRotation(capability);
-    this.tick();
-    check(this.session !== null && equal(capability, this.session.capability), 'HTTP capability expired or refused');
+  verify(capability: string,countMessage=false): void {
+    this.authenticate(capability,countMessage);
   }
   private activateRotation(capability:string) {
     const s=this.session,r=s?.rotation;
@@ -115,7 +114,7 @@ export class ConnectorHttpChannel {
   }
   renew(capability:string,nonce:string) {
     const s=this.authenticate(capability);
-    check(/^[a-f0-9-]{36}$/.test(nonce) && s.approved && s.batchProtocol===5 && s.epoch===this.provider.channelEpoch && !!this.writer?.batch.transportRenewable(),'renewal requires an active, explicitly authorized autonomous drawing');
+    check(/^[a-f0-9-]{36}$/.test(nonce) && s.approved && (s.batchProtocol??0)>=5 && s.epoch===this.provider.channelEpoch && !!this.writer?.batch.transportRenewable(),'renewal requires an active, explicitly authorized autonomous drawing');
     s.lastSeen=this.now();
     if(s.rotation && this.now()>=s.rotation.until)delete s.rotation;
     if(s.rotation)check(s.rotation.nonce===nonce,'another rotation is pending');
@@ -130,11 +129,20 @@ export class ConnectorHttpChannel {
     s.lastSeen = this.now();
     return this.writer;
   }
-  claimBatch(capability:string){const w=this.writerAccess(capability);check((w.batch.view().execution!=='grouped'||(this.session?.batchProtocol??0)>=2) && (w.batch.view().execution!=='session'||(this.session?.batchProtocol??0)>=3),'reader 0.7.0 required for grouped execution');check(w.batch.view().execution!=='continuous'||(this.session?.batchProtocol??0)>=4,'reader 0.9.0 required');check(w.batch.view().execution!=='autonomous'||this.session?.batchProtocol===5,'reader 1.0.0 required');return w.batch.claim();}
-  batchAllowed(capability:string,batchId:string,attemptId:string){const b=this.writerAccess(capability).batch;return {allowed:b.view().id===batchId && b.allowed(attemptId)};}
-  async batchResult(capability:string,batchId:string,attemptId:string,result:'confirmed'|'not-sent'|'uncertain'|'waiting-resources'){
-    const b=this.writerAccess(capability).batch;check(b.view().id===batchId,'batch result mismatch');const v=await b.result(attemptId,result);return this.session?.batchProtocol===5 ? {state:v.state,confirmed:v.confirmed,acceptedRequests:v.acceptedRequests,uncertain:v.uncertain} : v;
+  claimBatch(capability:string){
+    const batch=this.writerAccess(capability).batch,v=batch.control(),protocol=this.session?.batchProtocol??0;
+    check((v.execution!=='grouped'||protocol>=2) && (v.execution!=='session'||protocol>=3),'reader 0.7.0 required for grouped execution');
+    check(v.execution!=='continuous'||protocol>=4,'reader 0.9.0 required');
+    check(v.execution!=='autonomous'||protocol>=((v.scope?.groupSize??5)===0 || (v.scope?.groupSize??5)>5?6:5),'reader 1.1.0 required');
+    return batch.claim();
   }
+  batchAllowed(capability:string,batchId:string,attemptId:string){const b=this.writerAccess(capability).batch;return {allowed:b.control().id===batchId && b.allowed(attemptId)};}
+  async batchResult(capability:string,batchId:string,attemptId:string,result:'confirmed'|'not-sent'|'uncertain'|'waiting-resources'|'rejected-size'){
+    const b=this.writerAccess(capability).batch;check(b.control().id===batchId,'batch result mismatch');const v=await b.result(attemptId,result);return (this.session?.batchProtocol??0)>=5 ? {state:v.state,confirmed:v.confirmed,acceptedRequests:v.acceptedRequests,uncertain:v.uncertain} : v;
+  }
+  async claimUpgrade(capability:string){check(this.session?.batchProtocol===6,'upgrade reader required');return this.writerAccess(capability).upgrades.claim();}
+  upgradeAllowed(capability:string,id:string){return {allowed:this.writerAccess(capability).upgrades.allowed(id)};}
+  async upgradeResult(capability:string,id:string,result:'accepted'|'not-sent'|'uncertain'){await this.writerAccess(capability).upgrades.result(id,result);return {accepted:true};}
   claimPixel(capability: string) { return this.writerAccess(capability).claim(); }
   pixelAllowed(capability: string, attemptId: string) {
     const view = this.writerAccess(capability).view();
@@ -144,19 +152,18 @@ export class ConnectorHttpChannel {
   pixelResult(capability: string, attemptId: string, result: 'confirmed'|'not-sent'|'uncertain') {
     return this.writerAccess(capability).result(attemptId,result);
   }
-  authenticate(capability: string): Session {
+  private authenticate(capability: string,countMessage=false): Session {
     this.activateRotation(capability);
     this.tick();
     const s = this.session;
     check(s !== null && equal(capability, s.capability), 'HTTP capability expired or refused');
-    s.requests = s.requests.filter((t) => t > this.now() - 1_000);
-    check(s.requests.length < 25, 'HTTP message frequency exceeded');
-    s.requests.push(this.now());
+    // Count ingress messages once; revalidating the SAME held response is not another message.
+    if(countMessage){s.requests=s.requests.filter(t=>t>this.now()-1000);check(s.requests.length<25,'HTTP message frequency exceeded');s.requests.push(this.now());}
     return s;
   }
     status(
         capability: string,
-        readerVersion?: 3 | 4 | 5 | 6 | 7 | 8 | 9,
+        readerVersion?: 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10,
         ack?: { revision: number; state: 'running' | 'paused' | 'stopped' },
         abortedCapture?: string,
         writerResources?: unknown
@@ -164,28 +171,29 @@ export class ConnectorHttpChannel {
         const s = this.authenticate(capability);
         s.lastSeen = this.now();
         if (s.approved) {
-            if(readerVersion===5 || readerVersion===6 || readerVersion===7 || readerVersion===8 || readerVersion===9)s.batchProtocol=readerVersion===9?5:readerVersion===8?4:readerVersion===7?3:readerVersion===6?2:1;
+            if(readerVersion===5 || readerVersion===6 || readerVersion===7 || readerVersion===8 || readerVersion===9 || readerVersion===10)s.batchProtocol=readerVersion===10?6:readerVersion===9?5:readerVersion===8?4:readerVersion===7?3:readerVersion===6?2:1;
             this.provider.heartbeat();
             if(writerResources !== undefined) {
-                check((readerVersion === 8 || readerVersion === 9) && this.writer !== undefined && s.epoch === this.provider.channelEpoch,'writer resource channel refused');
+                check((readerVersion === 8 || readerVersion === 9 || readerVersion === 10) && this.writer !== undefined && s.epoch === this.provider.channelEpoch,'writer resource channel refused');
                 this.writer.batch.observeResources(writerResources);
             }
-            this.provider.monitoring.capabilities(readerVersion === 3 || readerVersion === 4 || readerVersion === 5 || readerVersion === 6 || (readerVersion === 7 || readerVersion === 8 || readerVersion === 9), readerVersion === 4 || readerVersion === 5 || readerVersion === 6 || (readerVersion === 7 || readerVersion === 8 || readerVersion === 9));
+            this.provider.monitoring.capabilities(readerVersion === 3 || readerVersion === 4 || readerVersion === 5 || readerVersion === 6 || (readerVersion === 7 || readerVersion === 8 || readerVersion === 9 || readerVersion === 10), readerVersion === 4 || readerVersion === 5 || readerVersion === 6 || (readerVersion === 7 || readerVersion === 8 || readerVersion === 9 || readerVersion === 10));
             if (abortedCapture) {
-                check(readerVersion === 4 || readerVersion === 5 || readerVersion === 6 || (readerVersion === 7 || readerVersion === 8 || readerVersion === 9), 'regional reader required');
+                check(readerVersion === 4 || readerVersion === 5 || readerVersion === 6 || (readerVersion === 7 || readerVersion === 8 || readerVersion === 9 || readerVersion === 10), 'regional reader required');
                 this.provider.monitoring.abortCapture(abortedCapture);
             }
             if (ack) this.provider.monitoring.acknowledge(ack.revision, ack.state);
         }
         return {
+            ...(readerVersion===10?{upgrades:{commandReady:this.writer?.upgrades.commandReady()??false},workAuthorized:!!this.writer?.batch.upgradeAuthority() || !!this.writer?.batch.transportRenewable()}:{}),
             approved: s.approved,
-            ...(readerVersion===9 ? {limits:{maxModelPixels:MAX_MODEL_PIXELS,modelMemoryBytes:MODEL_MEMORY_BYTES,groupMax:5,autonomous:true},renewRequired: s.approved && s.deadline-this.now()<90000 && !!this.writer?.batch.transportRenewable()} : {}),
+            ...((readerVersion===9 || readerVersion===10) ? {limits:{maxModelPixels:MAX_MODEL_PIXELS,modelMemoryBytes:MODEL_MEMORY_BYTES,groupMax:readerVersion===10?CONNECTOR_MAX_GROUP_PIXELS:5,commandBytes:CONNECTOR_COMMAND_BYTES,autonomous:true},renewRequired: s.approved && s.deadline-this.now()<90000 && !!this.writer?.batch.transportRenewable()} : {}),
             expires: s.deadline,
             lastSequence: s.lastSequence,
             fingerprint: s.fingerprint,
-            ...([4,5,6,7,8,9].includes(readerVersion??0) ? { regionalProtocol: 1 } : {}),
-            ...([5,6,7,8,9].includes(readerVersion??0)?{batchProtocol:readerVersion===9?5:readerVersion===8?4:readerVersion===7?3:readerVersion===6?2:1,batch:this.writer?(readerVersion===9 ? {commandReady:this.writer.batch.view().commandReady,grant:this.writer.batch.grant()} : {...this.writer.batch.view(),grant:this.writer.batch.grant()}):null}:{}),
-            ...(readerVersion === 3 || readerVersion === 4 || readerVersion === 5 || readerVersion === 6 || (readerVersion === 7 || readerVersion === 8 || readerVersion === 9)
+            ...([4,5,6,7,8,9,10].includes(readerVersion??0) ? { regionalProtocol: 1 } : {}),
+            ...([5,6,7,8,9,10].includes(readerVersion??0)?{batchProtocol:readerVersion===10?6:readerVersion===9?5:readerVersion===8?4:readerVersion===7?3:readerVersion===6?2:1,batch:this.writer?((readerVersion??0)>=9 ? {commandReady:this.writer.batch.control().commandReady,grant:this.writer.batch.grant()} : {...this.writer.batch.view(),grant:this.writer.batch.grant()}):null}:{}),
+            ...(readerVersion === 3 || readerVersion === 4 || readerVersion === 5 || readerVersion === 6 || (readerVersion === 7 || readerVersion === 8 || readerVersion === 9 || readerVersion === 10)
                 ? { monitoring: this.provider.monitoring.control(), pacing: 'server-50ms' }
                 : {}),
         };
@@ -193,14 +201,15 @@ export class ConnectorHttpChannel {
     /** One bounded held HTTP response. No browser timer, no permission renewal beyond deadline. */
     async poll(
         capability: string,
-        readerVersion: 3 | 4 | 5 | 6 | 7 | 8 | 9,
+        readerVersion: 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10,
         ack: { revision: number; state: 'running' | 'paused' | 'stopped' } | undefined,
         signal: AbortSignal,
         abortedCapture?: string,
         writerResources?: unknown
     ) {
         const initial=this.status(capability, readerVersion, ack, abortedCapture, writerResources);
-        if(initial.batch?.commandReady)return initial;
+        if(initial.upgrades?.commandReady || initial.batch?.commandReady)return initial;
+        if(readerVersion===10 && this.provider.monitoring.automaticRegionCount()>0 && initial.monitoring?.state==='running'){await new Promise(r=>setTimeout(r,150));check(!signal.aborted,'reader poll aborted');return this.status(capability,readerVersion);}
         const s = this.session!;
         check(!s.releasePoll, 'concurrent reader poll');
         await new Promise<void>((resolve) => {

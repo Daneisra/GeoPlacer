@@ -8,8 +8,10 @@ export type BatchView = {
     mode: 'fake' | 'real' | null;
     execution?: 'sequential' | 'grouped' | 'session' | 'continuous' | 'autonomous';
     energyCost?: number;
+    limits?: {maxGroupPixels:number;commandBytes:number};
+    adaptiveGroupSize?:number;
     budgets?: { pixels: number; energy: number };
-    scope?: { region: { x: number; y: number; width: number; height: number }; durationMs: number | null; groupSize?: number } | null;
+    scope?: { region: { x: number; y: number; width: number; height: number }; durationMs: number | null; groupSize?: number; upgrades?:{maxBudget:number;minimumReserve:number;priority:string[]} } | null;
     spent?: number;
     resources?: { available: number; capturedAt: number } | null;
     regionProgress?: { correct: number; incorrect: number; unknown: number; percent: number | null } | null;

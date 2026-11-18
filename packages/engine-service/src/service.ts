@@ -391,7 +391,7 @@ export class EngineService {
         this.singlePixelWriter = new SinglePixelWriter(lock, this.connector,
             () => !this.closed && this.source === 'geopixels' && !this.active && !this.stopping && !this.connectorControl && !this.backingUp && this.attempts?.open().length === 0 ? this.selectedTemplate : null,
             value => this.durableConnectorJson('connector-writer-intent.json', value), Date.now,
-            value => this.batchMetadata.save(value));
+            value => this.batchMetadata.save(value),value=>this.durableConnectorJson('connector-upgrades.json',value));
         this.connector.monitoring.subscribe((kind) => {
             this.hub.connector();
             if (kind === 'capture') {
@@ -492,7 +492,9 @@ export class EngineService {
             let batch: unknown = null;
             try {batch=JSON.parse(await readFile(path.join(root,'connector-batch.json'),'utf8'));}
             catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
-            await service.singlePixelWriter.open(writerIntent,await service.batchMetadata.load(batch));
+            let upgrades:unknown=null;
+            try{upgrades=JSON.parse(await readFile(path.join(root,'connector-upgrades.json'),'utf8'));}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
+            await service.singlePixelWriter.open(writerIntent,await service.batchMetadata.load(batch),upgrades);
             return service;
         } catch (error) {
             await lock.release();
@@ -883,6 +885,7 @@ export class EngineService {
             ...this.connector.status(),
             singlePixel: this.singlePixelWriter.view(),
             batch: await this.singlePixelWriter.batch.observedView(),
+            upgrades:this.singlePixelWriter.upgrades.view(),
             error: this.connector.status().error ?? calculationError,
             bound,
             source: this.source,
@@ -1184,7 +1187,7 @@ export class EngineService {
     const {template}=await this.templates.load(this.ref(templateId));
     return {png:await exportGhostPng(pngjsCodec,template),filename:ghostInfo(template).filename};
   }
-  async previewDrawing(groupSize=5,pixelBudget?:number) {
+  async previewDrawing(groupSize=0,pixelBudget?:number,upgrades?:import('./geopixels/upgrade-policy.js').AutomaticUpgradePolicy) {
     this.guard();const t=this.selectedTemplate,p=this.connector.status().project;
     check(t!==null && p!==null,'Importer une image et coupler le navigateur avec son fantôme chargé.');
     const rgba=quantizedToRgba(t.image);
@@ -1197,7 +1200,7 @@ export class EngineService {
     let retained=0;for(const color of t.image.pixels)if(color!==0xffffffff)retained++;
     const budget=pixelBudget ?? retained;
     check(Number.isSafeInteger(budget)&&budget>=1&&budget<=retained,'Budget supérieur aux pixels du modèle');
-    return this.singlePixelWriter.batch.prepare(this.connector.status().mode==='local-fake'?'fake':'real',budget,'autonomous',budget,{region:{x:0,y:0,width:t.image.width,height:t.image.height},durationMs:null,groupSize});
+    return this.singlePixelWriter.batch.prepare(this.connector.status().mode==='local-fake'?'fake':'real',budget,'autonomous',budget,{region:{x:0,y:0,width:t.image.width,height:t.image.height},durationMs:null,groupSize,...(upgrades?{upgrades}:{})});
   }
   async importGhost(input: GhostImportInput): Promise<GhostInfo> {
     this.guard();

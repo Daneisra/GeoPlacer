@@ -11,6 +11,8 @@ import { RegionalObservations, type RegionView } from './RegionalObservations';
 import { ObservationSupervision, type Monitoring } from './ObservationSupervision';
 
 type View = {
+    tileEvidence?:{total:number;nativeUpdated:number;nativeChecked:number;missing:number;sourceDateKnown:boolean};
+    upgrades?:{error?:string|null;uncertain:number;history:{id:string;kind:string;cost:number;state:string;at:number}[]};
     connected: boolean;
     mode: 'read-only' | 'local-fake' | null;
     session: string;
@@ -164,7 +166,7 @@ export function ConnectorDashboard() {
                 <p>
                     {view?.mode === 'local-fake'
                         ? 'Fournisseur factice local : écritures synthétiques uniquement.'
-                        : 'Lecture du cache ; dessin supervisé dans une zone et un budget autorisés, par groupes de cinq. Achats indisponibles.'}
+                        : 'Lecture du cache ; dessin supervisé dans une zone et un budget autorisés, par groupes adaptés aux ressources disponibles.'}
                 </p>
                 <p>
                     Connexion : <strong id="connectorConnection">{view?.connected ? 'Connecté' : 'Déconnecté'}</strong>{' '}
@@ -195,7 +197,7 @@ export function ConnectorDashboard() {
                 </p>
             )}
             <label className="flex items-center gap-2"><input type="checkbox" aria-label="Réglages avancés" checked={advanced} onChange={e=>{setAdvanced(e.target.checked);sessionStorage.setItem('geoplacer.advanced',String(e.target.checked));}}/>Réglages avancés et anciens parcours</label>
-            {(!advanced || view?.batch.execution==='autonomous')&&<SimpleDrawingPanel view={view} approvalKey={approvalKey} refresh={refresh}/>}
+            {(!advanced || view?.batch.execution==='autonomous')&&<SimpleDrawingPanel view={view} approvalKey={approvalKey} refresh={refresh} readerReady={view?.mode==='local-fake'||(httpReader?.batchProtocol??0)>=6}/>}
             <details className="connector-setup" open={!view?.connected || !!httpReader?.pending}>
                 <summary>1. Connexion {view?.connected ? 'établie ✓ — réglages' : 'au navigateur'}</summary>
                 <label>

@@ -1,5 +1,5 @@
-/* Passive tap of the public sync-worker contract (GeoPixelsFront 8367389).
- * No request is initiated. No session field is copied to loopback.
+/* Native resource evidence: passive tap of the public sync-worker contract (GeoPixelsFront 8367389).
+ * Optional fixed GetUserData refresh only during explicitly authorized work; no tile fetch. No session field is copied to loopback.
  * currentEnergy may LOWER a balance, never prove clock-based regeneration.
  */
 const GeoPlacerEnergy = (() => {
@@ -8,6 +8,7 @@ const GeoPlacerEnergy = (() => {
         wrapped = null,
         pending = null,
         evidence = null;
+    let refreshing=false,lastRefresh=0,direct=false;
     let sequence = 0,
         spent = 0,
         ceiling = 0,
@@ -34,6 +35,7 @@ const GeoPlacerEnergy = (() => {
         if (!r || !Object.hasOwn(r, 'ok')) return;
         const request = pending;
         pending = null;
+        if (typeof GeoPlacerTiles !== 'undefined' && request && !request.ambiguous) GeoPlacerTiles.receive(r, request.tiles, Date.now());
         if (
             !request ||
             request.ambiguous ||
@@ -48,13 +50,15 @@ const GeoPlacerEnergy = (() => {
             owned = colors(raw?.colors);
         if (!raw || !Number.isSafeInteger(raw.energy) || raw.energy < 0 || raw.energy > 1e9 || !owned) return;
         evidence = {
-            source: 'native-worker-response',
+            source: request.direct?'native-user-response':'native-worker-response',
             sequence: ++sequence,
             requestStartedAt: request.at,
             capturedAt: Date.now(),
             energy: raw.energy,
             colors: owned,
+            ...(typeof GeoPlacerShop!=='undefined' && GeoPlacerShop.catalog() && Number.isSafeInteger(raw.pixels) && raw.pixels>=0 && Number.isSafeInteger(raw.maxEnergy) && raw.maxEnergy>0 && Number.isSafeInteger(raw.energyRate) && raw.energyRate>=15 ? {shop:{catalog:GeoPlacerShop.catalog(),currency:Math.floor(raw.pixels/5),capacity:raw.maxEnergy,intervalMs:raw.energyRate*1000,colorPrice:GeoPlacerShop.colorPrice?.(owned)??null}} : {}),
         };
+        direct=!!request.direct;
         evidenceUser = request.user;
         spent = 0;
         ceiling = raw.energy;
@@ -74,7 +78,7 @@ const GeoPlacerEnergy = (() => {
         wrapped = function (...args) {
             // The sensitive arguments are forwarded unchanged, never retained or serialized.
             if (args[0]?.type === 'sync-delta') {
-                pending = { at: Date.now(), user: account(), ambiguous: !!pending };
+                pending = { at: Date.now(), user: account(), ambiguous: !!pending, tiles: typeof GeoPlacerTiles!=='undefined'?GeoPlacerTiles.request(args[0]):[] };
             }
             return Reflect.apply(original, this, args);
         };
@@ -92,14 +96,23 @@ const GeoPlacerEnergy = (() => {
         if (evidence && account() !== evidenceUser) clear();
         if (!attach() || !evidence || writing || Date.now() - evidence.capturedAt > 30000) return null;
         const counter =
-            typeof currentEnergy === 'number' && Number.isFinite(currentEnergy)
-                ? Math.max(0, Math.floor(currentEnergy))
-                : 0;
+            direct ? evidence.energy : typeof currentEnergy === 'number' && Number.isFinite(currentEnergy) ? Math.max(0, Math.floor(currentEnergy)) : 0;
         ceiling = Math.min(ceiling, counter, Math.max(0, evidence.energy - spent));
         return { ...evidence, colors: [...evidence.colors], available: ceiling };
     }
     return {
         snapshot,
+        async refresh(authorized) {
+            if(!authorized || refreshing || writing || Date.now()-lastRefresh<10000 || typeof tokenUser!=='string' || !tokenUser || typeof userID!=='number')return;
+            attach();refreshing=true;lastRefresh=Date.now();const at=Date.now(),user=account();
+            const c=new AbortController(),timer=setTimeout(()=>c.abort(),5000);
+            try {const response=await fetch('/GetUserData',{method:'POST',redirect:'error',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:userID,token:tokenUser}),signal:c.signal});
+                if(!response.ok || writing || user!==account() || at<=settledAt)return;
+                const raw=await response.json();if(pending)return;
+                pending={at,user,direct:true,tiles:[]};receive({data:{ok:true,userData:raw}});
+            }catch { /* Missing resource proof never credits energy. */ }
+            finally{clearTimeout(timer);refreshing=false;}
+        },
         inspect() {
             const r = snapshot();
             return !worker

@@ -276,7 +276,7 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
       entry.colorBitmap.getContext('2d').clearRect(999,1,1,1);
       globalThis.fixtureSiteCalls=0;globalThis.fixtureWrites=[];
       globalThis.fetch=async(url,options)=>{
-        if(url!==location.origin+'/PlacePixels' || !Array.isArray(JSON.parse(options.body).Pixels) || JSON.parse(options.body).Pixels.length<1 || JSON.parse(options.body).Pixels.length>5)
+        if(url!==location.origin+'/PlacePixels' || !Array.isArray(JSON.parse(options.body).Pixels) || JSON.parse(options.body).Pixels.length<1 || JSON.parse(options.body).Pixels.length>793)
           throw new Error('Unexpected fixture site operation');
         globalThis.fixtureSiteCalls++;globalThis.fixtureWrites.push(...JSON.parse(options.body).Pixels);
         return new Response('Ok',{status:200});
@@ -513,12 +513,55 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     await simple.getByText('Envois terminés — vérifier les observations',{exact:true}).waitFor();
     const autonomous=await api('connector/status',undefined,'GET');
     assert.equal(autonomous.batch.execution,'autonomous');assert.equal(autonomous.batch.confirmed,20);
-    assert.equal(autonomous.batch.acceptedRequests,4);assert.equal(autonomous.monitoring.state,'stopped');
-    assert.equal(await reader.evaluate(()=>globalThis.fixtureSiteCalls),beforeSimple+4);
+    assert.equal(autonomous.batch.acceptedRequests,2);assert.equal(autonomous.monitoring.state,'stopped');
+    assert.equal(await reader.evaluate(()=>globalThis.fixtureSiteCalls),beforeSimple+2);
     assert.equal(new Set((await reader.evaluate(()=>globalThis.fixtureWrites)).map(p=>p.GridX+','+p.GridY)).size,20);
     assert.equal(autonomous.progress.correct,0); // Acceptances are not synthesized into observations.
     await page.screenshot({path:path.join(out,'simple-drawing-local-fixture.png'),fullPage:true});
-    record('OK DEFAULT simple workflow: PNG import, exact image match and automatic binding, one launch, automatic regional monitoring, 20 targets / four native groups, no service requests');
+    record('OK DEFAULT simple workflow: PNG import, exact image match and automatic binding, one launch, automatic regional monitoring, 20 targets / two adaptive groups, no service requests');
+    await page.getByRole('button',{name:'Révoquer le canal',exact:true}).click();
+
+    await page.locator('#connectorConnection').filter({hasText:/^D\u00e9connect\u00e9$/}).waitFor();
+
+    // Optional upgrades: actual dashboard + capability routes + generated browser code.
+    // BOTH native endpoints are local stubs. No GeoPixels request is permitted by this recipe.
+    await reader.evaluate(()=>{
+      ghostImageTopLeft={...ghostImageTopLeft,gridX:ghostImageTopLeft.gridX+40};
+      globalThis.MakePurchase=function(){return '/MakePurchase UserId Subject';};
+      for(const [id,price] of [['EnergyInput','10 Pixels / +20 energy'],['EnergyCapacityInput','50 Pixels / +5 max'],['FasterRechargeInput','500 Pixels / -1s (cap at 15s)'],['ExtraColorInput','100 Pixels / Any hex color allowed']]) {
+        const card=document.createElement('div'),label=document.createElement('p'),row=document.createElement('div'),input=document.createElement('input');
+        input.id=id;label.textContent=price;row.append(input);card.append(label,row);card.hidden=true;document.body.append(card);
+      }
+      globalThis.fixturePurchaseCalls=0;globalThis.fixtureShopBalance={energy:0,colors:'0,16777215',pixels:500,maxEnergy:100,energyRate:20};
+      const paint=globalThis.fetch;
+      globalThis.fetch=async(url,options)=>{
+        if(url==='/GetUserData')return new Response(JSON.stringify(fixtureShopBalance),{status:200});
+        if(url==='/MakePurchase') {
+          const b=JSON.parse(options.body);
+          if(b.type!=='Energy'||b.amount!==1)throw new Error('Unexpected fixture purchase');
+          fixturePurchaseCalls++;fixtureShopBalance.energy+=20;fixtureShopBalance.pixels-=50;
+          return new Response('fixture accepted',{status:200});
+        }
+        const response=await paint(url,options);
+        if(response.ok)fixtureShopBalance.energy-=JSON.parse(options.body).Pixels.length;
+        return response;
+      };
+    });
+    await simple.getByLabel('Autoriser avec le prochain lancement du dessin',{exact:true}).check();
+    await simple.getByLabel('Budget maximal de monnaie',{exact:true}).fill('10');
+    await pair();
+    await reader.evaluate(()=>{
+      syncWorker.postMessage({type:'sync-delta'});
+      for(const fn of fixtureEnergyListeners)fn({data:{ok:true,userData:{...fixtureShopBalance}}});
+    });
+    await page.waitForFunction(()=>![...document.querySelectorAll('#simpleDrawing button')].find(b=>b.textContent==='Lancer le dessin')?.disabled);
+    await simple.getByRole('button',{name:'Lancer le dessin',exact:true}).click();
+    await simple.getByText('Envois terminés — vérifier les observations',{exact:true}).waitFor();
+    const upgraded=await api('connector/status',undefined,'GET');
+    assert.equal(upgraded.batch.confirmed,20);assert.equal(upgraded.upgrades.history.at(-1).state,'verified');
+    assert.equal(await reader.evaluate(()=>fixturePurchaseCalls),1);assert.equal(upgraded.upgrades.uncertain,0);
+    await page.screenshot({path:path.join(out,'automatic-upgrade-local-fixture.png'),fullPage:true});
+    record('OK opt-in upgrade: one launch, zero initial native energy, durable purchase intent, fixed in-game endpoint stub, exact observed debit/effect, same scheduler resumes and draws 20 targets within a 10-coin budget; no external requests');
     await page.getByRole('button',{name:'Révoquer le canal',exact:true}).click();
 
     assert.deepEqual(external, []);

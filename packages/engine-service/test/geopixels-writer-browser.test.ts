@@ -297,6 +297,19 @@ function nativeLot(s: Awaited<ReturnType<typeof setup>>) {
     return { command, grant: { ...b.grant, execution: 'grouped' } };
 }
 describe('Native grouped browser writer (site fetch is always mocked)', () => {
+    it.each([16,50,100,300,793])('sends %s targets in ONE native request within the negotiated transport budget',async(count)=>{
+        const s=await setup({energy:1000,colors:[0]}),project=s.command.project;
+        Object.assign(project,{width:40,height:40,gridX:0,gridY:40});
+        s.context.GeoPlacerPageReader.targetColor=()=>0;
+        s.context.GeoPlacerEnergy={snapshot:()=>({available:1000,colors:[0]}),spend:()=>{},settled:()=>{}};
+        (s.writer as typeof s.writer & {setLimits:(v:object)=>void}).setLimits({groupMax:793});
+        const command={protocol:2 as const,attemptId:s.command.attemptId,batchId:'c954385d-7ab0-4939-a233-1d7e784bd526',project,deadline:Date.now()+20000,pixels:Array.from({length:count},(_,i)=>({gridX:i%40,gridY:40-Math.floor(i/40),color:0}))};
+        const grant={id:command.batchId,digest:'a'.repeat(64),expires:Date.now()+20000,project,writes:[],execution:'autonomous',budgets:{pixels:1000,energy:1000},region:{x:0,y:0,width:40,height:40},groupSize:793};
+        expect(Buffer.byteLength(JSON.stringify(command))).toBeLessThan(128*1024);
+        expect(await s.writer.executeBatch(command,s.allowed,grant)).toBe('confirmed');expect(s.fetch).toHaveBeenCalledTimes(1);
+        expect((s.sent[0]!.body.Pixels as unknown[])).toHaveLength(count);
+        expect(await s.writer.executeBatch(command,s.allowed,grant)).toBe('not-sent');
+    });
     it('sends one request containing exactly five approved targets and never repeats it', async () => {
         const s = await setup(),
             b = nativeLot(s);
@@ -428,7 +441,7 @@ describe('Continuous writer browser boundaries',()=>{
         const s=await setup({energy:100,colors:[0]});
         s.context.GeoPlacerPageReader.targetColor=()=>0;
         let available=10;
-        s.context.GeoPlacerEnergy={snapshot:()=>({available}),spend:(n:number)=>{available-=n;},settled:()=>{}};
+        s.context.GeoPlacerEnergy={snapshot:()=>({available,colors:[0]}),spend:(n:number)=>{available-=n;},settled:()=>{}};
         const command={protocol:2 as const,attemptId:s.command.attemptId,batchId:'c954385d-7ab0-4939-a233-1d7e784bd526',project:s.command.project,deadline:Date.now()+20000,pixels:[{gridX:999,gridY:1001,color:0}]};
         const grant={id:command.batchId,digest:'a'.repeat(64),expires:Date.now()+60000,project:command.project,writes:[],execution:'continuous',budgets:{pixels:100,energy:100},region:{x:0,y:0,width:2,height:2}};
         return {...s,command,grant,setAvailable:(n:number)=>{available=n;}};

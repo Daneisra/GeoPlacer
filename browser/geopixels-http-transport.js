@@ -34,6 +34,9 @@ const GeoPlacerHttpTransport = (address, request) => {
         'batch-claim',
         'batch-check',
         'batch-result',
+        'upgrade-claim',
+        'upgrade-check',
+        'upgrade-result',
       ].includes(operation)
     )
       throw new Error('Opération interdite');
@@ -79,7 +82,7 @@ const GeoPlacerHttpTransport = (address, request) => {
               if (
                 response.status !== 200 ||
                 (response.finalUrl && response.finalUrl !== base + operation) ||
-                response.responseText.length > 8192
+                response.responseText.length > (operation==='batch-claim'?128*1024:8192)
               )
                 throw new Error('Requête refusée : vérifier approbation, révocation et expiration.');
               finish(null, JSON.parse(response.responseText));
@@ -110,9 +113,9 @@ const GeoPlacerHttpTransport = (address, request) => {
       capability = claimed.capability;
       pending(claimed.fingerprint);
       for (let i = 0; i < 60; i++) {
-        const state = await post('status', { protocol: 1, readerVersion: 9, waitMs: 5000 });
+        const state = await post('status', { protocol: 1, readerVersion: 10, waitMs: 5000 });
         if (state.approved === true && state.lastSequence === 0) {
-          if (state.pacing !== 'server-50ms' || state.regionalProtocol !== 1 || state.batchProtocol !== 5)
+          if (state.pacing !== 'server-50ms' || state.regionalProtocol !== 1 || state.batchProtocol !== 6)
             throw new Error('Serveur incompatible : mettre à jour GeoPlacer et refaire le couplage.');
           features = state.limits;
           active = true;
@@ -150,7 +153,7 @@ const GeoPlacerHttpTransport = (address, request) => {
       if (!active || busy) return;
       const answer = await post('status', {
         protocol: 1,
-        readerVersion: 9,
+        readerVersion: 10,
         ...(monitoring ? { monitoring } : {}),
       });
       if (answer.approved !== true || answer.lastSequence !== sequence) {
@@ -163,7 +166,7 @@ const GeoPlacerHttpTransport = (address, request) => {
       if (!active) throw new Error('Canal non couplé');
       const answer = await post('status', {
         protocol: 1,
-        readerVersion: 9,
+        readerVersion: 10,
         waitMs: 5000,
         ...(writerResources ? { writerResources } : {}),
         ...(abortedCapture ? { abortedCapture } : {}),
@@ -201,6 +204,9 @@ const GeoPlacerHttpTransport = (address, request) => {
     async pixelResult(attemptId, result) {
       return post('pixel-result', { protocol: 1, attemptId, result });
     },
+    async claimUpgrade(){return (await post('upgrade-claim',{protocol:1})).command;},
+    async upgradeAllowed(id){return active && (await post('upgrade-check',{protocol:1,id})).allowed===true;},
+    async upgradeResult(id,result){return post('upgrade-result',{protocol:1,id,result});},
     async claimBatch() {
       if (!active) throw new Error('Canal non couplé');
       return (await post('batch-claim', { protocol: 1 })).command;

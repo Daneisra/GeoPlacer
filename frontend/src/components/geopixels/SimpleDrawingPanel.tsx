@@ -9,6 +9,8 @@ type DrawingView = {
     project: { id: string; generation?: string; width: number; height: number; gridX: number; gridY: number } | null;
     batch: BatchView;
     monitoring: { inFlight: unknown };
+    tileEvidence?:{total:number;nativeUpdated:number;nativeChecked:number;missing:number;sourceDateKnown:boolean};
+    upgrades?:{error?:string|null;uncertain:number;history:{id:string;kind:string;cost:number;state:string;at:number}[]};
     progress: { correct: number; incorrect: number; unknown: number; total: number } | null;
 };
 const errorMessage = (e: unknown) => {
@@ -26,20 +28,25 @@ export function SimpleDrawingPanel({
     view,
     approvalKey,
     refresh,
+    readerReady=true,
 }: {
     view: DrawingView | null;
     approvalKey: string;
     refresh: () => Promise<void>;
+    readerReady?:boolean;
 }) {
     const [file, setFile] = useState<File | null>(null),
         [busy, setBusy] = useState(false),
         [error, setError] = useState('');
-    const [groupSize, setGroupSize] = useState(5),
+    const [groupSize, setGroupSize] = useState(0),
         [budget, setBudget] = useState(''),
         [palette, setPalette] = useState(PERSONAL_GEOPIXELS_PALETTE.join('\n'));
     const [importNotice, setImportNotice] = useState<{ kind: 'loading' | 'success' | 'error'; text: string } | null>(
         null
     );
+    const [autoUpgrades,setAutoUpgrades]=useState(false),[coinBudget,setCoinBudget]=useState(0),[coinReserve,setCoinReserve]=useState(50),[targetCapacity,setTargetCapacity]=useState(300),[energyBelow,setEnergyBelow]=useState(5),[upgradeKinds,setUpgradeKinds]=useState<string[]>(['energy-pack']),[upgradePriority,setUpgradePriority]=useState('energy-pack');
+    const upgradeJson=autoUpgrades?JSON.stringify({maxBudget:coinBudget,minimumReserve:coinReserve,targetCapacity,energyBelow,priority:[upgradePriority,...upgradeKinds.filter(k=>k!==upgradePriority)].filter(k=>upgradeKinds.includes(k))}):'';
+    const kindLabels:Record<string,string>={'energy-pack':'Recharge (+20 énergie, 10 monnaies)','max-energy':'Capacité (+5, 50 monnaies)','regen-speed':'Récupération (−1 s, 500 monnaies)','color-unlock':'Couleurs nécessaires (gratuité vérifiée ou 100 monnaies)'};
     const importing = importNotice?.kind === 'loading';
     const attempted = useRef('');
     const batch = view?.batch,
@@ -101,21 +108,22 @@ export function SimpleDrawingPanel({
     }
     const previewIdentity =
         selected && view?.project
-            ? JSON.stringify([selected.templateId, view.project, groupSize, budget, approvalKey])
+            ? JSON.stringify([selected.templateId, view.project, groupSize, budget, upgradeJson, approvalKey])
             : '';
     const viewConnected = !!view?.connected;
-    const canPreview = !!approvalKey && !!view?.connected && !active && !busy && !batch?.uncertain;
+    const canPreview = readerReady && !!approvalKey && !!view?.connected && !active && !busy && !batch?.uncertain;
     useEffect(() => {
         if (!previewIdentity || !viewConnected) {
             attempted.current = '';
             return;
         }
         if (!canPreview || attempted.current === previewIdentity) return;
+        const timer=setTimeout(()=>{
         attempted.current = previewIdentity;
         void engineHttp
             .post(
                 '/connector/drawing/preview',
-                { groupSize, ...(budget ? { pixelBudget: Number(budget) } : {}) },
+                { groupSize, ...(upgradeJson?{upgrades:JSON.parse(upgradeJson)}:{}), ...(budget ? { pixelBudget: Number(budget) } : {}) },
                 { headers: { 'X-GeoPlacer-Approval': approvalKey } }
             )
             .then(() => {
@@ -127,8 +135,12 @@ export function SimpleDrawingPanel({
             .catch((e) => {
                 if (attempted.current === previewIdentity) setError(errorMessage(e));
             });
-    }, [approvalKey, previewIdentity, canPreview, groupSize, budget, refresh, viewConnected]);
+        },300);
+        return ()=>clearTimeout(timer);
+    }, [approvalKey, previewIdentity, canPreview, groupSize, budget, upgradeJson, refresh, viewConnected]);
     const consent = { batchId: batch?.id, digest: batch?.digest, approved: true };
+    const preparedGroup=batch?.scope?.groupSize ?? 5;
+    const previewReady=preparedGroup===groupSize && JSON.stringify(batch?.scope?.upgrades??null)===JSON.stringify(upgradeJson?JSON.parse(upgradeJson):null) && (!budget || batch?.budgets?.pixels===Number(budget));
     return (
         <div className="space-y-4" id="simpleDrawing">
             <div className="rounded border p-4 space-y-3" aria-busy={importing}>
@@ -175,6 +187,7 @@ export function SimpleDrawingPanel({
             </div>
             <div className="rounded border border-amber-500 p-4 space-y-3">
                 <h3 className="text-lg font-semibold">2. Vérifier et lancer le dessin</h3>
+                {view?.connected && !readerReady && <p>Installez le lecteur 1.1.0 proposé ci-dessous et refaites le couplage pour utiliser les groupes adaptatifs et les améliorations configurables.</p>}
                 {!view?.connected ? (
                     <p>
                         Chargez le fantôme sur GeoPixels, puis effectuez le couplage ci-dessous. Le lecteur observe
@@ -198,7 +211,7 @@ export function SimpleDrawingPanel({
                         </p>
                         <p>
                             Au maximum {batch.budgets?.pixels} pixels distincts et {batch.budgets?.energy} énergie pour
-                            ce travail, par groupes de {groupSize} maximum. Autorisation jusqu’à la fin, l’arrêt ou la
+                            ce travail, par groupes {preparedGroup===0?'adaptés à l’énergie et au transport':`de ${preparedGroup} maximum`}. Autorisation jusqu’à la fin, l’arrêt ou la
                             révocation ; le transport seul peut être renouvelé automatiquement.
                         </p>
                     </>
@@ -207,11 +220,14 @@ export function SimpleDrawingPanel({
                     Vérifiez l’image et sa destination avant de lancer : les envois suivants seront automatiques dans ce
                     périmètre.
                 </p>
+                {batch?.scope?.upgrades && <p>Améliorations autorisées avec le lancement : budget maximal {batch.scope.upgrades.maxBudget} monnaies du jeu, réserve minimale {batch.scope.upgrades.minimumReserve}. Aucun paiement en argent réel.</p>}
                 <div className="flex flex-wrap gap-3">
                     <button
                         className="font-semibold"
                         disabled={
                             busy ||
+                            !previewReady ||
+                            !readerReady ||
                             !approvalKey ||
                             !!view?.monitoring.inFlight ||
                             !view?.bound ||
@@ -266,7 +282,7 @@ export function SimpleDrawingPanel({
                                 void action(() =>
                                     engineHttp.post(
                                         '/connector/drawing/preview',
-                                        { groupSize, ...(budget ? { pixelBudget: Number(budget) } : {}) },
+                                        { groupSize, ...(upgradeJson?{upgrades:JSON.parse(upgradeJson)}:{}), ...(budget ? { pixelBudget: Number(budget) } : {}) },
                                         { headers: { 'X-GeoPlacer-Approval': approvalKey } }
                                     )
                                 )
@@ -323,13 +339,17 @@ export function SimpleDrawingPanel({
                             Aucune recharge estimée.
                         </p>
                         {view?.progress && (
-                            <p>
-                                Cache observé : {view.progress.correct} corrects · {view.progress.incorrect} incorrects
-                                · {view.progress.unknown} inconnus. La réception récente ne prouve pas la fraîcheur
-                                serveur des tuiles.
-                            </p>
+                            <div className="space-y-1">
+                                <p>Couverture : {(view.progress.total-view.progress.unknown).toLocaleString('fr-FR')} / {view.progress.total.toLocaleString('fr-FR')} cibles connues. {view.progress.correct.toLocaleString('fr-FR')} conformes · {view.progress.incorrect.toLocaleString('fr-FR')} à corriger · {view.progress.unknown.toLocaleString('fr-FR')} inconnues.</p>
+                                <p>{view.tileEvidence?.nativeUpdated ?? 0} tuile(s) remplacée(s) par une réponse native récente · {view.tileEvidence?.nativeChecked ?? 0} vérifiée(s) sans changement · {view.tileEvidence?.missing ?? 0} absente(s) du cache observé.</p>
+                                {view.progress.unknown>0 && <p>Les régions chargées continuent d’être parcourues. Pour élargir la couverture, affichez les zones manquantes sur GeoPixels.</p>}
+                                <details><summary>Actualisation et confirmations</summary><p>Un accusé accepte la requête. La conformité est mesurée séparément dans le cache. Une réponse native récente signifie reçue depuis moins de 30 s ; son curseur n’est pas une date serveur. Une relecture locale ne renouvelle jamais cette preuve. Les tuiles fusionnées sans preuve corrélée restent non vérifiées.</p></details>
+                            </div>
                         )}
+                        <p>Prochain groupe : jusqu’à {batch.adaptiveGroupSize ?? 0} pixels, selon l’énergie et le réglage autorisé.</p>
+                        {!!view?.upgrades?.history.length && <details><summary>Améliorations du dessin ({view.upgrades.history.length})</summary>{view.upgrades.history.map(r=><p key={r.id}>{kindLabels[r.kind]??r.kind} · {r.cost} monnaies · {({verified:'Effet et débit observés',accepted:'Acceptée, effet à vérifier',uncertain:'Incertaine — achats concernés bloqués',delivered:'Résultat attendu',prepared:'Préparée',refused:'Refusée',cancelled:'Annulée'} as Record<string,string>)[r.state]}</p>)}</details>}
                         {batch.error && <p>{batch.error}</p>}
+                        {view?.upgrades?.error && <p role="alert">{view.upgrades.error}</p>}
                     </div>
                 )}
                 {error && <p role="alert">{error}</p>}
@@ -338,13 +358,13 @@ export function SimpleDrawingPanel({
                 <summary>Options du dessin</summary>
                 <div className="grid gap-3 p-3 md:grid-cols-2">
                     <label>
-                        Pixels par requête (1 à 5, capacité validée)
+                        Taille cible des groupes (0 : automatique)
                         <input
                             aria-label="Pixels par requête"
                             type="number"
-                            min={1}
-                            max={5}
-                            value={groupSize}
+                            min={0}
+                            max={batch?.limits?.maxGroupPixels}
+                            value={active ? preparedGroup : groupSize}
                             disabled={active || busy}
                             onChange={(e) => setGroupSize(Number(e.target.value))}
                         />
@@ -360,6 +380,19 @@ export function SimpleDrawingPanel({
                             onChange={(e) => setBudget(e.target.value)}
                         />
                     </label>
+                    <fieldset className="md:col-span-2 space-y-2" disabled={active || busy}>
+                        <legend>Améliorations automatiques — monnaie du jeu uniquement</legend>
+                        <label><input type="checkbox" checked={autoUpgrades} onChange={e=>setAutoUpgrades(e.target.checked)}/> Autoriser avec le prochain lancement du dessin</label>
+                        {autoUpgrades && <div className="grid gap-2 md:grid-cols-2">
+                            <label>Budget maximal de monnaie<input type="number" min={0} value={coinBudget} onChange={e=>setCoinBudget(Number(e.target.value))}/></label>
+                            <label>Réserve minimale<input type="number" min={0} value={coinReserve} onChange={e=>setCoinReserve(Number(e.target.value))}/></label>
+                            <label>Capacité ciblée<input type="number" min={1} value={targetCapacity} onChange={e=>setTargetCapacity(Number(e.target.value))}/></label>
+                            <label>Recharger si énergie inférieure à<input type="number" min={0} value={energyBelow} onChange={e=>setEnergyBelow(Number(e.target.value))}/></label>
+                            {Object.entries(kindLabels).map(([k,label])=><label key={k}><input type="checkbox" checked={upgradeKinds.includes(k)} onChange={e=>setUpgradeKinds(v=>e.target.checked?[...v,k]:v.filter(x=>x!==k))}/>{label}</label>)}
+                            <label>Priorité<select value={upgradePriority} onChange={e=>setUpgradePriority(e.target.value)}>{Object.entries(kindLabels).map(([k,label])=><option key={k} value={k}>{label}</option>)}</select></label>
+                            <p>Tarifs vérifiés dans la boutique avant chaque achat. Un tarif ou un résultat non vérifiable suspend les achats concernés.</p>
+                        </div>}
+                    </fieldset>
                     <label className="md:col-span-2">
                         Palette locale (#RRGGBB)
                         <textarea

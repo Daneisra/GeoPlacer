@@ -1,8 +1,11 @@
+import { validateUpgradePolicy, type AutomaticUpgradePolicy } from './upgrade-policy.js';
+import { CONNECTOR_COMMAND_BYTES, CONNECTOR_MAX_GROUP_PIXELS, INITIAL_GROUP_PIXELS } from './batch-limits.js';
 import { assertMetadataHeadroom } from './capacity.js';
 import { createHash, randomUUID } from 'node:crypto';
 import {
     createScheduler,
     computeProgress,
+    computeProgressWithinBounds,
     createWorkPlanner,
     prepareTemplate,
     taskIdOf,
@@ -32,7 +35,7 @@ type RecordEntry = {
     write: PixelWrite;
     execution?: 'sequential' | 'grouped' | 'session' | 'continuous' | 'autonomous';
 };
-export type DrawingScope = { region: { x: number; y: number; width: number; height: number }; durationMs: number | null; groupSize?: number };
+export type DrawingScope = { region: { x: number; y: number; width: number; height: number }; durationMs: number | null; groupSize?: number; upgrades?:AutomaticUpgradePolicy };
 type Batch = {
     id: string;
     identity: string;
@@ -89,7 +92,14 @@ export class ControlledBatch {
     private pending: Pending | null = null;
     private deadline = 0;
     private nextAt = 0;
+    private requiredColorsFor:Template|null=null;
+    private requiredUpgradeColors:number[]=[];
+    private resourcesAfter=0;
+    private auxiliary=false;
+    private adaptiveCeiling=CONNECTOR_MAX_GROUP_PIXELS;
+    private adaptiveWindow = INITIAL_GROUP_PIXELS;
     private epoch = -1;
+    private yieldRegion=true;
     private planningRegion: {id:string;x:number;y:number;width:number;height:number} | null = null;
     private readonly completedRegions = new Set<string>();
     private generation = 0;
@@ -217,9 +227,10 @@ export class ControlledBatch {
     }
     private validScope(scope: DrawingScope | undefined, project: BrowserProject) {
         const r = scope?.region;
+        if(scope?.upgrades)validateUpgradePolicy(scope.upgrades);
         return (
             !!r &&
-            Object.keys(scope!).every((k) => ['region', 'durationMs', 'groupSize'].includes(k)) &&
+            Object.keys(scope!).every((k) => ['region', 'durationMs', 'groupSize', 'upgrades'].includes(k)) &&
             Object.keys(r).length === 4 &&
             ['x', 'y', 'width', 'height'].every((k) => Object.hasOwn(r, k)) &&
             [r.x, r.y, r.width, r.height].every(Number.isSafeInteger) &&
@@ -230,7 +241,7 @@ export class ControlledBatch {
             r.x + r.width <= project.width &&
             r.y + r.height <= project.height &&
             (scope!.durationMs === null || (Number.isSafeInteger(scope!.durationMs) && scope!.durationMs >= 30000 && scope!.durationMs <= 600000)) &&
-            (scope!.groupSize === undefined || (Number.isInteger(scope!.groupSize) && scope!.groupSize >= 1 && scope!.groupSize <= 5))
+            (scope!.groupSize === undefined || (Number.isInteger(scope!.groupSize) && scope!.groupSize >= 0 && scope!.groupSize <= CONNECTOR_MAX_GROUP_PIXELS))
         );
     }
     private inScope(w: PixelWrite, b = this.saved.batch!) {
@@ -264,7 +275,7 @@ export class ControlledBatch {
         check(validWriterResources(value), 'invalid writer resources');
         const now = Date.now(),
             epoch = this.d.provider.channelEpoch;
-        if (value.capturedAt > now || now - value.capturedAt > 30000) return;
+        if (value.capturedAt > now || now - value.capturedAt > 30000 || value.requestStartedAt<=this.resourcesAfter) return;
         const previous = this.wallet?.epoch === epoch ? this.wallet.value : null;
         if (
             previous &&
@@ -282,13 +293,8 @@ export class ControlledBatch {
                 return false;
             }
         });
-        const barrier = Math.max(
-            0,
-            ...relevant.map((r) => {
-                const a = this.d.attempts.get(r.attemptId);
-                return a && a.state !== 'failed' && a.state !== 'cancelled' ? (a.closedAt ?? a.startedAt ?? 0) : 0;
-            })
-        );
+        let barrier = 0;
+        for(const r of relevant){const a=this.d.attempts.get(r.attemptId);if(a && a.state !== 'failed' && a.state !== 'cancelled')barrier=Math.max(barrier,a.closedAt ?? a.startedAt ?? 0);}
         if ((!previous || value.sequence > previous.sequence) && value.requestStartedAt <= barrier) return;
         this.wallet = {
             epoch,
@@ -522,6 +528,9 @@ export class ControlledBatch {
             this.controlling = false;
         }
     }
+    private groupLimit() {
+        return this.saved.batch?.execution==='autonomous' ? Math.min(this.saved.batch.scope?.groupSize || CONNECTOR_MAX_GROUP_PIXELS,CONNECTOR_MAX_GROUP_PIXELS) : 5;
+    }
     private allowance(
         t: Template,
         count?: number,
@@ -539,7 +548,7 @@ export class ControlledBatch {
                 type: 'resource-observation' as const,
                 agent: this.d.agent,
                 observedAt: Date.now(),
-                energy: Math.min(energy, wallet?.available ?? 0),
+                energy: Math.min(energy, this.auxiliary ? 0 : wallet?.available ?? 0, b.execution==='autonomous' ? Math.min(this.groupLimit(),this.adaptiveWindow) : Number.MAX_SAFE_INTEGER),
                 capacity,
                 currency: 0,
                 unlockedColors: t.palette.colors.map((c) => c.rgb).filter((c) => wallet?.colors.includes(c)),
@@ -563,12 +572,40 @@ export class ControlledBatch {
             availability: { status: 'available' as const },
         };
     }
+    upgradeAuthority() {
+        try {this.context();const b=this.saved.batch;return b?.execution==='autonomous' && this.state==='running' && this.deadline>Date.now() && b.scope?.upgrades && !this.d.attempts.open().some(a=>a.state==='needs-reconciliation') ? {job:b.id,project:b.project,policy:b.scope.upgrades}:null;}catch{return null;}
+    }
+    upgradeResources(){
+        const frame=this.wallet?.epoch===this.d.provider.channelEpoch && Date.now()-this.wallet.value.capturedAt<=30000 ? this.wallet.value:null;
+        if(!frame)return null;
+        // A conservative debit is spendable for paint, but is NOT a new account/shop observation.
+        for(const record of this.saved.records){const a=this.d.attempts.get(record.attemptId);if(a?.state==='finished' && !('reconciled' in a && a.reconciled) && (a.closedAt??a.startedAt??0)>=frame.requestStartedAt){try{if(JSON.parse(record.identity).at(-1)===this.d.provider.status().mode)return null;}catch{return null;}}}
+        return structuredClone(frame);
+    }
+    async lockUpgrades(){
+        if(!this.upgradeAuthority() || this.pending || this.d.attempts.open().length)return false;
+        this.auxiliary=true;await this.scheduler?.pause();
+        if(!this.upgradeAuthority() || this.pending || this.d.attempts.open().length){this.unlockUpgrades();return false;}
+        return true;
+    }
+    unlockUpgrades(){this.auxiliary=false;this.wallet=null;if(this.state==='running' && this.scheduler?.status().state==='paused' && this.upgradeAuthority())this.scheduler.resume();}
+    private upgradeColors(){const t=this.context();if(t!==this.requiredColorsFor){this.requiredUpgradeColors=[...new Set(t.image.pixels)].filter(c=>c!==0xffffffff);this.requiredColorsFor=t;}return this.requiredUpgradeColors;}
+    async upgradeProgress(){
+        const t=this.context(),r=this.planningRegion??this.autonomousRegion();
+        const rect={minX:t.placement.topLeft.x+r.x,minY:t.placement.topLeft.y+r.y,width:r.width,height:r.height};
+        const w=await this.d.provider.readWindow(rect),coordinateSystem={yAxis:'down' as const,bounds:rect};
+        // An upgrade estimate must never move the paint scheduler's active region.
+        return {progress:computeProgressWithinBounds({...t,coordinateSystem},{...w.snapshot,coordinateSystem},Date.now(),{}),colors:this.upgradeColors()};
+    }
     transportRenewable() {
         try {this.context();return this.saved.batch?.execution === 'autonomous' && ['running','paused'].includes(this.state) && this.deadline> Date.now() && !this.pending?.delivered && this.d.attempts.open().every(a=>a.state !== 'needs-reconciliation');}
         catch{return false;}
     }
     private autonomousRegion() {
         const t=this.context(), r=this.d.provider.monitoring.view().lastCapture?.captureRegion;
+        if(this.planningRegion && !this.yieldRegion && !this.completedRegions.has(this.planningRegion.id))return this.planningRegion;
+        const candidate=[...this.d.provider.monitoring.view().history].reverse().find(c=>c.projectKey===this.d.provider.monitoring.view().lastCapture?.projectKey && c.captureRegion?.id.startsWith('auto-') && c.captureRegion.revision===this.d.provider.monitoring.control().region?.revision && c.captureRegion.x+c.captureRegion.width<=t.image.width && c.captureRegion.y+c.captureRegion.height<=t.image.height && Date.now()-c.capturedAt<30000 && !this.completedRegions.has(c.captureRegion.id));
+        if(candidate?.captureRegion)return candidate.captureRegion;
         return r?.id.startsWith('auto-') && r.revision===this.d.provider.monitoring.control().region?.revision && r.x+r.width<=t.image.width && r.y+r.height<=t.image.height ? r : {id:'auto-0',x:0,y:0,width:Math.min(256,t.image.width),height:Math.min(256,t.image.height)};
     }
     private async executionTemplate() {
@@ -628,7 +665,9 @@ export class ControlledBatch {
                 ['continuous','autonomous'].includes(this.saved.batch!.execution!) ? (this.saved.batch!.execution === 'autonomous' ? this.saved.batch!.budgets!.pixels : 1000) : this.saved.batch!.execution === 'session' ? 25 : 5
             );
             this.deadline = this.saved.batch!.execution === 'autonomous' ? Number.MAX_SAFE_INTEGER : Date.now() + (this.saved.batch!.scope?.durationMs ?? 120_000);
-            this.completedRegions.clear();
+            this.completedRegions.clear();this.planningRegion=null;this.yieldRegion=true;
+            this.adaptiveCeiling=this.groupLimit();
+            this.adaptiveWindow = Math.min(INITIAL_GROUP_PIXELS,this.adaptiveCeiling);
             if(this.saved.batch!.execution === 'autonomous') {
                 const monitor=this.d.provider.monitoring;
                 if(monitor.control().state !== 'stopped') monitor.command('stop',5000);
@@ -692,7 +731,7 @@ export class ControlledBatch {
                             const a = await base.start(id, now);
                             check(
                                 a.writes.length >= 1 &&
-                                    a.writes.length <= 5 &&
+                                    a.writes.length <= this.groupLimit() &&
                                     a.writes.every((w) => this.inScope(w, b)),
                                 'attempt outside batch scope'
                             );
@@ -727,7 +766,7 @@ export class ControlledBatch {
                     agents: [this.d.agent],
                     maxActiveAgents: 1,
                     maxBatchSize: ['session', 'continuous', 'autonomous'].includes(this.saved.batch!.execution!)
-                        ? (this.saved.batch!.scope?.groupSize ?? 5)
+                        ? (this.saved.batch!.execution === 'autonomous' ? this.groupLimit() : (this.saved.batch!.scope?.groupSize ?? 5))
                         : this.saved.batch!.execution === 'grouped'
                           ? this.saved.batch!.writes.length
                           : 1,
@@ -764,7 +803,7 @@ export class ControlledBatch {
                                 this.saved.batch!.execution === 'sequential' ||
                                 this.saved.batch!.execution === undefined
                                     ? 1
-                                    : 5,
+                                    : this.groupLimit(),
                             idempotentWrites: false,
                             applyPixels: (_agent, writes, options) => this.dispatch(writes, options),
                         },
@@ -773,6 +812,7 @@ export class ControlledBatch {
             );
             this.scheduler.subscribe((e) => {
                 if(e.type === 'progress' && this.saved.batch!.execution === 'autonomous' && this.planningRegion) {
+                    this.yieldRegion=e.progress.incorrect===0;
                     if(e.progress.completion === 'complete' || e.progress.completion === 'no-eligible-pixels') this.completedRegions.add(this.planningRegion.id);
                     else this.completedRegions.delete(this.planningRegion.id);
                 }
@@ -820,7 +860,7 @@ export class ControlledBatch {
                 this.deadline > Date.now() &&
                 !this.pending &&
                 writes.length >= 1 &&
-                writes.length <= (['grouped', 'session', 'continuous', 'autonomous'].includes(b.execution!) ? 5 : 1) &&
+                writes.length <= (['grouped', 'session', 'continuous', 'autonomous'].includes(b.execution!) ? this.groupLimit() : 1) &&
                 writes.every((w) => this.inScope(w, b) && !this.done(w) && !this.excluded(b.identity).has(key(w))),
             'write outside authorized batch'
         );
@@ -961,7 +1001,7 @@ export class ControlledBatch {
             return false;
         }
     }
-    async result(id: string, status: 'confirmed' | 'not-sent' | 'uncertain' | 'waiting-resources') {
+    async result(id: string, status: 'confirmed' | 'not-sent' | 'uncertain' | 'waiting-resources' | 'rejected-size') {
         check(
             this.saved.records.some((r) => r.attemptId === id),
             'unknown batch result'
@@ -990,15 +1030,23 @@ export class ControlledBatch {
             status !== 'waiting-resources' || ['continuous','autonomous'].includes(this.saved.batch?.execution ?? ''),
             'resource wait requires continuous session'
         );
+        if(status==='rejected-size' || status==='waiting-resources')this.resourcesAfter=Date.now();
+        if(status === 'rejected-size') {
+            check(this.saved.batch?.execution==='autonomous','adaptive rejection requires autonomous drawing');
+            this.adaptiveCeiling=Math.max(1,Math.min(this.adaptiveCeiling,Math.floor(p.writes.length/2)));
+            this.adaptiveWindow=this.adaptiveCeiling;
+            this.wallet=null; // New native evidence required; no imaginary energy refund.
+        }
+        if(status==='confirmed' && this.saved.batch?.execution==='autonomous')this.adaptiveWindow=Math.min(this.adaptiveCeiling,this.adaptiveWindow*2);
         if (status === 'waiting-resources') this.wallet = null; // A refusal cannot leave a spendable stale balance.
         const writes = p.writes;
-        if (status === 'not-sent') {
+        if (status === 'not-sent' || (status==='rejected-size' && writes.length===1)) {
             this.state = 'paused';
             this.error = 'Le lecteur a refusé ce pixel avant envoi. Consulter son message avant de reprendre.';
             void this.scheduler?.pause();
         }
         p.resolve({
-            ...(status === 'waiting-resources' ? { resources: this.allowance(this.context()) } : {}),
+            ...(['waiting-resources','rejected-size'].includes(status) ? { resources: this.allowance(this.context()) } : {}),
             attemptId: id as AttemptId,
             outcomes: writes.map((w) =>
                 status === 'confirmed'
@@ -1230,6 +1278,7 @@ export class ControlledBatch {
             },
         };
     }
+    control(){const b=this.saved.batch;return {id:b?.id??null,execution:b?.execution??'sequential',scope:b?.scope??null,commandReady:!!this.pending?.ready && !this.pending.delivered && this.state==='running'};}
     view() {
         const b = this.saved.batch;
         const latest = new Map(this.saved.records.filter((r) => r.batchId === b?.id).map((r) => [key(r.write), r]));
@@ -1252,6 +1301,8 @@ export class ControlledBatch {
             state: this.state,
             mode: b?.mode ?? null,
             execution: b?.execution ?? 'sequential',
+            limits:{maxGroupPixels:CONNECTOR_MAX_GROUP_PIXELS,commandBytes:CONNECTOR_COMMAND_BYTES},
+            adaptiveGroupSize: Math.min(this.groupLimit(),this.adaptiveWindow,this.energy()?.available ?? 0),
             energyCost: b && ['continuous','autonomous'].includes(b.execution!) ? Math.min(b.budgets!.pixels, b.budgets!.energy) : targets.length,
             scope: b?.scope ?? null,
             spent: this.used(),
@@ -1299,7 +1350,7 @@ export class ControlledBatch {
             digest: b.digest,
             expires: Math.min(this.deadline, this.saved.batch!.execution === 'autonomous' ? Date.now()+30000 : this.deadline),
             project: b.project,
-            ...(b.execution === 'autonomous' ? {execution:'autonomous' as const,budgets:b.budgets!,region:b.scope!.region,groupSize:b.scope!.groupSize ?? 5} : {}),
+            ...(b.execution === 'autonomous' ? {execution:'autonomous' as const,budgets:b.budgets!,region:b.scope!.region,groupSize:this.groupLimit()} : {}),
             ...(b.execution === 'continuous'
                 ? { execution: 'continuous' as const, budgets: b.budgets!, region: b.scope!.region }
                 : {}),
