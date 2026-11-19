@@ -500,7 +500,15 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     await simple.getByText('Options du dessin',{exact:true}).click();
     await simple.getByLabel('Budget du dessin',{exact:true}).fill('20');
     await simple.locator('#drawingImportNotice').filter({hasText:/^Image importée :/}).waitFor();
-    await reader.evaluate(()=>{currentEnergy=100;globalThis.fixtureWrites=[];});
+    await reader.evaluate(()=>{
+      currentEnergy=100;globalThis.fixtureWrites=[];
+      // Start a fresh native evidence stream. Its first response arrives after launch.
+      syncWorker={postMessage(){},addEventListener(type,fn){if(type==='message')fixtureEnergyListeners.add(fn);},removeEventListener(type,fn){if(type==='message')fixtureEnergyListeners.delete(fn);}};
+      const paint=globalThis.fetch;
+      globalThis.fetch=(url,options)=>url==='/GetUserData'
+        ? Promise.resolve(new Response(null,{status:503}))
+        : paint(url,options);
+    });
     await pair(); // Auto-observation after approved coupling must match the imported PNG hash.
     await simple.getByRole('button',{name:'Lancer le dessin',exact:true}).waitFor();
     await page.waitForFunction(()=>![...document.querySelectorAll('#simpleDrawing button')].find(b=>b.textContent==='Lancer le dessin')?.disabled);
@@ -510,11 +518,19 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     await nav.getByRole('link',{name:'Tableau de bord',exact:true}).click();
     assert.equal(await simple.getByRole('button',{name:'Lancer le dessin',exact:true}).isEnabled(),true);
     const beforeSimple=await reader.evaluate(()=>globalThis.fixtureSiteCalls);
+    await simple.getByRole('button',{name:'Lancer le dessin',exact:true}).click();
+    await simple.getByText('En attente d’une lecture d’énergie GeoPixels.',{exact:true}).waitFor();
+    assert.equal(await reader.evaluate(()=>globalThis.fixtureSiteCalls),beforeSimple);
+    await reader.evaluate(()=>{
+      syncWorker.postMessage({type:'sync-delta'});
+      for(const fn of fixtureEnergyListeners)fn({data:{ok:true,userData:{energy:0,colors:'0,16777215'}}});
+    });
+    await simple.getByText('En attente de recharge. Énergie exploitable : 0.',{exact:true}).waitFor();
+    assert.equal(await reader.evaluate(()=>globalThis.fixtureSiteCalls),beforeSimple);
     await reader.evaluate(()=>{
       syncWorker.postMessage({type:'sync-delta'});
       for(const fn of fixtureEnergyListeners)fn({data:{ok:true,userData:{energy:100,colors:'0,16777215'}}});
     });
-    await simple.getByRole('button',{name:'Lancer le dessin',exact:true}).click();
     await simple.getByText('Envois terminés — vérifier les observations',{exact:true}).waitFor();
     const autonomous=await api('connector/status',undefined,'GET');
     assert.equal(autonomous.batch.execution,'autonomous');assert.equal(autonomous.batch.confirmed,20);
@@ -523,7 +539,7 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     assert.equal(new Set((await reader.evaluate(()=>globalThis.fixtureWrites)).map(p=>p.GridX+','+p.GridY)).size,20);
     assert.equal(autonomous.progress.correct,0); // Acceptances are not synthesized into observations.
     await page.screenshot({path:path.join(out,'simple-drawing-local-fixture.png'),fullPage:true});
-    record('OK DEFAULT simple workflow: PNG import, exact image match and automatic binding, one launch, automatic regional monitoring, 20 targets / two adaptive groups, no service requests');
+    record('OK DEFAULT simple workflow: one launch, explicit missing then zero energy status, resumes on native resource proof, 20 targets / two adaptive groups, no service requests');
     await page.getByRole('button',{name:'Révoquer le canal',exact:true}).click();
 
     await page.locator('#connectorConnection').filter({hasText:/^D\u00e9connect\u00e9$/}).waitFor();

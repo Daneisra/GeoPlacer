@@ -33,6 +33,18 @@ const upgradeStateLabels: Record<string, string> = {
     uncertain: 'Incertaine. Achats concernés bloqués.', delivered: 'Résultat attendu',
     prepared: 'Préparée', refused: 'Refusée', cancelled: 'Annulée',
 };
+
+function runningDrawingStatus(batch: BatchView) {
+    if (batch.scheduler === 'waiting-resources') {
+        if (!batch.resources) return 'En attente d’une lecture d’énergie GeoPixels.';
+        if (batch.resources.available === 0) return 'En attente de recharge. Énergie exploitable : 0.';
+        return 'Énergie disponible. En attente de couleurs utilisables ou de données exploitables.';
+    }
+    if (batch.scheduler === 'waiting-observation') return 'En attente de cibles observées dans les régions chargées.';
+    if (batch.scheduler === 'waiting-reconciliation') return 'En attente de vérification d’une tentative.';
+    return 'Dessin en cours';
+}
+
 /** Default workflow. Authority is granted only by the explicit launch/resume buttons. */
 export function SimpleDrawingPanel({
     view,
@@ -238,6 +250,7 @@ export function SimpleDrawingPanel({
                             !previewReady ||
                             !readerReady ||
                             !approvalKey ||
+                            !view?.connected ||
                             !!view?.monitoring.inFlight ||
                             !view?.bound ||
                             batch?.execution !== 'autonomous' ||
@@ -326,11 +339,7 @@ export function SimpleDrawingPanel({
                                 : batch.state === 'paused'
                                   ? 'Dessin en pause'
                                   : batch.state === 'running'
-                                    ? batch.scheduler === 'waiting-resources'
-                                        ? 'Attente d’énergie observée ou de couleurs disponibles'
-                                        : batch.scheduler === 'waiting-observation'
-                                          ? 'Attente de pixels connus dans les régions chargées'
-                                          : 'Dessin en cours'
+                                    ? runningDrawingStatus(batch)
                                     : batch.state === 'prepared'
                                       ? 'Prêt — aucun envoi autorisé'
                                       : batch.state === 'stopped'
@@ -348,6 +357,9 @@ export function SimpleDrawingPanel({
                             {batch.resources?.available ?? 'indisponible — attente d’une nouvelle réponse native'}.
                             Aucune recharge estimée.
                         </p>
+                        {batch.state === 'running' && batch.scheduler === 'waiting-resources' && !batch.resources && (
+                            <p>Dans GeoPixels, ouvrez « Options du lecteur » puis « Diagnostiquer » pour vérifier la lecture de l’énergie.</p>
+                        )}
                         <p>Prochain groupe : jusqu’à {batch.adaptiveGroupSize ?? 0} pixels, selon l’énergie et le réglage autorisé.</p>
                         {batch.error && <p>{batch.error}</p>}
                         {view?.upgrades?.error && <p role="alert">{view.upgrades.error}</p>}
