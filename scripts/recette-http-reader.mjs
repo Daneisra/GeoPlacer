@@ -163,8 +163,8 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
       reader.off('dialog', handle);
     }
     await pair();
-    await page.locator('#connectorCouplingTime').filter({hasText:/Couplage navigateur.*s restantes/}).waitFor();
-    record('OK distinct absolute coupling countdown displayed; starting drawing does not renew it');
+    await page.locator('#connectorCouplingTime').filter({hasText:'Couplage actif pour la session GeoPlacer.'}).waitFor();
+    record('OK dashboard displays a session-long reader pairing');
     await reader.getByRole('button', { name: 'Observer le modèle', exact: true }).click();
     await page.getByText('Modèle du navigateur : 8 × 5, origine (999, 1001)', { exact: true }).waitFor();
     await page.getByRole('button', { name: 'Lier ce modèle', exact: true }).click();
@@ -227,6 +227,8 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     assert.equal((await api('connector/status', undefined, 'GET')).monitoring.history.length, stopped);
     const afterProfile = profile ? await profile.send('Performance.getMetrics') : null;
     const finalView = await api('connector/status', undefined, 'GET');
+    assert.equal(finalView.lastCompleteProgress.correct,38);
+    assert.equal(finalView.lastCompleteProgress.unknown,0);
     const metric = (p, name) => p?.metrics.find(m=>m.name === name)?.value ?? null;
     writeFileSync(path.join(out,'monitoring-metrics.json'), JSON.stringify({
       fixture: true, sourceFreshness: 'unverified', captions: finalView.monitoring.history.map(p=>({ capturedAt:p.capturedAt, receivedAt:p.receivedAt, sourceObservedAt:p.sourceObservedAt })),
@@ -529,7 +531,7 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     assert.equal(await reader.evaluate(()=>globalThis.fixtureSiteCalls),beforeSimple);
     await reader.evaluate(()=>{
       syncWorker.postMessage({type:'sync-delta'});
-      for(const fn of fixtureEnergyListeners)fn({data:{ok:true,userData:{energy:100,colors:'0,16777215'}}});
+      for(const fn of fixtureEnergyListeners)fn({data:{ok:true,userData:{energy:0,colors:'0,16777215',checkedTick:Math.floor(Date.now()/1000)-3600,energyRate:30,maxEnergy:100}}});
     });
     await simple.getByText('Envois terminés — vérifier les observations',{exact:true}).waitFor();
     const autonomous=await api('connector/status',undefined,'GET');
@@ -539,7 +541,7 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     assert.equal(new Set((await reader.evaluate(()=>globalThis.fixtureWrites)).map(p=>p.GridX+','+p.GridY)).size,20);
     assert.equal(autonomous.progress.correct,0); // Acceptances are not synthesized into observations.
     await page.screenshot({path:path.join(out,'simple-drawing-local-fixture.png'),fullPage:true});
-    record('OK DEFAULT simple workflow: one launch, explicit missing then zero energy status, resumes on native resource proof, 20 targets / two adaptive groups, no service requests');
+    record('OK DEFAULT simple workflow: missing then zero balance, native recharge checkpoint unlocks 20 targets / two adaptive groups, no service requests');
     await page.getByRole('button',{name:'Révoquer le canal',exact:true}).click();
 
     await page.locator('#connectorConnection').filter({hasText:/^D\u00e9connect\u00e9$/}).waitFor();
@@ -553,7 +555,7 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
         const card=document.createElement('div'),label=document.createElement('p'),row=document.createElement('div'),input=document.createElement('input');
         input.id=id;label.textContent=price;row.append(input);card.append(label,row);card.hidden=true;document.body.append(card);
       }
-      globalThis.fixturePurchaseCalls=0;globalThis.fixtureShopBalance={energy:0,colors:'0,16777215',pixels:500,maxEnergy:100,energyRate:20};
+      globalThis.fixturePurchaseCalls=0;globalThis.fixtureShopBalance={energy:0,colors:'0,16777215',pixels:500,maxEnergy:100,energyRate:20,checkedTick:Math.floor(Date.now()/1000)};
       const paint=globalThis.fetch;
       globalThis.fetch=async(url,options)=>{
         if(url==='/GetUserData')return new Response(JSON.stringify(fixtureShopBalance),{status:200});

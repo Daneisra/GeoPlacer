@@ -15,6 +15,7 @@ type DrawingView = {
     tileEvidence?:{total:number;nativeUpdated:number;nativeChecked:number;missing:number;sourceDateKnown:boolean};
     upgrades?:{error?:string|null;uncertain:number;history:{id:string;kind:string;cost:number;state:string;at:number}[]};
     progress: { correct: number; incorrect: number; unknown: number; total: number } | null;
+    lastCompleteProgress?: { correct: number; incorrect: number; unknown: number; total: number; capturedAt: number } | null;
     lastSync?: number | null;
     captureExpired?: boolean;
 };
@@ -170,7 +171,10 @@ export function SimpleDrawingPanel({
     const preparedGroup=batch?.scope?.groupSize ?? 5;
     const previewReady=preparedGroup===groupSize && JSON.stringify(batch?.scope?.upgrades??null)===JSON.stringify(upgradeJson?JSON.parse(upgradeJson):null) && (!budget || batch?.budgets?.pixels===Number(budget));
     const dashboard = page === 'dashboard';
-    const progress = view?.progress;
+    const currentProgress = view?.progress;
+    const historical = view?.lastCompleteProgress;
+    const showingHistory = historical && (!currentProgress || view?.captureExpired || historical.unknown < currentProgress.unknown);
+    const progress = showingHistory ? historical : currentProgress;
     const counts = progress ? [
         {label:'Conformes', value:progress.correct, type:'correct'},
         {label:'À corriger', value:progress.incorrect, type:'incorrect'},
@@ -209,7 +213,7 @@ export function SimpleDrawingPanel({
             <div hidden={!dashboard && page !== 'diagnostics'}>{pairing}</div>
             <section className="studio-card space-y-3" hidden={!dashboard || !showWorkflow}>
                 <h2 className="studio-step"><span>3</span> Vérifier et lancer le dessin</h2>
-                {view?.connected && !readerReady && <p>Installez le lecteur 1.1.0 proposé ci-dessous et refaites le couplage pour utiliser les groupes adaptatifs et les améliorations configurables.</p>}
+                {view?.connected && !readerReady && <p>Installez le lecteur proposé à l’étape 2, puis refaites le couplage pour utiliser les groupes adaptatifs et les améliorations configurables.</p>}
                 {!view?.connected ? (
                     <p>
                         Chargez le fantôme sur GeoPixels, puis couplez le lecteur à l’étape 2.
@@ -377,18 +381,19 @@ export function SimpleDrawingPanel({
                   {imageUrl && selected ? <img src={`${imageUrl}?rev=${selected.revision}`} alt={`Modèle préparé : ${selected.name}`} /> : <ImageIcon size={44} aria-hidden="true" />}
                 </div>
                 <div className="studio-card-heading">
-                  <h3>Progression observée</h3>
+                  <h3>{showingHistory ? 'Dernière capture complète' : 'Progression observée'}</h3>
                   {progress && <span>{(progress.total-progress.unknown).toLocaleString('fr-FR')} / {progress.total.toLocaleString('fr-FR')} cibles connues</span>}
                 </div>
                 {progress && progress.total > 0 && <div className="studio-progress" aria-hidden="true">{counts.map(c => <span key={c.type} data-count={c.type} style={{flexGrow:c.value}} />)}</div>}
                 {progress ? <dl className="studio-metrics">{counts.map(c => <div key={c.type}><dt>{c.label}</dt><dd data-count={c.type}>{c.value.toLocaleString('fr-FR')}</dd></div>)}</dl> : <p className="text-muted-foreground">En attente d’une observation du lecteur.</p>}
+                {showingHistory && <p className="text-muted-foreground">Instantané conservé à {new Date(historical.capturedAt).toLocaleTimeString('fr-FR')}. Couverture exploitable actuellement : {(currentProgress ? currentProgress.total - currentProgress.unknown : 0).toLocaleString('fr-FR')} cibles.</p>}
                 {view?.lastSync && <p className="text-muted-foreground">Dernière capture à {new Date(view.lastSync).toLocaleTimeString('fr-FR')}{view.captureExpired ? ' · capture expirée' : ''}</p>}
                 {view?.tileEvidence && (
                   <details>
                     <summary>Actualisation des tuiles</summary>
                     <p>{view.tileEvidence.nativeUpdated} actualisées · {view.tileEvidence.nativeChecked} vérifiées sans changement · {view.tileEvidence.missing} absentes du cache.</p>
                     <p>{view.tileEvidence.sourceDateKnown ? 'Source datée.' : 'Fraîcheur serveur non vérifiée. Une relecture locale ne rajeunit pas la preuve native.'}</p>
-                    {!!progress?.unknown && <p>Affichez les zones manquantes sur GeoPixels pour élargir la couverture.</p>}
+                    {!!progress?.unknown && !showingHistory && <p>Affichez les zones manquantes sur GeoPixels pour élargir la couverture.</p>}
                   </details>
                 )}
               </section>

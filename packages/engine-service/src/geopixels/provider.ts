@@ -262,7 +262,14 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
                 version = Math.max(version, this.cells[y * Math.ceil(p.width / 256) + x]!);
         return version;
     }
-    async readWindow(rect: CanvasRect) {
+    // Historical display only. Operational readers always use the normal per-pixel expiry.
+    readCompletedCaptureWindow(rect: CanvasRect, from: number, through: number) {
+        return this.readObservationWindow(rect, { from, through });
+    }
+    readWindow(rect: CanvasRect) {
+        return this.readObservationWindow(rect);
+    }
+    private async readObservationWindow(rect: CanvasRect, completedCapture?: { from: number; through: number }) {
         check(
             integer(rect.width, 1, MAX_MODEL_PIXELS) &&
                 integer(rect.height, 1, MAX_MODEL_PIXELS) &&
@@ -293,7 +300,10 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
                     const index = iy * p.width + ix;
                     const date = this.dates[index]!;
                     const sampled = this.captures[index] !== 0 || this.pixels[index] !== UNKNOWN;
-                    if (sampled && readAt - Math.abs(date) > CONNECTOR_MAX_AGE_MS) continue;
+                    if (completedCapture) {
+                        const capturedAt = this.captures[index]!;
+                        if (!sampled || capturedAt < completedCapture.from || capturedAt > completedCapture.through) continue;
+                    } else if (sampled && readAt - Math.abs(date) > CONNECTOR_MAX_AGE_MS) continue;
                     const availableAt = Math.max(Math.abs(date), this.captures[index]!);
                     if (sampled && availableAt > readAt) {
                         this.readValidUntil = Math.min(this.readValidUntil, availableAt - 1);

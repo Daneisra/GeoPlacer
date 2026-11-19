@@ -1,6 +1,7 @@
 /* Native resource evidence: passive tap of the public sync-worker contract (GeoPixelsFront 8367389).
  * Optional fixed GetUserData refresh only during explicitly authorized work; no tile fetch. No session field is copied to loopback.
- * currentEnergy may LOWER a balance, never prove clock-based regeneration.
+ * A fresh response can supply the checkpoint used by GeoPixels to compute recharge.
+ * The page counter caps that calculation and never supplies evidence by itself.
  */
 const GeoPlacerEnergy = (() => {
     let worker = null,
@@ -9,6 +10,7 @@ const GeoPlacerEnergy = (() => {
         pending = null,
         evidence = null;
     let refreshing=false,lastRefresh=0,direct=false;
+    let checkpoint = null, rawEnergy = null;
     let sequence = 0,
         spent = 0,
         ceiling = 0,
@@ -18,6 +20,8 @@ const GeoPlacerEnergy = (() => {
     function clear() {
         pending = null;
         evidence = null;
+        checkpoint = null;
+        rawEnergy = null;
         spent = 0;
         ceiling = 0;
     }
@@ -36,32 +40,45 @@ const GeoPlacerEnergy = (() => {
         const request = pending;
         pending = null;
         if (typeof GeoPlacerTiles !== 'undefined' && request && !request.ambiguous) GeoPlacerTiles.receive(r, request.tiles, Date.now());
+        if (r.ok) record(r.userData, request);
+    }
+    function record(raw, request) {
         if (
             !request ||
             request.ambiguous ||
-            !r.ok ||
             writing ||
             request.at <= settledAt ||
             request.user !== account() ||
-            Date.now() - request.at > 30000
+            Date.now() - request.at > 30000 ||
+            (evidence && request.at < evidence.requestStartedAt)
         )
             return;
-        const raw = r.userData,
-            owned = colors(raw?.colors);
+        const owned = colors(raw?.colors);
         if (!raw || !Number.isSafeInteger(raw.energy) || raw.energy < 0 || raw.energy > 1e9 || !owned) return;
+        const now = typeof serverNow === 'function' ? serverNow() : Math.floor(Date.now() / 1000);
+        const validCheckpoint = Number.isSafeInteger(now) && Number.isSafeInteger(raw.checkedTick) &&
+            raw.checkedTick > 0 && raw.checkedTick <= now && Number.isSafeInteger(raw.maxEnergy) && raw.maxEnergy >= 1 &&
+            raw.maxEnergy <= 1e9 && Number.isSafeInteger(raw.energyRate) && raw.energyRate >= 15 && raw.energyRate <= 86400;
+        if (checkpoint !== null && (!validCheckpoint || raw.checkedTick < checkpoint)) return;
+        const energy = validCheckpoint && raw.energy < raw.maxEnergy
+            ? Math.min(raw.maxEnergy, raw.energy + Math.floor((now - raw.checkedTick) / raw.energyRate))
+            : raw.energy;
+        // Rereading the same checkpoint must not credit locally reserved energy a second time.
+        if (checkpoint === null || raw.checkedTick > checkpoint) spent = 0;
+        checkpoint = validCheckpoint ? raw.checkedTick : null;
+        rawEnergy = raw.energy;
         evidence = {
             source: request.direct?'native-user-response':'native-worker-response',
             sequence: ++sequence,
             requestStartedAt: request.at,
             capturedAt: Date.now(),
-            energy: raw.energy,
+            energy,
             colors: owned,
             ...(typeof GeoPlacerShop!=='undefined' && GeoPlacerShop.catalog() && Number.isSafeInteger(raw.pixels) && raw.pixels>=0 && Number.isSafeInteger(raw.maxEnergy) && raw.maxEnergy>0 && Number.isSafeInteger(raw.energyRate) && raw.energyRate>=15 ? {shop:{catalog:GeoPlacerShop.catalog(),currency:Math.floor(raw.pixels/5),capacity:raw.maxEnergy,intervalMs:raw.energyRate*1000,colorPrice:GeoPlacerShop.colorPrice?.(owned)??null}} : {}),
         };
-        direct=!!request.direct;
+        direct=!!request.direct && energy === raw.energy;
         evidenceUser = request.user;
-        spent = 0;
-        ceiling = raw.energy;
+        ceiling = Math.max(0, energy - spent);
     }
     function attach() {
         const next = typeof syncWorker === 'object' && syncWorker ? syncWorker : null;
@@ -108,8 +125,8 @@ const GeoPlacerEnergy = (() => {
             const c=new AbortController(),timer=setTimeout(()=>c.abort(),5000);
             try {const response=await fetch('/GetUserData',{method:'POST',redirect:'error',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:userID,token:tokenUser}),signal:c.signal});
                 if(!response.ok || writing || user!==account() || at<=settledAt)return;
-                const raw=await response.json();if(pending)return;
-                pending={at,user,direct:true,tiles:[]};receive({data:{ok:true,userData:raw}});
+                const raw=await response.json();
+                record(raw,{at,user,direct:true});
             }catch { /* Missing resource proof never credits energy. */ }
             finally{clearTimeout(timer);refreshing=false;}
         },
@@ -118,7 +135,7 @@ const GeoPlacerEnergy = (() => {
             return !worker
                 ? 'Énergie : interface sync-worker indisponible ; aucun crédit de recharge.'
                 : r
-                  ? `Énergie : réponse native n° ${r.sequence}, solde conservateur ${r.available}, reçue il y a ${Math.floor((Date.now() - r.capturedAt) / 1000)} s.`
+                  ? `Énergie : réponse native n° ${r.sequence}, solde brut ${rawEnergy}, solde exploitable ${r.available}, reçue il y a ${Math.floor((Date.now() - r.capturedAt) / 1000)} s.`
                   : 'Énergie : attente d’une réponse native exploitable, aucun crédit de recharge.';
         },
         spend(n) {

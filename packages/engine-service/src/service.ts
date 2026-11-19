@@ -19,7 +19,7 @@ import { GeoPixelsProvider } from './geopixels/provider.js';
 import { ConnectorPairing } from './geopixels/pairing.js';
 import { parseObservationHistory } from './geopixels/monitor.js';
 import { parseRegions, type ImageRegion } from './geopixels/regions.js';
-import { RegionalProgressCache } from './geopixels/region-progress.js';
+import { RegionalProgressCache, summarizeCompletedCapture } from './geopixels/region-progress.js';
 import { check } from './geopixels/protocol.js';
 import path from 'node:path';
 import type {
@@ -343,6 +343,12 @@ export class EngineService {
   private observationStoreHealthy = true;
     private readonly batchMetadata: BatchMetadataStore;
     private readonly regionalProgress = new RegionalProgressCache();
+  private lastCompleteCapture: {
+    template: Template;
+    epoch: number;
+    capturedAt: number;
+    progress: Awaited<ReturnType<typeof summarizeCompletedCapture>>;
+  } | null = null;
     private savedRegions: {
         schemaVersion: 1;
         identity: string;
@@ -397,7 +403,20 @@ export class EngineService {
             if (kind === 'capture') {
                 const capture = this.connector.monitoring.view().lastCapture;
                 const epoch = this.connector.channelEpoch;
-                if (capture)
+                const template = this.selectedTemplate;
+                if (capture && !capture.regionId && template && this.connector.status().bound) {
+                    void summarizeCompletedCapture(template, this.connector, capture.capturedAt, capture.receivedAt)
+                        .then((progress) => {
+                            if (this.closed || epoch !== this.connector.channelEpoch || this.selectedTemplate !== template) return;
+                            this.connector.assertBinding(template);
+                            if (this.lastCompleteCapture?.epoch === epoch && this.lastCompleteCapture.template === template &&
+                                this.lastCompleteCapture.capturedAt > capture.capturedAt) return;
+                            this.lastCompleteCapture = { template, epoch, capturedAt: capture.capturedAt, progress };
+                            this.connector.monitoring.annotate(capture.id, template.id, progress);
+                            this.hub.connector();
+                        })
+                        .catch(() => this.hub.notice('warning', 'Historique de la capture complète indisponible.'));
+                } else if (capture)
                     void this.connectorView()
                         .then((view) => {
                             if (!this.closed && epoch === this.connector.channelEpoch)
@@ -881,6 +900,8 @@ export class EngineService {
                 calculationError = 'Progression indisponible pendant le recalcul ; nouvelle lecture du cache attendue.';
             }
         }
+        const historical = this.lastCompleteCapture?.template === t && this.lastCompleteCapture.epoch === this.connector.channelEpoch
+            ? this.lastCompleteCapture : null;
         return {
             ...this.connector.status(),
             singlePixel: this.singlePixelWriter.view(),
@@ -891,6 +912,7 @@ export class EngineService {
             source: this.source,
             selection: t === null ? null : this.templateInfo(t),
             progress,
+            lastCompleteProgress: historical && { capturedAt: historical.capturedAt, ...historical.progress },
             regionViews,
             recomputedCells,
             savedRegionConfiguration: {

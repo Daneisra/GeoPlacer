@@ -6,17 +6,16 @@ import type { GeoPixelsProvider } from './provider.js';
 import { check, parseObservation, type BrowserObservation } from './protocol.js';
 import type { SinglePixelWriter } from './single-pixel-writer.js';
 
-export const HTTP_IDLE_MS = 30_000;
-export const HTTP_LIFETIME_MS = 10 * 60_000;
+const HTTP_APPROVAL_MS = 60_000;
 const secret = () => randomBytes(32).toString('hex');
 const equal = (a: string, b: string) =>
   /^[a-f0-9]{64}$/.test(a) && timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));
 export type ChannelDiagnostic = {
-  code: 'HTTP_APPROVED' | 'HTTP_RENEWED' | 'HTTP_LIFETIME_EXPIRED' | 'HTTP_IDLE_EXPIRED' | 'HTTP_PENDING_EXPIRED' | 'HTTP_CONTEXT_CHANGED' | 'HTTP_CHANNEL_REPLACED' | 'HTTP_READER_DISCONNECTED' | 'HTTP_REVOKED';
+  code: 'HTTP_APPROVED' | 'HTTP_RENEWED' | 'HTTP_PENDING_EXPIRED' | 'HTTP_CONTEXT_CHANGED' | 'HTTP_CHANNEL_REPLACED' | 'HTTP_READER_DISCONNECTED' | 'HTTP_REVOKED';
   at: number;
   reason: string;
   approvedAt: number | null;
-  expiresAt: number;
+  expiresAt: number | null;
   lastSeen: number;
 };
 type Session = {
@@ -26,7 +25,7 @@ type Session = {
   fingerprint: string;
   approved: boolean;
   approvedAt: number | null;
-  deadline: number;
+  approvalDeadline: number;
   lastSeen: number;
   epoch: number;
   lastSequence: number;
@@ -74,14 +73,14 @@ export class ConnectorHttpChannel {
       fingerprint: createHash('sha256').update(id).digest('hex').slice(0, 12),
       approved: false,
       approvedAt: null,
-      deadline: this.now() + 60_000,
+      approvalDeadline: this.now() + HTTP_APPROVAL_MS,
       lastSeen: this.now(),
       epoch: -1,
       lastSequence: 0,
       lastDigest: null,
       requests: [],
     };
-    return { requestId: id, capability, fingerprint: this.session.fingerprint, expires: this.session.deadline };
+    return { requestId: id, capability, fingerprint: this.session.fingerprint, expires: this.session.approvalDeadline };
   }
   approve(key: string, id: string) {
     this.control(key);
@@ -94,10 +93,9 @@ export class ConnectorHttpChannel {
     s.approved = true;
     s.approvedAt = this.now();
     this.lastTermination = null;
-    s.deadline = this.now() + HTTP_LIFETIME_MS;
     s.lastSeen = this.now();
     s.epoch = this.provider.channelEpoch;
-    this.diagnostic(s, 'HTTP_APPROVED', 'Couplage HTTP approuvé ; durée absolue de dix minutes.');
+    this.diagnostic(s, 'HTTP_APPROVED', 'Couplage HTTP approuvé pour la session GeoPlacer.');
     s.releasePoll?.();
     return { approved: true };
   }
@@ -107,9 +105,9 @@ export class ConnectorHttpChannel {
   private activateRotation(capability:string) {
     const s=this.session,r=s?.rotation;
     if(!s||!r||!equal(capability,r.capability))return;
-    check(this.now()<s.deadline && this.now()<r.until && s.approved && s.epoch===this.provider.channelEpoch && !!this.writer?.batch.transportRenewable(),'rotation no longer authorized');
+    check(this.now()<r.until && s.approved && s.epoch===this.provider.channelEpoch && !!this.writer?.batch.transportRenewable(),'rotation no longer authorized');
     s.capability=r.capability;delete s.rotation;
-    s.approvedAt=this.now();s.deadline=this.now()+HTTP_LIFETIME_MS;s.lastSeen=this.now();
+    s.lastSeen=this.now();
     this.diagnostic(s,'HTTP_RENEWED','Capacité du transport renouvelée ; autorisation de travail inchangée.');
   }
   renew(capability:string,nonce:string) {
@@ -118,8 +116,8 @@ export class ConnectorHttpChannel {
     s.lastSeen=this.now();
     if(s.rotation && this.now()>=s.rotation.until)delete s.rotation;
     if(s.rotation)check(s.rotation.nonce===nonce,'another rotation is pending');
-    else s.rotation={nonce,capability:secret(),until:Math.min(s.deadline,this.now()+10000)};
-    // Main capability/deadline remain unchanged until possession of the new capability is proved.
+    else s.rotation={nonce,capability:secret(),until:this.now()+10000};
+    // The current capability remains valid until possession of the replacement is proved.
     return {nonce,capability:s.rotation.capability,expires:s.rotation.until};
   }
   private writerAccess(capability: string) {
@@ -187,8 +185,8 @@ export class ConnectorHttpChannel {
         return {
             ...(readerVersion===10?{upgrades:{commandReady:this.writer?.upgrades.commandReady()??false},workAuthorized:!!this.writer?.batch.upgradeAuthority() || !!this.writer?.batch.transportRenewable()}:{}),
             approved: s.approved,
-            ...((readerVersion===9 || readerVersion===10) ? {limits:{maxModelPixels:MAX_MODEL_PIXELS,modelMemoryBytes:MODEL_MEMORY_BYTES,groupMax:readerVersion===10?CONNECTOR_MAX_GROUP_PIXELS:5,commandBytes:CONNECTOR_COMMAND_BYTES,autonomous:true},renewRequired: s.approved && s.deadline-this.now()<90000 && !!this.writer?.batch.transportRenewable()} : {}),
-            expires: s.deadline,
+            ...((readerVersion===9 || readerVersion===10) ? {limits:{maxModelPixels:MAX_MODEL_PIXELS,modelMemoryBytes:MODEL_MEMORY_BYTES,groupMax:readerVersion===10?CONNECTOR_MAX_GROUP_PIXELS:5,commandBytes:CONNECTOR_COMMAND_BYTES,autonomous:true},renewRequired: false} : {}),
+            expires: s.approved ? null : s.approvalDeadline,
             lastSequence: s.lastSequence,
             fingerprint: s.fingerprint,
             ...([4,5,6,7,8,9,10].includes(readerVersion??0) ? { regionalProtocol: 1 } : {}),
@@ -281,7 +279,7 @@ export class ConnectorHttpChannel {
     return { disconnected: true };
   }
   private diagnostic(s: Session, code: ChannelDiagnostic['code'], reason: string) {
-    const event = { code, reason, at: this.now(), approvedAt: s.approvedAt, expiresAt: s.deadline, lastSeen: s.lastSeen };
+    const event = { code, reason, at: this.now(), approvedAt: s.approvedAt, expiresAt: s.approved ? null : s.approvalDeadline, lastSeen: s.lastSeen };
     if (code !== 'HTTP_APPROVED' && code !== 'HTTP_RENEWED') this.lastTermination = event;
     // Logging failure must never prevent a revocation. No capability, origin, token or request body.
     try { this.onDiagnostic?.({...event}); } catch { /* retain security behaviour if logging fails */ }
@@ -296,10 +294,8 @@ export class ConnectorHttpChannel {
   tick(): void {
     const s = this.session;
     if (!s) return;
-    if (this.now() >= s.deadline) {
-      this.revoke(s.approved ? 'Couplage navigateur expiré : dix minutes depuis son approbation, indépendamment de la durée du dessin. Nouveau couplage requis.' : 'Demande de couplage expirée avant approbation.', s.approved ? 'HTTP_LIFETIME_EXPIRED' : 'HTTP_PENDING_EXPIRED');
-    } else if (s.approved && this.now() - s.lastSeen >= HTTP_IDLE_MS) {
-      this.revoke('Couplage navigateur interrompu : aucune activité reçue pendant 30 secondes. Nouveau couplage requis.', 'HTTP_IDLE_EXPIRED');
+    if (!s.approved && this.now() >= s.approvalDeadline) {
+      this.revoke('Demande de couplage expirée avant approbation.', 'HTTP_PENDING_EXPIRED');
     } else if (s.approved && s.epoch !== this.provider.channelEpoch) {
       const contextChanged = this.provider.status().error === 'Projet, position, palette ou session modifié : nouveau couplage requis.';
       this.revoke(contextChanged ? 'Contexte de page modifié : projet, position, palette ou session. Nouveau couplage requis.' : 'Canal navigateur remplacé ou interrompu. Nouveau couplage requis.', contextChanged ? 'HTTP_CONTEXT_CHANGED' : 'HTTP_CHANNEL_REPLACED');
@@ -313,12 +309,12 @@ export class ConnectorHttpChannel {
       batchProtocol: s?.batchProtocol ?? null,
       pending:
         s && !s.approved
-          ? { requestId: s.id, fingerprint: s.fingerprint, originClaim: s.originClaim, expires: s.deadline }
+          ? { requestId: s.id, fingerprint: s.fingerprint, originClaim: s.originClaim, expires: s.approvalDeadline }
           : null,
       active: !!s?.approved,
       approvedAt: s?.approvedAt ?? null,
-      expires: s?.approved ? s.deadline : null,
-      remainingMs: s?.approved ? Math.max(0,s.deadline-this.now()) : null,
+      expires: null,
+      remainingMs: null,
       lastTermination: this.lastTermination ? {...this.lastTermination} : null,
     };
   }

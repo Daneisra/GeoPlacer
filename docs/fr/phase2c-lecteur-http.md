@@ -31,7 +31,7 @@ Taper directement l'adresse locale dans la barre d'adresse d'un nouvel onglet (p
 4. Comparer les empreintes courtes de la demande dans les deux panneaux, puis cliquer « Confirmer la demande HTTP » dans le dashboard avant expiration. L'origine est **déclarée**, pas attestée cryptographiquement par HTTP.
 5. Attendre « Couplé par HTTP privilégié, en lecture seule ». Aucun cookie, identifiant Google ou token GeoPixels n'est demandé.
 
-La capacité reste en mémoire. Inactivité maximale : **30 secondes** ; bail de **10 minutes**. Le nouveau mode autonome permet une rotation sécurisée avant expiration uniquement pendant un travail explicitement autorisé ; elle ne rétablit jamais un travail révoqué. Les anciens modes ne renouvellent pas leur bail. Les échanges de statut ne rafraîchissent pas les pixels. Après rechargement, redémarrage, expiration effective ou révocation : nouveau code et confirmation.
+La capacité approuvée reste en mémoire pendant la session GeoPlacer. Une interruption temporaire peut reprendre avec le même lecteur. Les échanges de statut ne rafraîchissent pas les pixels. Un rechargement du lecteur, un redémarrage de GeoPlacer ou une révocation exige un nouveau code et une confirmation.
 
 Le statut utilise une attente HTTP côté serveur de 5 secondes au plus, interrompue par une commande. Les réponses de statut et d'observation sont cadencées côté serveur (50 ms minimum). Aucune cadence de capture ne dépend d'un setInterval ou d'un petit setTimeout de la page. Cela traite le ralentissement des temporisateurs d'un onglet masqué ; cela ne garantit pas l'exécution d'une page gelée ou abandonnée par le navigateur. Si le navigateur suspend réellement le lecteur, le canal expire normalement. Ne pas désactiver les protections ou l'économie d'énergie globale pour ce test.
 
@@ -131,7 +131,7 @@ Cette validation ne certifie ni une actualisation côté service, ni les grandes
 3. **S’arrêter ici jusqu’à l’accord explicite de l’utilisateur sur ce lot et sa destination.** Après cet accord seulement : cliquer **Autoriser et démarrer le lot**. Les pixels s’enchaînent sans autre confirmation ; garder le lecteur ouvert. Ne pas utiliser le bouton d’essai unitaire.
 4. Vérifier le nombre d’**envois confirmés**, puis **Observer le modèle** pour mesurer séparément la progression. Pause, reprise du même lot et arrêt immédiat sont disponibles. Révoquer ensuite le canal.
 
-L’autorisation dure deux minutes maximum ; le couplage conserve sa limite absolue de dix minutes. Un délai minimal d’une seconde sépare deux envois terminés. Chaque envoi exige une observation non expirée de sa cible et les vérifications navigateur (énergie, couleur possédée, file native vide, session, modèle, position et couche inchangés). Le budget de ressources côté moteur est une autorisation locale, **pas l’énergie du compte**. Le navigateur ne crédite aucune régénération pendant ces essais ; recharger avant un nouveau lot si son budget conservateur est épuisé.
+L’autorisation de cet essai dure deux minutes maximum. Un délai minimal d’une seconde sépare deux envois terminés. Chaque envoi exige une observation non expirée de sa cible et les vérifications navigateur (énergie, couleur possédée, file native vide, session, modèle, position et couche inchangés). Le budget du moteur borne l’autorisation locale. Recharger avant un nouveau lot si le budget conservateur du lecteur est épuisé.
 
 Un résultat manquant ou ambigu arrête le lot et conserve la réservation incertaine. Aucun renvoi aveugle, même après redémarrage. Une réponse `Ok` confirme l’envoi, sans modifier le cache ni la progression observée. Les confirmations durables excluent ces cibles d’un nouveau lot si un ancien cache est relu. La réconciliation exige une source datée postérieure à l’interruption ; le cache réel actuellement non daté ne suffit pas. Un redémarrage ne restaure aucune autorisation : les cibles confirmées sont conservées et les restantes demandent un nouvel accord. L’arrêt ne peut pas annuler une requête déjà partie.
 
@@ -181,7 +181,7 @@ Validation réelle 2J du 18 novembre 2026 : l’utilisateur confirme **50 cibles
 
 ### Deux échéances et diagnostic d’interruption
 
-Le dashboard indique séparément le temps restant du **couplage navigateur** (dix minutes depuis son approbation) et de l’**autorisation de dessin** (durée choisie depuis son démarrage). Autoriser un dessin ne renouvelle pas le couplage. Une durée de dessin de 600 s ne garantit donc pas dix minutes supplémentaires de canal.
+Le dashboard sépare le **couplage navigateur**, valable pour la session GeoPlacer, de l’**autorisation de dessin**, dont la durée dépend du mode choisi. Toute révocation interrompt le canal et invalide les opérations autorisées par ce canal.
 
 Après interruption, le dernier motif connu s’affiche : expiration absolue, inactivité, contexte changé, canal remplacé, déconnexion ou révocation. Les nouveaux journaux serveur `[connector-http]` et `[connector-drawing]` conservent les dates et compteurs utiles, sans secrets. Une fermeture par inactivité ne permet pas à elle seule de distinguer rechargement, suspension de l’onglet ou perte de transport. Le lecteur 0.9.0 reste compatible ; aucun allongement de limite n’est nécessaire.
 

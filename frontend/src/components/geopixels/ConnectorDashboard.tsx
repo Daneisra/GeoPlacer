@@ -36,6 +36,7 @@ type View = {
     error: string | null;
     resources: { energy: number | null; capacity: number | null; currency: number | null } | null;
     progress: { correct: number; incorrect: number; unknown: number; total: number } | null;
+    lastCompleteProgress?: { correct: number; incorrect: number; unknown: number; total: number; capturedAt: number } | null;
     scheduler: { state: string; reason: string | null; openAttempts: number; uncertainAttempts: string[] } | null;
 };
 type HttpReaderInfo = {
@@ -286,7 +287,7 @@ export function ConnectorDashboard({ page }: { page: WorkspacePage }) {
             </details>
             <div className="flex flex-wrap items-center gap-2 mt-3">
             <button
-                disabled={busy || (!view?.connected && !httpReader?.pending && !capability)}
+                disabled={busy || (!view?.connected && !httpReader?.active && !httpReader?.pending && !capability)}
                 onClick={() =>
                     void action(async () => {
                         await engineHttp.post('/connector/revoke', {});
@@ -319,13 +320,11 @@ export function ConnectorDashboard({ page }: { page: WorkspacePage }) {
                         ? 'Contexte reçu (session non authentifiée par GeoPlacer)'
                         : 'Indisponible'}
                 </p>
-                {httpReader?.active && httpReader.expires != null && (
+                {httpReader?.active && (
                     <p id="connectorCouplingTime">
-                        Couplage navigateur : {Math.ceil((httpReader.remainingMs ?? 0) / 1000)} s
-                        restantes pour cette capacité, expiration à {new Date(httpReader.expires).toLocaleTimeString('fr-FR')}.
-                        {view?.batch.execution==='autonomous' && ['running','paused'].includes(view.batch.state)
-                          ? ' Rotation sécurisée possible pendant ce travail autorisé ; arrêt et révocation restent prioritaires.'
-                          : ' Hors dessin autonome autorisé, un nouveau couplage est requis à l’expiration.'}
+                        {httpReader.expires == null
+                            ? (view?.connected ? 'Couplage actif pour la session GeoPlacer.' : 'Couplage conservé · attente du lecteur.')
+                            : `Couplage actif pour encore ${Math.ceil((httpReader.remainingMs ?? 0) / 1000)} s.`}
                     </p>
                 )}
                 {!httpReader?.active && httpReader?.lastTermination && (

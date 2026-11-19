@@ -6,6 +6,7 @@ import {
   TRANSPARENT_U32,
   type CanvasRect,
   type CanvasSnapshot,
+  type PixelCounts,
   type ProgressSnapshot,
   type Template,
 } from '@geoplacer/core';
@@ -40,6 +41,28 @@ const intersection = (a: CanvasRect, b: CanvasRect): CanvasRect | null => {
     height = Math.min(a.minY + a.height, b.minY + b.height) - minY;
   return width > 0 && height > 0 ? { minX, minY, width, height } : null;
 };
+
+/** Classify the bands of one completed whole capture for history and display. */
+export async function summarizeCompletedCapture(
+  t: Template, provider: GeoPixelsProvider, capturedAt: number, receivedAt: number,
+): Promise<PixelCounts> {
+  const whole = { minX: t.placement.topLeft.x, minY: t.placement.topLeft.y, width: t.image.width, height: t.image.height };
+  const area = t.coordinateSystem.bounds ? intersection(whole, t.coordinateSystem.bounds) : whole;
+  const counts = { total: 0, correct: 0, incorrect: 0, unknown: 0, wrongColor: 0, missing: 0 };
+  if (!area) return counts;
+  for (let y = 0; y < area.height; y += 256) {
+    for (let x = 0; x < area.width; x += 256) {
+      provider.assertBinding(t);
+      const rect = { minX: area.minX + x, minY: area.minY + y, width: Math.min(256, area.width - x), height: Math.min(256, area.height - y) };
+      const { snapshot } = await provider.readCompletedCaptureWindow(rect, capturedAt, receivedAt);
+      const coordinateSystem = { yAxis: 'down' as const, bounds: rect };
+      const result = computeProgressWithinBounds({ ...t, coordinateSystem }, { ...snapshot, coordinateSystem }, receivedAt, OPTIONS);
+      for (const key of ['total', 'correct', 'incorrect', 'unknown', 'wrongColor', 'missing'] as const) counts[key] += result[key];
+      await yieldToEventLoop();
+    }
+  }
+  return counts;
+}
 
 /** Calculation cells of one image, not tasks/models. Core owns every pixel classification. */
 export class RegionalProgressCache {

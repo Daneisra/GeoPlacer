@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { computeProgress, TRANSPARENT_U32, type Template } from '@geoplacer/core';
 import { GeoPixelsProvider } from '../src/geopixels/provider.js';
-import { RegionalProgressCache } from '../src/geopixels/region-progress.js';
+import { RegionalProgressCache, summarizeCompletedCapture } from '../src/geopixels/region-progress.js';
 import { parseRegions, chooseRegion, type ImageRegion } from '../src/geopixels/regions.js';
 import type { BrowserObservation } from '../src/geopixels/protocol.js';
 
@@ -16,6 +16,24 @@ const region = (id = 'left', patch: Partial<ImageRegion> = {}): ImageRegion => (
     enabled: true,
     ...patch,
 });
+
+it('retains accurate display counts for a complete capture whose first band has expired', async () => {
+    const s = setup();
+    s.send({ x: 0, y: 0, width: 4, height: 1 }, [0, -1, -2, 0], { id: 'slow', index: 0, count: 2 });
+    s.advance(31_000);
+    s.send({ x: 0, y: 1, width: 4, height: 1 }, [0, 0xffffff, 0, 0], { id: 'slow', index: 1, count: 2 });
+    const capture = s.p.monitoring.view().lastCapture!;
+    expect((await s.view()).progress).toMatchObject({ correct: 3, incorrect: 1, unknown: 4 });
+    expect(await summarizeCompletedCapture(s.t, s.p, capture.capturedAt, capture.receivedAt)).toMatchObject({
+        total: 8, correct: 5, incorrect: 2, unknown: 1,
+    });
+    s.advance(31_000);
+    expect((await s.view()).progress).toMatchObject({ correct: 0, incorrect: 0, unknown: 8 });
+    expect(await summarizeCompletedCapture(s.t, s.p, capture.capturedAt, capture.receivedAt)).toMatchObject({
+        total: 8, correct: 5, incorrect: 2, unknown: 1,
+    });
+});
+
 function setup(width = 4, height = 2) {
     let now = 100_000,
         sequence = 0,

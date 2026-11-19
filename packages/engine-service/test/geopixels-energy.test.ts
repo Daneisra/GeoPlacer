@@ -75,6 +75,34 @@ describe('Passive native resource evidence, no service request or token export',
         for (const fn of f.listeners) fn({ data: { ok: false } });
         expect(f.api.snapshot()).toBeNull();
     });
+    it('uses GeoPixels recharge checkpoints, and keeps the debit when a response repeats the same checkpoint', async () => {
+        const f = await fixture();
+        f.context.serverNow = () => 5000;
+        f.context.currentEnergy = 290;
+        const checkpoint = { checkedTick: 100, energyRate: 15, maxEnergy: 290 };
+        f.request();
+        f.reply(0, checkpoint);
+        expect(f.api.snapshot()).toMatchObject({ energy: 290, available: 290 });
+        f.api.spend(16);
+        f.api.settled();
+        f.advance();
+        f.request();
+        f.reply(0, checkpoint);
+        expect(f.api.snapshot()).toMatchObject({ energy: 290, available: 274 });
+        f.request();
+        f.reply(1, { ...checkpoint, checkedTick: 99 });
+        expect(f.api.snapshot()).toMatchObject({ energy: 290, available: 274 });
+        f.request();
+        f.reply(274, { ...checkpoint, checkedTick: 5000 });
+        expect(f.api.snapshot()).toMatchObject({ energy: 274, available: 274 });
+    });
+    it('keeps the raw balance when the recharge checkpoint is missing or in the future', async () => {
+        const f = await fixture();
+        f.context.currentEnergy = 290;
+        f.request();
+        f.reply(0, { energyRate: 15, maxEnergy: 290, checkedTick: 100000 });
+        expect(f.api.snapshot()).toMatchObject({ energy: 0, available: 0 });
+    });
     it('deducts spending; clock-based counter growth cannot replenish it', async () => {
         const f = await fixture();
         f.request();

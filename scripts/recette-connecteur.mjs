@@ -130,6 +130,25 @@ try {
     assert.equal(await simple.getByRole('button',{name:'Lancer le dessin',exact:true}).isDisabled(), true);
     await page.screenshot({path:path.join(out,'dashboard.png'),fullPage:true});
 
+    const statusUrl = '**/api/v1/connector/status';
+    const expiredCapture = async (route) => {
+      const response = await route.fetch();
+      const state = await response.json();
+      const capturedAt = Date.now() - 35_000;
+      await route.fulfill({ response, json: {
+        ...state, lastSync: capturedAt, captureExpired: true,
+        lastCompleteProgress: { capturedAt, total: 400, correct: 24, incorrect: 376, unknown: 0 },
+        progress: { total: 400, correct: 0, incorrect: 0, unknown: 400 },
+      } });
+    };
+    await page.route(statusUrl, expiredCapture);
+    await simple.getByRole('heading',{name:'Dernière capture complète',exact:true}).waitFor();
+    assert.equal(await simple.locator('[data-count="correct"]').last().textContent(),'24');
+    await simple.getByText(/Couverture exploitable actuellement : 0 cibles/).waitFor();
+    await page.screenshot({path:path.join(out,'capture-expiree.png'),fullPage:true});
+    await page.unroute(statusUrl, expiredCapture);
+    record('OK historical capture stays visible when operational coverage expires');
+
     await nav.getByRole('link',{name:'Ressources et améliorations',exact:true}).click();
     await page.getByText('Ressources indisponibles.',{exact:true}).waitFor();
     await page.screenshot({path:path.join(out,'ressources.png'),fullPage:true});

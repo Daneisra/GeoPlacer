@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { Template } from '@geoplacer/core';
 import { ObservationMonitor, parseObservationHistory } from '../src/geopixels/monitor.js';
 import { GeoPixelsProvider } from '../src/geopixels/provider.js';
-import { ConnectorHttpChannel, HTTP_LIFETIME_MS } from '../src/geopixels/http-channel.js';
+import { ConnectorHttpChannel } from '../src/geopixels/http-channel.js';
 import { ConnectorPairing } from '../src/geopixels/pairing.js';
 import type { BrowserObservation } from '../src/geopixels/protocol.js';
 
@@ -37,9 +37,11 @@ describe('Repeated cache observation, without service freshness claims', () => {
     const next=s.http.poll(s.claim.capability,3,undefined,new AbortController().signal);
     s.http.revoke();await expect(next).rejects.toThrow();
   });
-  it('cannot keep a capability alive past its absolute deadline with a held request', async () => {
+  it('keeps approval across an idle gap with a held request', async () => {
     const s=setup();const pending=s.http.poll(s.claim.capability,3,undefined,new AbortController().signal);
-    s.advance(HTTP_LIFETIME_MS);s.http.tick();await expect(pending).rejects.toThrow();
+    s.advance(900_000);s.http.tick();
+    s.provider.monitoring.command('start',5000);
+    await expect(pending).resolves.toMatchObject({approved:true,expires:null});
   });
   it('requires capability negotiation and enforces bounded, acknowledged controls', () => {
     const m = new ObservationMonitor();
@@ -111,13 +113,12 @@ describe('Repeated cache observation, without service freshness claims', () => {
     expect(s.provider.status().connected).toBe(false);
     expect(s.provider.monitoring.view().history).toHaveLength(1);
   });
-  it('does not silently extend the absolute coupling lifetime with monitoring', () => {
+  it('keeps monitoring coupled past the former deadline', () => {
     const s = setup(); s.send(); s.provider.monitoring.command('start', 5000);
-    for (let i=0;i<HTTP_LIFETIME_MS/10000-1;i++) { s.advance(10000); s.http.status(s.claim.capability, 3); }
-    s.advance(10000);
-    expect(() => s.http.status(s.claim.capability, 3)).toThrow();
-    expect(s.provider.status().connected).toBe(false);
-    expect(s.provider.monitoring.view().state).toBe('stopped');
+    s.advance(3_600_000);
+    expect(s.http.status(s.claim.capability, 3)).toMatchObject({approved:true,expires:null});
+    expect(s.provider.status().connected).toBe(true);
+    expect(s.provider.monitoring.view().state).toBe('running');
   });
   it.each(['revoke', 'disconnect'] as const)('stops on %s and refuses former capabilities', kind => {
     const s = setup(); s.send(); s.provider.monitoring.command('start', 5000);
