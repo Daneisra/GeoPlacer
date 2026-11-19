@@ -27,6 +27,10 @@ export type CaptureSummary = {
 export type ObservationPoint = CaptureSummary & {
   templateId: string | null; progress: PixelCounts | null;
 };
+type DrawingObservation = { templateId: string; capturedAt: number; progress: PixelCounts };
+type ObservationHistory = { history: ObservationPoint[]; drawings: DrawingObservation[] };
+// Compact summaries fit the existing 1 MB store independently of the 120-capture timeline.
+const MAX_DRAWING_SUMMARIES = 2048;
 type Assembly = CaptureSummary & { next: number; count: number; nextY: number; started: number };
 
 /** Bounded session observation service, never a painting scheduler. No timers or network access. */
@@ -50,6 +54,7 @@ export class ObservationMonitor {
   private intervalMs = 10_000;
   private assembly: Assembly | null = null;
   private points: ObservationPoint[] = [];
+  private readonly drawingObservations = new Map<string, DrawingObservation>();
   private events: { at: number; code: string; message: string }[] = [];
   private listeners = new Set<(kind: 'capture' | 'history' | 'state') => void>();
   private lastReceivedAt: number | null = null;
@@ -334,12 +339,32 @@ export class ObservationMonitor {
     if (!last || last.id !== id) return;
     const p = progress && { total: progress.total, correct: progress.correct, incorrect: progress.incorrect, unknown: progress.unknown, wrongColor: progress.wrongColor, missing: progress.missing };
     this.points[this.points.length - 1] = { ...last, templateId, progress: p };
+    if (templateId && p && !last.regionId) this.rememberDrawing({ templateId, capturedAt: last.capturedAt, progress: p });
     this.emit('history');
   }
-    persisted() {
-        return { schemaVersion: 2, history: this.points };
+    private rememberDrawing(observation: DrawingObservation) {
+        const previous = this.drawingObservations.get(observation.templateId);
+        if (previous && previous.capturedAt > observation.capturedAt) return;
+        this.drawingObservations.delete(observation.templateId);
+        this.drawingObservations.set(observation.templateId, observation);
+        if (this.drawingObservations.size > MAX_DRAWING_SUMMARIES)
+            this.drawingObservations.delete(this.drawingObservations.keys().next().value!);
     }
-  restore(points: ObservationPoint[]) { this.points = points.slice(-120); } // Validated at the filesystem boundary.
+    lastDrawingObservation(templateId: string) {
+        return this.drawingObservations.get(templateId) ?? null;
+    }
+    persisted() {
+        return { schemaVersion: 3, history: this.points, drawings: [...this.drawingObservations.values()] };
+    }
+    restore({ history, drawings }: ObservationHistory) {
+        this.points = history.slice(-120); // Validated at the filesystem boundary.
+        this.drawingObservations.clear();
+        for (const point of history) {
+            if (point.templateId && point.progress && !point.regionId)
+                this.rememberDrawing({ templateId: point.templateId, capturedAt: point.capturedAt, progress: point.progress });
+        }
+        for (const summary of drawings) this.rememberDrawing(summary);
+    }
     control() {
         const r = this.selectedRegion();
         return {
@@ -376,12 +401,24 @@ export class ObservationMonitor {
     }
 }
 
-export function parseObservationHistory(value: unknown): ObservationPoint[] {
-    check(typeof value === 'object' && value !== null, 'invalid observation history');
-    const v = value as { schemaVersion?: unknown; history?: unknown };
+function checkProgress(progress: PixelCounts) {
+    check(progress !== null && typeof progress === 'object' && Object.keys(progress).length === 6, 'invalid history progress');
+    for (const key of ['total', 'correct', 'incorrect', 'unknown', 'wrongColor', 'missing'] as const)
+        check(integer(progress[key], 0, MAX_MODEL_PIXELS), 'invalid history progress count');
     check(
-        Object.keys(v).length === 2 &&
-            [1, 2].includes(v.schemaVersion as number) &&
+        progress.total === progress.correct + progress.incorrect + progress.unknown &&
+            progress.incorrect === progress.wrongColor + progress.missing,
+        'invalid history progress totals'
+    );
+}
+
+export function parseObservationHistory(value: unknown): ObservationHistory {
+    check(typeof value === 'object' && value !== null, 'invalid observation history');
+    const v = value as { schemaVersion?: unknown; history?: unknown; drawings?: unknown };
+    const newFormat = v.schemaVersion === 3;
+    check(
+        Object.keys(v).length === (newFormat ? 3 : 2) &&
+            [1, 2, 3].includes(v.schemaVersion as number) &&
             Array.isArray(v.history) &&
             v.history.length <= 120,
         'invalid observation history'
@@ -466,16 +503,18 @@ export function parseObservationHistory(value: unknown): ObservationPoint[] {
             p.templateId === null || (typeof p.templateId === 'string' && p.templateId.length <= 128),
             'invalid history template'
         );
-        if (p.progress !== null) {
-            check(typeof p.progress === 'object' && Object.keys(p.progress).length === 6, 'invalid history progress');
-            for (const key of ['total', 'correct', 'incorrect', 'unknown', 'wrongColor', 'missing'] as const)
-                check(integer(p.progress[key], 0, MAX_MODEL_PIXELS), 'invalid history progress count');
-            check(
-                p.progress.total === p.progress.correct + p.progress.incorrect + p.progress.unknown &&
-                    p.progress.incorrect === p.progress.wrongColor + p.progress.missing,
-                'invalid history progress totals'
-            );
+        if (p.progress !== null) checkProgress(p.progress);
+    }
+    if (newFormat) {
+        check(Array.isArray(v.drawings) && v.drawings.length <= MAX_DRAWING_SUMMARIES, 'invalid drawing summaries');
+        const seen = new Set<string>();
+        for (const d of v.drawings as DrawingObservation[]) {
+            check(d && typeof d === 'object' && Object.keys(d).length === 3 && ['templateId','capturedAt','progress'].every(k => Object.hasOwn(d, k)) &&
+                typeof d.templateId === 'string' && d.templateId.length > 0 && d.templateId.length <= 128 && !seen.has(d.templateId) &&
+                integer(d.capturedAt, 0, 8_640_000_000_000_000), 'invalid drawing summary');
+            checkProgress(d.progress);
+            seen.add(d.templateId);
         }
     }
-    return v.history as ObservationPoint[];
+    return { history: v.history as ObservationPoint[], drawings: newFormat ? v.drawings as DrawingObservation[] : [] };
 }

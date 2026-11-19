@@ -11,6 +11,7 @@ import {
     taskIdOf,
     canvasPointKey,
     type AgentId,
+    type DrawingStrategyId,
     type AttemptId,
     type AttemptManager,
     type PixelWrite,
@@ -22,6 +23,7 @@ import {
 } from '@geoplacer/core';
 import { nodeSha256Hasher } from '@geoplacer/adapters-node';
 import { monotonicClock } from '../clock.js';
+import { STRATEGIES } from '../settings.js';
 import { check, type BrowserProject } from './protocol.js';
 import { nativePoint, type GeoPixelsProvider } from './provider.js';
 import { validWriterResources, type WriterResources } from './writer-resources.js';
@@ -35,7 +37,7 @@ type RecordEntry = {
     write: PixelWrite;
     execution?: 'sequential' | 'grouped' | 'session' | 'continuous' | 'autonomous';
 };
-export type DrawingScope = { region: { x: number; y: number; width: number; height: number }; durationMs: number | null; groupSize?: number; upgrades?:AutomaticUpgradePolicy };
+export type DrawingScope = { region: { x: number; y: number; width: number; height: number }; durationMs: number | null; groupSize?: number; strategy?: DrawingStrategyId; upgrades?:AutomaticUpgradePolicy };
 type Batch = {
     id: string;
     identity: string;
@@ -230,7 +232,8 @@ export class ControlledBatch {
         if(scope?.upgrades)validateUpgradePolicy(scope.upgrades);
         return (
             !!r &&
-            Object.keys(scope!).every((k) => ['region', 'durationMs', 'groupSize', 'upgrades'].includes(k)) &&
+            Object.keys(scope!).every((k) => ['region', 'durationMs', 'groupSize', 'strategy', 'upgrades'].includes(k)) &&
+            (scope!.strategy === undefined || STRATEGIES.includes(scope!.strategy)) &&
             Object.keys(r).length === 4 &&
             ['x', 'y', 'width', 'height'].every((k) => Object.hasOwn(r, k)) &&
             [r.x, r.y, r.width, r.height].every(Number.isSafeInteger) &&
@@ -325,6 +328,7 @@ export class ControlledBatch {
             available: Math.max(0, Math.min(value.available, this.wallet!.baseline - committed)),
             capturedAt: value.capturedAt,
             colors: value.colors,
+            ...(value.shop ? { shop: value.shop } : {}),
         };
     }
     private scopedTemplate(t: Template, exclude = false) {
@@ -356,6 +360,7 @@ export class ControlledBatch {
         if (b)
             check(
                 this.identity(t) === b.identity &&
+                    (b.scope?.strategy === undefined || b.scope.strategy === t.strategy.id) &&
                     this.d.provider.status().mode === (b.mode === 'real' ? 'read-only' : 'local-fake') &&
                     (reconnect || this.epoch === this.d.provider.channelEpoch),
                 'batch model, position, layer or session changed'
@@ -372,6 +377,20 @@ export class ControlledBatch {
     private accounted(r: RecordEntry) {
         const a = this.d.attempts.get(r.attemptId);
         return a?.state === 'finished';
+    }
+    drawingReceipts() {
+        const counts = new Map<string, { real: number; fake: number }>();
+        for (const record of this.saved.records) {
+            const attempt = this.d.attempts.get(record.attemptId);
+            if (attempt?.state !== 'finished' || ('reconciled' in attempt && attempt.reconciled)) continue;
+            const source = record.identity.endsWith(',"read-only"]') ? 'real' :
+                record.identity.endsWith(',"local-fake"]') ? 'fake' : null;
+            if (!source) continue;
+            const tally = counts.get(attempt.templateId) ?? { real: 0, fake: 0 };
+            tally[source]++;
+            counts.set(attempt.templateId, tally);
+        }
+        return counts;
     }
     excludedFor(t: Template) {
         return this.excluded(this.identity(t));
@@ -1281,6 +1300,14 @@ export class ControlledBatch {
     control(){const b=this.saved.batch;return {id:b?.id??null,execution:b?.execution??'sequential',scope:b?.scope??null,commandReady:!!this.pending?.ready && !this.pending.delivered && this.state==='running'};}
     view() {
         const b = this.saved.batch;
+        const scheduler = this.scheduler?.status();
+        let templateId: string | null = null;
+        if (b) {
+            try {
+                const identity: unknown = JSON.parse(b.identity);
+                if (Array.isArray(identity) && typeof identity[0] === 'string') templateId = identity[0];
+            } catch { /* Identifiers from unreadable archives stay unavailable. */ }
+        }
         const latest = new Map(this.saved.records.filter((r) => r.batchId === b?.id).map((r) => [key(r.write), r]));
         const accepted = b ? this.excluded(b.identity) : new Set<string>();
         const targets =
@@ -1297,6 +1324,7 @@ export class ControlledBatch {
             }) ?? [];
         return {
             id: b?.id ?? null,
+            templateId,
             digest: b?.digest ?? null,
             state: this.state,
             mode: b?.mode ?? null,
@@ -1337,7 +1365,17 @@ export class ControlledBatch {
             regionCount: b?.execution === 'autonomous' ? Math.ceil(b.project.width/256)*Math.ceil(b.project.height/256) : null,
             remainingMs: b?.execution !== 'autonomous' && this.deadline ? Math.max(0,this.deadline-Date.now()) : null,
             commandReady: !!this.pending?.ready && !this.pending.delivered && this.state === 'running',
-            scheduler: this.scheduler?.status().state ?? null,
+            scheduler: scheduler?.state ?? null,
+            schedulerReason: scheduler?.reason ?? null,
+            nextGroup: this.pending && {
+                attemptId: this.pending.command.attemptId,
+                state: this.pending.delivered ? 'delivered' as const : this.pending.ready ? 'ready' as const : 'reserving' as const,
+                pixels: this.pending.command.protocol === 2 ? this.pending.command.pixels : [{
+                    gridX: this.pending.command.gridX,
+                    gridY: this.pending.command.gridY,
+                    color: this.pending.command.color,
+                }],
+            },
         };
     }
     grant() {

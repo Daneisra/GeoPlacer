@@ -1,6 +1,7 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import type { WorkspacePage } from '../../navigation';
-import { DrawingGallery } from '../DrawingGallery';
+import { DrawingGallery, type DrawingInfo } from '../DrawingGallery';
+import { DrawingModes } from '../DrawingModes';
 import { ConnectorQueue } from './ConnectorQueue';
 import { SimpleDrawingPanel } from './SimpleDrawingPanel';
 import { useCallback, useEffect, useState } from 'react';
@@ -13,10 +14,12 @@ import { engineHttp, type TemplateInfo } from '../../lib/engine';
 import { onConnectorChange } from '../../hooks/useEngine';
 import { RegionalObservations, type RegionView } from './RegionalObservations';
 import { ObservationSupervision, type Monitoring } from './ObservationSupervision';
+import { upgrades, type UpgradeKind } from './upgrade-catalog';
 
 type View = {
     tileEvidence?:{total:number;nativeUpdated:number;nativeChecked:number;missing:number;sourceDateKnown:boolean};
-    upgrades?:{error?:string|null;uncertain:number;history:{id:string;kind:string;cost:number;state:string;at:number}[]};
+    upgrades?:{error?:string|null;uncertain:number;budgetUsed?:number;history:{id:string;kind:string;cost:number;state:string;at:number}[];
+        proposals: { kind: UpgradeKind; color: number | null; cost: number | null; allowed: boolean; reasons: string[] }[]};
     connected: boolean;
     mode: 'read-only' | 'local-fake' | null;
     session: string;
@@ -63,13 +66,14 @@ const kindLabels: Record<string, string> = {
 const number = (n: number | null | undefined) => (n == null ? 'Indisponible' : n.toLocaleString('fr-FR'));
 
 export function ConnectorDashboard({ page }: { page: WorkspacePage }) {
+    const navigate = useNavigate();
     const [advanced,setAdvanced]=useState(()=>sessionStorage.getItem('geoplacer.advanced')==='true');
     const showAdvanced = page === 'diagnostics' || (page === 'dashboard' && advanced);
     const [approvalKey, setApprovalKey] = useState('');
     const [httpReader, setHttpReader] = useState<HttpReaderInfo | null>(null);
     const [readerOrigin, setReaderOrigin] = useState('https://geopixels.net');
     const [view, setView] = useState<View | null>(null);
-    const [templates, setTemplates] = useState<TemplateInfo[] | null>(null);
+    const [templates, setTemplates] = useState<DrawingInfo[] | null>(null);
     const [galleryError, setGalleryError] = useState(false);
     const [error, setError] = useState('');
     const [capability, setCapability] = useState('');
@@ -115,7 +119,7 @@ export function ConnectorDashboard({ page }: { page: WorkspacePage }) {
     }, []);
     const selectionId = view?.selection?.templateId;
     const loadTemplates = useCallback((signal?: AbortSignal) =>
-        engineHttp.get<{ templates: TemplateInfo[] }>('/templates', { signal }).then(
+        engineHttp.get<{ templates: DrawingInfo[] }>('/connector/drawing', { signal }).then(
             ({data}) => {
                 if (!signal?.aborted) {
                     setTemplates(data.templates);
@@ -136,17 +140,22 @@ export function ConnectorDashboard({ page }: { page: WorkspacePage }) {
         setError('');
         try {
             await fn();
-            setView((await engineHttp.get<View>('/connector/status')).data);
+            await refresh();
+            return true;
         } catch (e) {
             const message = (e as { response?: { data?: { error?: { message?: string } } } }).response?.data?.error
                 ?.message;
             setError(message ?? 'Commande refusée');
+            return false;
         } finally {
             setBusy(false);
         }
     }
     const engineActive = !!view?.scheduler && !['stopped', 'completed', 'error'].includes(view.scheduler.state);
     const active = engineActive || ['running','paused'].includes(view?.batch.state ?? '');
+    const wallet = view?.batch.resources;
+    const shop = wallet?.shop;
+    const policy = view?.batch.scope?.upgrades;
     async function pair(mode: 'local-fake' | 'read-only') {
         setCapability('');
         const origin = mode === 'local-fake' ? location.origin : readerOrigin;
@@ -342,26 +351,56 @@ export function ConnectorDashboard({ page }: { page: WorkspacePage }) {
             <label hidden={page !== 'dashboard'} className="studio-advanced-toggle"><input type="checkbox" aria-label="Réglages avancés" checked={advanced} onChange={e=>{setAdvanced(e.target.checked);sessionStorage.setItem('geoplacer.advanced',String(e.target.checked));}}/>Réglages avancés et anciens parcours</label>
             {page === 'drawings' && (galleryError ? <p role="alert" className="studio-alert">Galerie indisponible. <button onClick={() => void loadTemplates()}>Réessayer</button></p> :
                 <DrawingGallery templates={templates} selected={selectionId} pending={busy} disabled={active || !!view?.batch.uncertain}
-                    onSelect={id => void action(() => engineHttp.put('/engine/selection', {templateId:id}))} />)}
-            <SimpleDrawingPanel view={view} approvalKey={approvalKey} refresh={refresh}
-                readerReady={view?.mode === 'local-fake' || (httpReader?.batchProtocol ?? 0) >= 6}
-                page={page} showWorkflow={showWorkflow} pairing={pairing} />
-            {page === 'queue' && <ConnectorQueue batch={view?.batch}
+                    onSelect={id => void action(() => engineHttp.put('/engine/selection', {templateId:id}))}
+                    onResume={id => void action(() => engineHttp.put('/engine/selection', {templateId:id})).then((ok) => { if (ok) void navigate('/'); })}
+                    onRemove={(id, confirmName) => void action(async () => {
+                        await engineHttp.delete(`/connector/drawing/${encodeURIComponent(id)}`, { data: { confirmName } });
+                        await loadTemplates();
+                    })} />)}
+            {page === 'modes' && <DrawingModes drawing={view?.selection ?? undefined}
+                busy={busy || active || !!view?.batch.uncertain}
+                onSelect={strategy => {
+                    if (selectionId) void action(() => engineHttp.put(`/connector/drawing/${encodeURIComponent(selectionId)}/strategy`, { strategy }));
+                }} />}
+            {page === 'queue' && <ConnectorQueue batch={view?.batch} drawing={view?.batch.templateId === selectionId ? view?.selection?.name : undefined}
                 canReconcile={!!view?.connected && view.bound && !active && !busy && /^[a-f0-9]{64}$/.test(approvalKey)}
                 onReconcile={() => void action(() => engineHttp.post('/connector/batch/reconcile', {}, {
                     headers: { 'X-GeoPlacer-Approval': approvalKey },
                 }))} />}
-            {page === 'resources' && (
-                <section className="studio-card">
+            {page === 'resources' && <>
+                <section className="studio-card space-y-2">
+                    <h2>Ressources du navigateur</h2>
                     <dl className="studio-metrics studio-resource-metrics">
-                        <div><dt>Énergie observée</dt><dd>{number(view?.resources?.energy)}</dd></div>
-                        <div><dt>Énergie exploitable</dt><dd>{number(view?.batch.resources?.available)}</dd></div>
-                        <div><dt>Capacité observée</dt><dd>{number(view?.resources?.capacity)}</dd></div>
-                        <div><dt>Monnaie du jeu</dt><dd>{number(view?.resources?.currency)}</dd></div>
+                        <div><dt>Énergie brute observée</dt><dd>{number(view?.resources?.energy)}</dd></div>
+                        <div><dt>Énergie exploitable</dt><dd>{number(wallet?.available)}</dd></div>
+                        <div><dt>Capacité observée</dt><dd>{number(shop?.capacity ?? view?.resources?.capacity)}</dd></div>
+                        <div><dt>Monnaie du jeu</dt><dd>{number(shop?.currency ?? view?.resources?.currency)}</dd></div>
                     </dl>
-                    <p>{!view?.resources ? 'Ressources indisponibles.' : view.resourcesStale ? 'Ressources anciennes ou non datées.' : 'Observation datée.'}</p>
+                    {shop && <p>Une unité d’énergie toutes les {number(shop.intervalMs / 1000)} s · état reçu à {new Date(wallet!.capturedAt).toLocaleTimeString('fr-FR')}</p>}
+                    {!shop && <p>{!view?.resources ? 'Ressources indisponibles.' : view.resourcesStale ? 'Ressources anciennes ou non datées.' : 'Observation datée.'}</p>}
                 </section>
-            )}
+                <section className="studio-card space-y-3">
+                    <h2>Améliorations GeoPixels</h2>
+                    <p>{shop ? 'Catalogue observé. Les tarifs sont contrôlés à l’exécution.' : 'Tarifs de référence en monnaie du jeu. Une lecture de la boutique est requise à l’exécution.'}</p>
+                    <div className="studio-gallery">{(Object.keys(upgrades) as UpgradeKind[]).map(kind => (
+                        <article className="studio-tile studio-tile-body" key={kind}>
+                            <h3>{upgrades[kind].name}</h3>
+                            <strong>{kind === 'color-unlock' && shop?.colorPrice != null ? number(shop.colorPrice) : upgrades[kind].cost} monnaies</strong>
+                            <p>{upgrades[kind].effect}</p>
+                            {kind === 'regen-speed' && shop?.intervalMs === 15000 && <p>Minimum atteint</p>}
+                        </article>
+                    ))}</div>
+                    {policy && <p>Budget du travail {number(policy.maxBudget)} monnaies · dépensé ou réservé {number(view?.upgrades?.budgetUsed)} · réserve {number(policy.minimumReserve)} · priorité {policy.priority.map(kind => upgrades[kind as UpgradeKind]?.name ?? kind).join(' → ')}</p>}
+                    {!!view?.upgrades?.proposals?.length && <details><summary>Dernières propositions du moteur</summary>
+                        <ul>{view.upgrades.proposals.map(p => <li key={`${p.kind}:${p.color}`}>
+                            {upgrades[p.kind].name}{p.color !== null && ` #${p.color.toString(16).padStart(6,'0')}`} · {number(p.cost)} monnaies · {p.allowed ? 'Admissible' : 'Non admissible'}
+                        </li>)}</ul>
+                    </details>}
+                </section>
+            </>}
+            <SimpleDrawingPanel view={view} approvalKey={approvalKey} refresh={refresh}
+                readerReady={view?.mode === 'local-fake' || (httpReader?.batchProtocol ?? 0) >= 6}
+                page={page} showWorkflow={showWorkflow} pairing={pairing} />
             {page === 'settings' && <Link className="studio-link" to="/settings/legacy">Ouvrir les paramètres hérités</Link>}
             <div hidden={!showAdvanced} className="studio-advanced space-y-4">
             <div className="rounded border p-4 space-y-2">

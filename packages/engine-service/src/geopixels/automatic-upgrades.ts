@@ -34,6 +34,7 @@ export class AutomaticUpgrades {
     private healthy = true;
     private error: string | null = null;
     private proposals: ReturnType<typeof upgradeProposals> = [];
+    private proposalJob: string | null = null;
     constructor(private readonly d: Dependencies) {}
     async open(value: unknown) {
         if (value === null) return;
@@ -118,9 +119,7 @@ export class AutomaticUpgrades {
         const last = relevant.at(-1);
         if (last && frame.requestStartedAt <= (last.closedAt ?? last.at)) return;
         const { progress, colors } = await this.d.progress();
-        const spent = relevant
-            .filter((r) => !['refused', 'cancelled'].includes(r.state))
-            .reduce((n, r) => n + r.cost, 0);
+        const spent = this.usedBudget(active.job);
         this.proposals = upgradeProposals(
             frame.shop,
             frame.available,
@@ -131,6 +130,7 @@ export class AutomaticUpgrades {
             progress,
             frame.capturedAt
         );
+        this.proposalJob = active.job;
         const proposal = this.proposals.find((p) => p.allowed && !blocked.has(p.proposal.kind))?.proposal;
         if (!proposal || !(await this.d.lock())) return;
         if (
@@ -207,13 +207,18 @@ export class AutomaticUpgrades {
         }
     }
     commandReady(){return this.pending?.state==='prepared' && this.permitted(this.pending);}
-    view() {
+    private usedBudget(job: string) {
+        return this.records.reduce((total, record) =>
+            record.job === job && !['refused', 'cancelled'].includes(record.state) ? total + record.cost : total, 0);
+    }
+    view(job = this.d.active()?.job ?? null) {
         return {
             error: this.error,
             commandReady: this.commandReady(),
             history: this.records.slice(-30).map(({ id, kind, cost, state, at }) => ({ id, kind, cost, state, at })),
             uncertain: this.records.filter((r) => r.state === 'uncertain').length,
-            proposals: this.proposals.map((p) => ({
+            budgetUsed: job === null ? 0 : this.usedBudget(job),
+            proposals: (job === this.proposalJob ? this.proposals : []).map((p) => ({
                 kind: p.proposal.kind,
                 color: p.proposal.color,
                 cost: p.proposal.cost,

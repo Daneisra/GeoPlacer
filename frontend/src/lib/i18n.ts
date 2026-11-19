@@ -104,6 +104,8 @@ const REASONS: [RegExp, (m: RegExpExecArray) => string][] = [
   [/^agent unavailable until (\d+)$/, (m) => `Agent indisponible jusqu’à ${time(m[1]!)}.`],
   [/^waiting for a newer observation \((.*)\)$/, () => 'En attente d’une observation plus récente des ressources.'],
   [/^waiting for the energy of (\d+) pixel\(s\)$/, (m) => `En attente de l’énergie de ${m[1]} pixel(s).`],
+  [/^(\d+) pixel\(s\) of colors the agent has not unlocked$/, (m) => `${m[1]} cibles nécessitent des couleurs indisponibles.`],
+  [/^(\d+) pixel\(s\) never observed$/, (m) => `${m[1]} cibles sans observation exploitable.`],
   [/^simulated world unavailable: ([A-Z_]+)$/, (m) => `Toile simulée indisponible (${m[1]}).`],
   [/^([A-Z_]+): ([\s\S]*)$/, (m) => translateError(m[1]!, m[2]!)],
 ];

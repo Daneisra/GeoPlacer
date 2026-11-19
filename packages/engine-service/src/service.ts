@@ -27,6 +27,7 @@ import type {
     AttemptId,
     AttemptManager,
     CanvasRect,
+    DrawingStrategyId,
     ProgressSnapshot,
     ProjectId,
     ResourceManager,
@@ -52,6 +53,8 @@ import {
   asProjectId,
   asTemplateId,
   isValidId,
+  proportionalSize,
+  resizeRgba,
   capacityOf,
   computeProgress,
   confirmUpgrade,
@@ -902,11 +905,12 @@ export class EngineService {
         }
         const historical = this.lastCompleteCapture?.template === t && this.lastCompleteCapture.epoch === this.connector.channelEpoch
             ? this.lastCompleteCapture : null;
+        const batch = await this.singlePixelWriter.batch.observedView();
         return {
             ...this.connector.status(),
             singlePixel: this.singlePixelWriter.view(),
-            batch: await this.singlePixelWriter.batch.observedView(),
-            upgrades:this.singlePixelWriter.upgrades.view(),
+            batch,
+            upgrades: this.singlePixelWriter.upgrades.view(batch.id),
             error: this.connector.status().error ?? calculationError,
             bound,
             source: this.source,
@@ -1113,19 +1117,92 @@ export class EngineService {
 
   async selectTemplate(templateId: string): Promise<CommandResult> {
     this.guard();
-    const info = await this.templateInfoOf(templateId);
     if (this.settingsValue.selection?.templateId === templateId) return { changed: false, status: this.status() };
-    this.requireIdle('changing the template');
-    check(!this.singlePixelWriter.view().locked, 'reconcile or cancel the single pixel before changing model');
-    this.connector.monitoring.stop('Modèle local modifié : nouvelle liaison nécessaire.');
-    if (this.source === 'simulation') this.assertInsideCanvas(info.width, info.height, info.placement?.x ?? 0, info.placement?.y ?? 0);
-    await this.saveSettingsValue({ ...this.settingsValue, selection: { templateId } });
-    await this.currentTemplate(this.ref(templateId));
+    return this.editDrawing(async () => {
+      const info = await this.templateInfoOf(templateId);
+      if (this.source === 'simulation') this.assertInsideCanvas(info.width, info.height, info.placement?.x ?? 0, info.placement?.y ?? 0);
+      await this.retireDrawingPreview();
+      this.connector.monitoring.stop('Modèle local modifié : nouvelle liaison nécessaire.');
+      await this.saveSettingsValue({ ...this.settingsValue, selection: { templateId } });
+      this.clearDrawingStatus();
+      this.hub.statusNow(this.status());
+      return { changed: true, status: this.status() };
+    });
+  }
+
+  private clearDrawingStatus() {
     this.scheduler = null;
     this.schedulerEnded = true;
     this.lastProgress = null;
     this.proposalBase = null;
-    return { changed: true, status: this.status() };
+  }
+
+  private async editDrawing<T>(edit: () => Promise<T>): Promise<T> {
+    this.guard();
+    this.requireIdle('editing a drawing');
+    check(this.starting === null && this.attempts.open().length === 0, 'Arrêter ou réconcilier les opérations en cours.');
+    const writer = this.singlePixelWriter.view();
+    check(writer.open === 0 && !['running', 'paused'].includes(this.singlePixelWriter.batch.view().state),
+      'Arrêter ou réconcilier le dessin en cours.');
+    this.connectorControl = true;
+    try { return await edit(); }
+    finally { this.connectorControl = false; }
+  }
+
+  private async retireDrawingPreview() {
+    if (this.singlePixelWriter.view().locked) {
+      await this.singlePixelWriter.batch.stop('Prévisualisation retirée ; confirmations conservées.');
+      check(!this.singlePixelWriter.view().locked, 'Réconcilier les opérations avant de modifier le dessin.');
+    }
+  }
+
+  async drawingLibrary() {
+    this.guard();
+    const listing = await this.listTemplates();
+    const receipts = this.singlePixelWriter.batch.drawingReceipts();
+    return {
+      ...listing,
+      templates: listing.templates.map((template) => {
+        const observation = this.connector.monitoring.lastDrawingObservation(template.templateId);
+        return {
+          ...template,
+          lastObservation: observation && { capturedAt: observation.capturedAt, ...observation.progress },
+          receipts: receipts.get(template.templateId) ?? { real: 0, fake: 0 },
+        };
+      }).sort((a, b) => b.updatedAt - a.updatedAt),
+    };
+  }
+
+  async setDrawingStrategy(templateId: string, strategy: DrawingStrategyId): Promise<TemplateInfo> {
+    check(STRATEGIES.includes(strategy), 'Mode de dessin inconnu.');
+    return this.editDrawing(async () => {
+      const template = await this.templateInfoOf(templateId);
+      if (template.strategy === strategy) return template;
+      if (this.settingsValue.selection?.templateId === templateId) await this.retireDrawingPreview();
+      await this.templates.updateSettings(this.ref(templateId), { strategy: { id: strategy, ...(strategy === 'random' ? { seed: 1 } : {}) } });
+      this.templateCache.delete(templateId);
+      const updated = await this.templateInfoOf(templateId);
+      this.hub.connector();
+      return updated;
+    });
+  }
+
+  async deleteDrawing(templateId: string, confirmName: string) {
+    return this.editDrawing(async () => {
+      const template = await this.templateInfoOf(templateId);
+      check(template.name === confirmName, 'Le nom de confirmation doit correspondre au dessin.');
+      if (this.settingsValue.selection?.templateId === templateId) {
+        await this.retireDrawingPreview();
+        this.connector.monitoring.stop('Dessin retiré de la bibliothèque.');
+        await this.saveSettingsValue({ ...this.settingsValue, selection: null });
+        this.clearDrawingStatus();
+      }
+      await this.templates.delete(this.ref(templateId), { confirmName });
+      this.templateCache.delete(templateId);
+      this.hub.statusNow(this.status());
+      this.hub.connector();
+      return { deleted: templateId };
+    });
   }
 
   /**
@@ -1205,9 +1282,16 @@ export class EngineService {
     const t=await importGhost(this.templates,pngjsCodec,{...input,x:0,y:0},SIMULATION_PROJECT);
     await this.selectTemplate(t.id);return this.templateInfo(t);
   }
-  async exportDrawing(templateId:string) {
-    const {template}=await this.templates.load(this.ref(templateId));
-    return {png:await exportGhostPng(pngjsCodec,template),filename:ghostInfo(template).filename};
+  async exportDrawing(templateId: string, thumbnail = false) {
+    const template = await this.currentTemplate(this.ref(templateId));
+    const { width, height } = template.image;
+    const filename = ghostInfo(template).filename;
+    if (thumbnail && Math.max(width, height) > 256) {
+      const size = proportionalSize(width, height, width >= height ? { width: 256 } : { height: 256 });
+      const image = resizeRgba({ width, height, rgba: quantizedToRgba(template.image) }, size.width, size.height);
+      return { png: await pngjsCodec.encode(image), filename };
+    }
+    return { png: await exportGhostPng(pngjsCodec, template), filename };
   }
   async previewDrawing(groupSize=0,pixelBudget?:number,upgrades?:import('./geopixels/upgrade-policy.js').AutomaticUpgradePolicy) {
     this.guard();const t=this.selectedTemplate,p=this.connector.status().project;
@@ -1222,7 +1306,7 @@ export class EngineService {
     let retained=0;for(const color of t.image.pixels)if(color!==0xffffffff)retained++;
     const budget=pixelBudget ?? retained;
     check(Number.isSafeInteger(budget)&&budget>=1&&budget<=retained,'Budget supérieur aux pixels du modèle');
-    return this.singlePixelWriter.batch.prepare(this.connector.status().mode==='local-fake'?'fake':'real',budget,'autonomous',budget,{region:{x:0,y:0,width:t.image.width,height:t.image.height},durationMs:null,groupSize,...(upgrades?{upgrades}:{})});
+    return this.singlePixelWriter.batch.prepare(this.connector.status().mode==='local-fake'?'fake':'real',budget,'autonomous',budget,{region:{x:0,y:0,width:t.image.width,height:t.image.height},durationMs:null,groupSize,strategy:t.strategy.id,...(upgrades?{upgrades}:{})});
   }
   async importGhost(input: GhostImportInput): Promise<GhostInfo> {
     this.guard();

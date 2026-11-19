@@ -20,4 +20,4 @@ export const navItems = [
     { path: '/diagnostics', label: 'Diagnostics', icon: Activity },
 ];
 
-export type WorkspacePage = 'dashboard' | 'drawings' | 'queue' | 'resources' | 'diagnostics' | 'settings' | 'other';
+export type WorkspacePage = 'dashboard' | 'drawings' | 'modes' | 'queue' | 'resources' | 'diagnostics' | 'settings' | 'other';

@@ -3,6 +3,7 @@ import { engineHttp } from '../../lib/engine';
 
 export type BatchView = {
     id: string | null;
+    templateId?: string | null;
     digest: string | null;
     state: string;
     mode: 'fake' | 'real' | null;
@@ -11,9 +12,9 @@ export type BatchView = {
     limits?: {maxGroupPixels:number;commandBytes:number};
     adaptiveGroupSize?:number;
     budgets?: { pixels: number; energy: number };
-    scope?: { region: { x: number; y: number; width: number; height: number }; durationMs: number | null; groupSize?: number; upgrades?:{maxBudget:number;minimumReserve:number;priority:string[]} } | null;
+    scope?: { region: { x: number; y: number; width: number; height: number }; durationMs: number | null; groupSize?: number; strategy?: string; upgrades?:{maxBudget:number;minimumReserve:number;priority:string[]} } | null;
     spent?: number;
-    resources?: { available: number; capturedAt: number } | null;
+    resources?: { available: number; capturedAt: number; shop?: { currency: number; capacity: number; intervalMs: number; colorPrice?: 0 | 100 | null } } | null;
     regionProgress?: { correct: number; incorrect: number; unknown: number; percent: number | null } | null;
     history?: {
         attemptId: string;
@@ -42,6 +43,12 @@ export type BatchView = {
     expires: number | null;
     remainingMs?: number | null;
     scheduler: string | null;
+    schedulerReason?: string | null;
+    nextGroup?: {
+        attemptId: string;
+        state: 'reserving' | 'ready' | 'delivered';
+        pixels: { gridX: number; gridY: number; color: number }[];
+    } | null;
     error: string | null;
 };
 const labels: Record<string, string> = {

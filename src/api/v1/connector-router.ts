@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ConnectorError, CONNECTOR_MAX_GROUP_PIXELS, type ConnectorHttpChannel } from '@geoplacer/engine-service';
 import { asRgb } from '@geoplacer/core';
 import type { EngineApi } from './engine-api.js';
+import { STRATEGY_IDS } from './engine-router.js';
 import { hostnameFromHostHeader } from '../../middleware/local-access.js';
 
 export const CONNECTOR_WS_PATH = '/api/v1/connector/channel';
@@ -146,13 +147,22 @@ export function createConnectorRouter(engine: EngineApi, httpChannel?: Connector
             return batch.prepare(b.mode, b.limit, b.execution, b.energyBudget, b.scope);
         })
     );
+    router.get('/drawing', action(() => engine.drawingLibrary!()));
+    router.put('/drawing/:id/strategy', action((req) => {
+        const { strategy } = z.strictObject({ strategy: z.enum(STRATEGY_IDS) }).parse(req.body);
+        return engine.setDrawingStrategy!(z.string().uuid().parse(req.params.id), strategy);
+    }));
+    router.delete('/drawing/:id', action((req) => {
+        const { confirmName } = z.strictObject({ confirmName: z.string().min(1).max(200) }).parse(req.body);
+        return engine.deleteDrawing!(z.string().uuid().parse(req.params.id), confirmName);
+    }));
     router.post('/drawing/import',action(async req=>{
         // Local image preparation grants no reader/writer authority; same-origin loopback guard above applies.
         const b=z.strictObject({name:z.string().trim().min(1).max(100),pngBase64:z.string().min(1),palette:z.array(z.string()).min(1).max(256)}).parse(req.body);
         return engine.importDrawing!({name:b.name,png:Buffer.from(b.pngBase64,'base64'),palette:b.palette});
     }));
     router.get('/drawing/:id/image',async(req,res)=>{
-        try {const {png,filename}=await engine.exportDrawing!(z.string().uuid().parse(req.params.id));res.setHeader('Content-Type','image/png');res.setHeader('Content-Disposition',`inline; filename="${filename}"`);res.send(Buffer.from(png));}
+        try {const {png,filename}=await engine.exportDrawing!(z.string().uuid().parse(req.params.id),req.query.thumbnail === '1');res.setHeader('Content-Type','image/png');res.setHeader('Content-Disposition',`inline; filename="${filename}"`);res.send(Buffer.from(png));}
         catch {res.status(404).json({error:'image unavailable'});}
     });
     router.post('/drawing/preview',action(req=>{

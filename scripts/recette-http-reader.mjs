@@ -507,9 +507,15 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
       // Start a fresh native evidence stream. Its first response arrives after launch.
       syncWorker={postMessage(){},addEventListener(type,fn){if(type==='message')fixtureEnergyListeners.add(fn);},removeEventListener(type,fn){if(type==='message')fixtureEnergyListeners.delete(fn);}};
       const paint=globalThis.fetch;
-      globalThis.fetch=(url,options)=>url==='/GetUserData'
-        ? Promise.resolve(new Response(null,{status:503}))
-        : paint(url,options);
+      globalThis.holdNextFixtureGroup=true;
+      globalThis.fetch=async(url,options)=>{
+        if(url==='/GetUserData')return new Response(null,{status:503});
+        if(url===location.origin+'/PlacePixels' && holdNextFixtureGroup){
+          globalThis.holdNextFixtureGroup=false;
+          await new Promise(resolve=>globalThis.releaseFixtureGroup=resolve);
+        }
+        return paint(url,options);
+      };
     });
     await pair(); // Auto-observation after approved coupling must match the imported PNG hash.
     await simple.getByRole('button',{name:'Lancer le dessin',exact:true}).waitFor();
@@ -517,8 +523,12 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     const nav = page.getByRole('navigation', {name:'Navigation principale'});
     await nav.getByRole('link',{name:'File de travail',exact:true}).click();
     await page.getByRole('heading',{name:'Travail courant',exact:true}).waitFor();
+    await nav.getByRole('link',{name:'Modes de dessin',exact:true}).click();
+    const bottomMode = page.getByRole('article').filter({has:page.getByRole('heading',{name:'Bas vers haut',exact:true})});
+    await bottomMode.getByRole('button',{name:'Choisir bas vers haut',exact:true}).click();
+    await bottomMode.getByRole('button',{name:'Mode sélectionné',exact:true}).waitFor();
     await nav.getByRole('link',{name:'Tableau de bord',exact:true}).click();
-    assert.equal(await simple.getByRole('button',{name:'Lancer le dessin',exact:true}).isEnabled(),true);
+    await page.waitForFunction(()=>![...document.querySelectorAll('#simpleDrawing button')].find(b=>b.textContent==='Lancer le dessin')?.disabled);
     const beforeSimple=await reader.evaluate(()=>globalThis.fixtureSiteCalls);
     await simple.getByRole('button',{name:'Lancer le dessin',exact:true}).click();
     await simple.getByText('En attente d’une lecture d’énergie GeoPixels.',{exact:true}).waitFor();
@@ -533,14 +543,34 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
       syncWorker.postMessage({type:'sync-delta'});
       for(const fn of fixtureEnergyListeners)fn({data:{ok:true,userData:{energy:0,colors:'0,16777215',checkedTick:Math.floor(Date.now()/1000)-3600,energyRate:30,maxEnergy:100}}});
     });
+    await reader.waitForFunction(()=>typeof globalThis.releaseFixtureGroup==='function');
+    await nav.getByRole('link',{name:'File de travail',exact:true}).click();
+    await page.getByRole('heading',{name:'Groupe transmis au lecteur',exact:true}).waitFor();
+    await page.getByText('16 cibles · Résultat attendu',{exact:true}).waitFor();
+    await page.screenshot({path:path.join(out,'file-de-travail.png'),fullPage:true});
+    await reader.evaluate(()=>globalThis.releaseFixtureGroup());
+    await nav.getByRole('link',{name:'Tableau de bord',exact:true}).click();
     await simple.getByText('Envois terminés — vérifier les observations',{exact:true}).waitFor();
     const autonomous=await api('connector/status',undefined,'GET');
     assert.equal(autonomous.batch.execution,'autonomous');assert.equal(autonomous.batch.confirmed,20);
     assert.equal(autonomous.batch.acceptedRequests,2);assert.equal(autonomous.monitoring.state,'stopped');
     assert.equal(await reader.evaluate(()=>globalThis.fixtureSiteCalls),beforeSimple+2);
+    assert.equal(autonomous.batch.scope.strategy,'bottom-to-top');
+    assert.equal(await reader.evaluate(()=>globalThis.fixtureWrites[0].GridY),982);
     assert.equal(new Set((await reader.evaluate(()=>globalThis.fixtureWrites)).map(p=>p.GridX+','+p.GridY)).size,20);
     assert.equal(autonomous.progress.correct,0); // Acceptances are not synthesized into observations.
     await page.screenshot({path:path.join(out,'simple-drawing-local-fixture.png'),fullPage:true});
+    await nav.getByRole('link',{name:'Mes dessins',exact:true}).click();
+    await page.getByText('20 cibles acquittées dans le journal GeoPixels',{exact:true}).first().waitFor();
+    const oldDrawing = page.getByRole('article').filter({has:page.getByRole('heading',{name:'LOCAL FIXTURE — continuous 20 × 20',exact:true})});
+    await oldDrawing.getByRole('button',{name:'Retirer',exact:true}).click();
+    const remove = oldDrawing.getByRole('button',{name:'Confirmer le retrait',exact:true});
+    assert.equal(await remove.isDisabled(),true);
+    await oldDrawing.getByLabel('Nom exact du dessin').fill('LOCAL FIXTURE — continuous 20 × 20');
+    await remove.click();
+    await oldDrawing.waitFor({state:'detached'});
+    await nav.getByRole('link',{name:'Tableau de bord',exact:true}).click();
+    record('OK saved strategy changes actual group order, queue shows a reserved in-flight group, gallery shows durable ACKs and confirms removal by exact name');
     record('OK DEFAULT simple workflow: missing then zero balance, native recharge checkpoint unlocks 20 targets / two adaptive groups, no service requests');
     await page.getByRole('button',{name:'Révoquer le canal',exact:true}).click();
 
@@ -586,6 +616,9 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     await page.screenshot({path:path.join(out,'automatic-upgrade-local-fixture.png'),fullPage:true});
     await nav.getByRole('link',{name:'Ressources et améliorations',exact:true}).click();
     await page.getByRole('cell',{name:'Effet et débit observés',exact:true}).waitFor();
+    for(const name of ['Recharge d’énergie','Capacité énergétique','Vitesse de recharge','Déblocage de couleur']) {
+      await page.getByRole('heading',{name,exact:true}).waitFor();
+    }
     await page.screenshot({path:path.join(out,'ressources.png'),fullPage:true});
     await nav.getByRole('link',{name:'Tableau de bord',exact:true}).click();
     record('OK opt-in upgrade: one launch, zero initial native energy, durable purchase intent, fixed in-game endpoint stub, exact observed debit/effect, same scheduler resumes and draws 20 targets within a 10-coin budget; no external requests');

@@ -2,9 +2,10 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ImageIcon, Upload } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import type { WorkspacePage } from '../../navigation';
-import { engineHttp, type TemplateInfo } from '../../lib/engine';
+import { engineHttp, STRATEGY_LABELS, type TemplateInfo } from '../../lib/engine';
 import { PERSONAL_GEOPIXELS_PALETTE, parsePaletteText } from '../../lib/ghost-palettes';
 import type { BatchView } from './BatchPanel';
+import { upgradeKinds as availableUpgrades, upgrades, type UpgradeKind } from './upgrade-catalog';
 type DrawingView = {
     connected: boolean;
     bound: boolean;
@@ -73,9 +74,15 @@ export function SimpleDrawingPanel({
     const [importNotice, setImportNotice] = useState<{ kind: 'loading' | 'success' | 'error'; text: string } | null>(
         null
     );
-    const [autoUpgrades,setAutoUpgrades]=useState(false),[coinBudget,setCoinBudget]=useState(0),[coinReserve,setCoinReserve]=useState(50),[targetCapacity,setTargetCapacity]=useState(300),[energyBelow,setEnergyBelow]=useState(5),[upgradeKinds,setUpgradeKinds]=useState<string[]>(['energy-pack']),[upgradePriority,setUpgradePriority]=useState('energy-pack');
-    const upgradeJson=autoUpgrades?JSON.stringify({maxBudget:coinBudget,minimumReserve:coinReserve,targetCapacity,energyBelow,priority:[upgradePriority,...upgradeKinds.filter(k=>k!==upgradePriority)].filter(k=>upgradeKinds.includes(k))}):'';
-    const kindLabels:Record<string,string>={'energy-pack':'Recharge (+20 énergie, 10 monnaies)','max-energy':'Capacité (+5, 50 monnaies)','regen-speed':'Récupération (−1 s, 500 monnaies)','color-unlock':'Couleurs nécessaires (gratuité vérifiée ou 100 monnaies)'};
+    const [autoUpgrades,setAutoUpgrades]=useState(false),[coinBudget,setCoinBudget]=useState(0),[coinReserve,setCoinReserve]=useState(50),[targetCapacity,setTargetCapacity]=useState(300),[energyBelow,setEnergyBelow]=useState(5);
+    const [upgradeKinds,setUpgradeKinds]=useState<UpgradeKind[]>(['energy-pack']);
+    const upgradeJson=autoUpgrades?JSON.stringify({maxBudget:coinBudget,minimumReserve:coinReserve,targetCapacity,energyBelow,priority:upgradeKinds}):'';
+    function moveUpgrade(index: number, direction: -1 | 1) {
+        const next = [...upgradeKinds];
+        const destination = index + direction;
+        [next[index], next[destination]] = [next[destination], next[index]];
+        setUpgradeKinds(next);
+    }
     const importing = importNotice?.kind === 'loading';
     const attempted = useRef('');
     const batch = view?.batch,
@@ -137,7 +144,7 @@ export function SimpleDrawingPanel({
     }
     const previewIdentity =
         selected && view?.project
-            ? JSON.stringify([selected.templateId, view.project, groupSize, budget, upgradeJson, approvalKey])
+            ? JSON.stringify([selected.templateId, selected.revision, selected.strategy, view.project, groupSize, budget, upgradeJson, approvalKey])
             : '';
     const viewConnected = !!view?.connected;
     const canPreview = showWorkflow && readerReady && !!approvalKey && !!view?.connected && !active && !busy && !batch?.uncertain;
@@ -169,7 +176,7 @@ export function SimpleDrawingPanel({
     }, [approvalKey, previewIdentity, canPreview, groupSize, budget, upgradeJson, refresh, viewConnected]);
     const consent = { batchId: batch?.id, digest: batch?.digest, approved: true };
     const preparedGroup=batch?.scope?.groupSize ?? 5;
-    const previewReady=preparedGroup===groupSize && JSON.stringify(batch?.scope?.upgrades??null)===JSON.stringify(upgradeJson?JSON.parse(upgradeJson):null) && (!budget || batch?.budgets?.pixels===Number(budget));
+    const previewReady=preparedGroup===groupSize && (!batch?.scope?.strategy || batch.scope.strategy === selected?.strategy) && JSON.stringify(batch?.scope?.upgrades??null)===JSON.stringify(upgradeJson?JSON.parse(upgradeJson):null) && (!budget || batch?.budgets?.pixels===Number(budget));
     const dashboard = page === 'dashboard';
     const currentProgress = view?.progress;
     const historical = view?.lastCompleteProgress;
@@ -234,6 +241,7 @@ export function SimpleDrawingPanel({
                             {view.project ? view.project.gridX + view.project.width - 1 : '?'},{' '}
                             {view.project ? view.project.gridY - view.project.height + 1 : '?'}).
                         </p>
+                        {selected && <p>Mode {STRATEGY_LABELS[selected.strategy] ?? selected.strategy} · <Link to="/modes">Modes de dessin</Link></p>}
                         <p>
                             Au maximum {batch.budgets?.pixels} pixels distincts et {batch.budgets?.energy} énergie pour
                             ce travail, par groupes {preparedGroup===0?'adaptés à l’énergie et au transport':`de ${preparedGroup} maximum`}. Autorisation jusqu’à la fin, l’arrêt ou la
@@ -369,6 +377,7 @@ export function SimpleDrawingPanel({
                         {view?.upgrades?.error && <p role="alert">{view.upgrades.error}</p>}
                     </div>
                 )}
+                {active && <Link className="studio-link" to="/file">Voir les groupes et les résultats</Link>}
                 {error && <p role="alert">{error}</p>}
             </section>
               </div>
@@ -432,9 +441,16 @@ export function SimpleDrawingPanel({
                             <label>Réserve minimale<input type="number" min={0} value={coinReserve} onChange={e=>setCoinReserve(Number(e.target.value))}/></label>
                             <label>Capacité ciblée<input type="number" min={1} value={targetCapacity} onChange={e=>setTargetCapacity(Number(e.target.value))}/></label>
                             <label>Recharger si énergie inférieure à<input type="number" min={0} value={energyBelow} onChange={e=>setEnergyBelow(Number(e.target.value))}/></label>
-                            {Object.entries(kindLabels).map(([k,label])=><label key={k}><input type="checkbox" checked={upgradeKinds.includes(k)} onChange={e=>setUpgradeKinds(v=>e.target.checked?[...v,k]:v.filter(x=>x!==k))}/>{label}</label>)}
-                            <label>Priorité<select value={upgradePriority} onChange={e=>setUpgradePriority(e.target.value)}>{Object.entries(kindLabels).map(([k,label])=><option key={k} value={k}>{label}</option>)}</select></label>
-                            <p>Tarifs vérifiés dans la boutique avant chaque achat. Un tarif ou un résultat non vérifiable suspend les achats concernés.</p>
+                            {availableUpgrades.map((kind)=><label key={kind}><input type="checkbox" checked={upgradeKinds.includes(kind)} onChange={e=>setUpgradeKinds(v=>e.target.checked?[...v,kind]:v.filter(x=>x!==kind))}/>{upgrades[kind].name}</label>)}
+                            {!!upgradeKinds.length && <div className="md:col-span-2 space-y-2">
+                                <h3>Ordre de priorité</h3>
+                                <ol className="space-y-2">{upgradeKinds.map((kind, index) => <li key={kind} className="flex flex-wrap items-center gap-2">
+                                    <span>{index + 1}. {upgrades[kind].name}</span>
+                                    <button type="button" aria-label={`Avancer ${upgrades[kind].name}`} disabled={index === 0} onClick={() => moveUpgrade(index, -1)}>↑</button>
+                                    <button type="button" aria-label={`Reculer ${upgrades[kind].name}`} disabled={index === upgradeKinds.length - 1} onClick={() => moveUpgrade(index, 1)}>↓</button>
+                                </li>)}</ol>
+                            </div>}
+                            <p className="md:col-span-2">Tarifs vérifiés avant chaque achat. Un résultat incertain suspend l’amélioration concernée.</p>
                         </div>}
                     </fieldset>
                     <label className="md:col-span-2" hidden={page === 'resources'}>
@@ -455,9 +471,9 @@ export function SimpleDrawingPanel({
                     {!!view?.upgrades?.uncertain && <p>Améliorations incertaines : {view.upgrades.uncertain}.</p>}
                     {view?.upgrades?.history.length ? (
                         <div className="observation-table">
-                            <table><thead><tr><th scope="col">Amélioration</th><th scope="col">Monnaie</th><th scope="col">État</th></tr></thead>
+                            <table><thead><tr><th scope="col">Heure</th><th scope="col">Amélioration</th><th scope="col">Monnaie</th><th scope="col">État</th></tr></thead>
                                 <tbody>{[...view.upgrades.history].reverse().map(row => (
-                                    <tr key={row.id}><td>{kindLabels[row.kind] ?? row.kind}</td><td>{row.cost}</td><td>{upgradeStateLabels[row.state] ?? row.state}</td></tr>
+                                    <tr key={row.id}><td>{new Date(row.at).toLocaleString('fr-FR')}</td><td>{upgrades[row.kind as UpgradeKind]?.name ?? row.kind}</td><td>{row.cost}</td><td>{upgradeStateLabels[row.state] ?? row.state}</td></tr>
                                 ))}</tbody>
                             </table>
                         </div>

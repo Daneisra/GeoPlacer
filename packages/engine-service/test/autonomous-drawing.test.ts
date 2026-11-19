@@ -139,6 +139,50 @@ async function fixture(lost = false, width = 20, height = 20) {
     };
 }
 describe('Autonomous drawing: same scheduler, explicit whole-image authority', () => {
+    it('seals the saved strategy into the drawing and retains confirmations across modes and restart', async () => {
+        const f = await fixture(false, 4, 3), batch = f.s.singlePixelWriter.batch;
+        f.energy(12);
+        const first = await f.s.previewDrawing(1, 1);
+        await batch.approve(first.id!, first.digest!);
+        await wait(() => batch.view().state === 'completed');
+        expect(f.writes[0]!.y).toBe(f.project.gridY);
+
+        const updated = await f.s.setDrawingStrategy(f.t.templateId, 'bottom-to-top');
+        expect(updated).toMatchObject({ strategy: 'bottom-to-top', revision: f.t.revision });
+        const preview = await f.s.previewDrawing(1, 1);
+        expect(preview.scope?.strategy).toBe('bottom-to-top');
+        await batch.approve(preview.id!, preview.digest!);
+        await expect(f.s.setDrawingStrategy(f.t.templateId, 'random')).rejects.toThrow(/Arrêter|reconcile/i);
+        await wait(() => batch.view().state === 'completed');
+        expect(f.writes[1]!.y).toBe(f.project.gridY - 2);
+        expect((await f.s.drawingLibrary()).templates.find(t => t.templateId === f.t.templateId)?.receipts).toEqual({ real: 0, fake: 2 });
+
+        await f.s.close();
+        opened.splice(opened.indexOf(f.s), 1);
+        const restored = await EngineService.open({ dataDir: f.dir });
+        opened.push(restored);
+        expect((await restored.drawingLibrary()).templates.find(t => t.templateId === f.t.templateId)).toMatchObject({
+            revision: f.t.revision, strategy: 'bottom-to-top', receipts: { real: 0, fake: 2 },
+        });
+        expect(restored.singlePixelWriter.batch.view().state).not.toBe('running');
+    });
+
+    it('switches away from an inactive preview and removes a model only with its exact name, keeping its files', async () => {
+        const f = await fixture();
+        const next = await f.s.importTemplate({ name: 'Dessin conservé', png: await demoPng(3, 2, () => 0), x: 0, y: 0, strategy: 'top-to-bottom' });
+        await f.s.previewDrawing();
+        await expect(f.s.deleteDrawing(f.t.templateId, 'autre nom')).rejects.toThrow(/nom/);
+        await f.s.selectTemplate(next.templateId);
+        expect(f.s.singlePixelWriter.batch.view().state).toBe('stopped');
+        const files = path.join(f.dir, 'projects', 'simulation', 'templates', f.t.templateId);
+        await f.s.deleteDrawing(f.t.templateId, f.t.name);
+        expect((await f.s.drawingLibrary()).templates.map(t => t.templateId)).toContain(next.templateId);
+        expect((await f.s.drawingLibrary()).templates.map(t => t.templateId)).not.toContain(f.t.templateId);
+        expect(await readdir(files)).not.toHaveLength(0);
+        expect(f.s.settings.selection?.templateId).toBe(next.templateId);
+        expect(f.calls()).toBe(0);
+    });
+
     it('draws a complete 400-pixel image, stops monitoring, and excludes every ACK against a stale cache', async () => {
         const f = await fixture(),
             b = f.s.singlePixelWriter.batch;

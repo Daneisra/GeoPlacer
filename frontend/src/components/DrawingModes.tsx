@@ -43,21 +43,21 @@ function highlighted(strategy: string, point: (typeof diagram)[number]) {
     }
 }
 
-export function DrawingModes() {
+export function DrawingModes({ drawing, busy, onSelect }: {
+    drawing?: { name: string; strategy: string };
+    busy?: boolean;
+    onSelect?: (strategy: string) => void;
+}) {
     return (
         <>
-            <div className="studio-page-heading">
-                <div>
-                    <h1>Modes de dessin</h1>
-                    <p>
-                        Choisissez une stratégie lors de l’import d’un PNG en simulation. Le mode autonome GeoPixels
-                        utilise son propre parcours.
-                    </p>
-                </div>
-            </div>
+            {onSelect && <section className="studio-card space-y-2 mb-4">
+                <h2>{drawing ? drawing.name : 'Sélectionnez un dessin'}</h2>
+                {drawing ? <p>Le prochain lancement utilisera cette stratégie dans chaque région observée.</p>
+                    : <Link className="studio-link" to="/dessins">Ouvrir Mes dessins</Link>}
+            </section>}
             <div className="studio-gallery">
                 {Object.entries(STRATEGY_LABELS).map(([id, label]) => (
-                    <article className="studio-tile" key={id}>
+                    <article className="studio-tile" key={id} data-selected={drawing?.strategy === id}>
                         <div className="studio-strategy-art" aria-hidden="true">
                             {diagram.map((point, i) => (
                                 <span
@@ -76,9 +76,11 @@ export function DrawingModes() {
                         <div className="studio-tile-body">
                             <h2>{label}</h2>
                             <p>{descriptions[id]}</p>
-                            <Link className="studio-link" to={`/dessins?strategie=${id}#simulation-import`}>
+                            {onSelect ? <button disabled={!drawing || busy || drawing.strategy === id} onClick={() => onSelect(id)}>
+                                {drawing?.strategy === id ? 'Mode sélectionné' : `Choisir ${label.toLocaleLowerCase('fr-FR')}`}
+                            </button> : <Link className="studio-link" to={`/dessins?strategie=${id}#simulation-import`}>
                                 Utiliser en simulation <ArrowRight size={15} aria-hidden="true" />
-                            </Link>
+                            </Link>}
                         </div>
                     </article>
                 ))}

@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
-import { formatTime } from '../../lib/engine';
+import { formatTime, STRATEGY_LABELS } from '../../lib/engine';
+import { translateReason } from '../../lib/i18n';
 import type { BatchView } from './BatchPanel';
 
 const labels: Record<string, string> = {
@@ -21,20 +22,26 @@ const labels: Record<string, string> = {
 
 export function ConnectorQueue({
     batch,
+    drawing,
     canReconcile,
     onReconcile,
 }: {
     batch?: BatchView;
+    drawing?: string;
     canReconcile: boolean;
     onReconcile: () => void;
 }) {
     const history = batch?.history ?? [];
+    const group = batch?.nextGroup;
+    const waiting = batch?.scheduler?.startsWith('waiting-') ? translateReason(batch.schedulerReason ?? null) : null;
+    const remaining = batch?.budgets ? Math.max(0, Math.min(batch.budgets.energy, batch.budgets.pixels) - (batch.spent ?? 0)) : null;
     return (
         <section className="studio-card space-y-5">
             <div className="studio-card-heading">
                 <div>
                     <h2>Travail courant</h2>
-                    <p>{batch ? (labels[batch.state] ?? batch.state) : 'État indisponible'}</p>
+                    <p>{drawing ?? (batch?.id ? 'Dernier travail enregistré' : 'Aucun dessin en cours')} · {batch ? (labels[batch.state] ?? batch.state) : 'État indisponible'}</p>
+                    {batch?.scope?.strategy && <p>Mode {STRATEGY_LABELS[batch.scope.strategy]}</p>}
                 </div>
                 <Link className="studio-link" to="/">
                     Ouvrir les commandes
@@ -55,6 +62,21 @@ export function ConnectorQueue({
                 </div>
             </dl>
             {batch?.error && <p role="status">{batch.error}</p>}
+            {waiting && <p role="status">{waiting}</p>}
+            <section className="space-y-2" aria-label="Groupes de dessin">
+                <h3>{group?.state === 'delivered' ? 'Groupe transmis au lecteur' : 'Prochain groupe'}</h3>
+                {group ? <>
+                    <p>{group.pixels.length.toLocaleString('fr-FR')} cibles · {group.state === 'delivered' ? 'Résultat attendu' : group.state === 'ready' ? 'Prêt à être pris par le lecteur' : 'Réservation en cours'}</p>
+                    <details><summary>Coordonnées et couleurs</summary>
+                        <ul>{group.pixels.map((pixel) => <li key={`${pixel.gridX},${pixel.gridY}`}>
+                            ({pixel.gridX}, {pixel.gridY}) · #{pixel.color.toString(16).padStart(6, '0')}
+                        </li>)}</ul>
+                    </details>
+                </> : <p>Le planificateur affichera ici le prochain groupe dès sa réservation.</p>}
+                {batch?.state === 'running' && batch.adaptiveGroupSize !== undefined && remaining !== null && (
+                    <p>Jusqu’à {Math.min(batch.adaptiveGroupSize, remaining).toLocaleString('fr-FR')} pixels par prochain groupe · budget restant {remaining.toLocaleString('fr-FR')}</p>
+                )}
+            </section>
             {!!batch?.uncertain && (
                 <div className="space-y-2">
                     <p>Une observation datée et postérieure à l’envoi doit couvrir les cibles concernées.</p>

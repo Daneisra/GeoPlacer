@@ -137,4 +137,19 @@ describe('Repeated cache observation, without service freshness claims', () => {
     expect(() => parseObservationHistory({ ...data, token:'forbidden' })).toThrow();
     expect(() => parseObservationHistory({ schemaVersion:1, history:[{...data.history[0], known:99999999}] })).toThrow();
   });
+  it('preserves a model summary after the observed capture leaves the timeline and migrates the older format', () => {
+    const s = setup();
+    s.send();
+    const capture = s.provider.monitoring.view().lastCapture!;
+    const progress = { total: 4, correct: 2, incorrect: 1, unknown: 1, wrongColor: 0, missing: 1 };
+    s.provider.monitoring.annotate(capture.id, 'first-drawing', progress);
+    const restored = new ObservationMonitor();
+    restored.restore(parseObservationHistory({ schemaVersion: 2, history: s.provider.monitoring.persisted().history }));
+    expect(restored.lastDrawingObservation('first-drawing')).toMatchObject({ progress });
+    for (let i = 0; i < 125; i++) s.send();
+    const persisted = s.provider.monitoring.persisted();
+    expect(persisted.history.some(p => p.templateId === 'first-drawing')).toBe(false);
+    restored.restore(parseObservationHistory(JSON.parse(JSON.stringify(persisted))));
+    expect(restored.lastDrawingObservation('first-drawing')).toEqual({ templateId: 'first-drawing', capturedAt: capture.capturedAt, progress });
+  });
 });

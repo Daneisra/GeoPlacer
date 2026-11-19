@@ -4,6 +4,7 @@ import { Link, Outlet, useLocation } from 'react-router-dom';
 import { engineHttp } from '../lib/engine';
 import { navItems, type WorkspacePage } from '../navigation';
 import { SimulationDashboard } from './simulation/SimulationDashboard';
+import { DrawingModes } from './DrawingModes';
 
 const ConnectorDashboard = lazy(() =>
     import('./geopixels/ConnectorDashboard').then((m) => ({ default: m.ConnectorDashboard }))
@@ -12,6 +13,7 @@ type Source = 'simulation' | 'geopixels';
 const workspace: Record<string, WorkspacePage> = {
     '/': 'dashboard',
     '/dessins': 'drawings',
+    '/modes': 'modes',
     '/file': 'queue',
     '/ressources': 'resources',
     '/diagnostics': 'diagnostics',
@@ -20,6 +22,7 @@ const workspace: Record<string, WorkspacePage> = {
 const descriptions: Record<Exclude<WorkspacePage, 'other'>, string> = {
     dashboard: 'Préparez votre image, puis suivez le dessin sur la toile.',
     drawings: 'Retrouvez vos images, sélectionnez un dessin ou préparez un nouveau modèle.',
+    modes: 'Choisissez l’ordre dans lequel le planificateur traite les pixels.',
     queue: 'Suivez les tentatives en cours, leurs résultats et les opérations à réconcilier.',
     resources: 'Consultez les ressources disponibles et les améliorations du dessin.',
     diagnostics: 'Vérifiez la connexion, les observations et les opérations en attente.',
@@ -119,6 +122,7 @@ export default function MainView() {
                 </div>
             )}
             {source === 'simulation' && <SimulationDashboard page={page} />}
+            {source === 'simulation' && page === 'modes' && <DrawingModes />}
             {source === 'geopixels' && (
                 <Suspense fallback={page === 'other' ? null : <p>Chargement du connecteur…</p>}>
                     <ConnectorDashboard page={page} />

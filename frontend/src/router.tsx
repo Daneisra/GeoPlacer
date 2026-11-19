@@ -15,10 +15,7 @@ export const router = createBrowserRouter([
                 children: [
                     { index: true, element: null },
                     { path: 'dessins', element: null },
-                    {
-                        path: 'modes',
-                        lazy: async () => ({ Component: (await import('./components/DrawingModes')).DrawingModes }),
-                    },
+                    { path: 'modes', element: null },
                     { path: 'file', element: null },
                     { path: 'ressources', element: null },
                     { path: 'diagnostics', element: null },
