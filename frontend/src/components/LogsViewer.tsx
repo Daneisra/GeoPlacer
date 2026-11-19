@@ -20,8 +20,6 @@ export default function LogsViewer() {
       if (!isActive) return;
 
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const host = window.location.hostname;
-      const port = '3000';
 
       // Close any existing connection first
       if (wsRef.current) {
@@ -29,7 +27,8 @@ export default function LogsViewer() {
         wsRef.current = null;
       }
 
-      const ws = new WebSocket(`${protocol}//${host}:${port}`);
+      const host = import.meta.env.DEV ? `${window.location.hostname}:3000` : window.location.host;
+      const ws = new WebSocket(`${protocol}//${host}`);
       wsRef.current = ws;
       setConnectionError(null);
 
@@ -53,7 +52,7 @@ export default function LogsViewer() {
       ws.onerror = () => {
         if (!isActive) return;
         setIsConnected(false);
-        setConnectionError('Connection error');
+        setConnectionError('Connexion au journal interrompue');
       };
 
       ws.onclose = () => {
@@ -99,7 +98,7 @@ export default function LogsViewer() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `wplacer-${logsMode}-${new Date().toISOString()}.txt`;
+    a.download = `geoplacer-${logsMode}-${new Date().toISOString()}.txt`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -116,30 +115,32 @@ export default function LogsViewer() {
 
   return (
     <div id="logsViewer" className="space-y-6">
-      <h2 className="text-3xl font-bold">Realtime Logs Viewer</h2>
+      <div className="studio-page-heading"><div><h1>Journal</h1><p>Messages et erreurs du serveur local.</p></div></div>
       
       <Card>
         <CardHeader>
-          <CardTitle>Logs Controls</CardTitle>
+          <CardTitle>Filtres et export</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-2">
             <input
-              className="flex-1 min-w-64 p-2 border rounded-md"
+              className="flex-1 p-2 border rounded-md"
               type="text"
-              placeholder="Search text..."
+              aria-label="Rechercher dans le journal"
+              placeholder="Rechercher un message"
               value={filterText}
               onChange={(e) => setFilterText(e.target.value)}
             />
             <select
               className="p-2 border rounded-md"
+              aria-label="Niveau du message"
               value={filterType}
               onChange={(e) => setFilterType(e.target.value)}
             >
-              <option value="">All</option>
-              <option value="error">Error</option>
-              <option value="warn">Warning</option>
-              <option value="success">Success</option>
+              <option value="">Tous</option>
+              <option value="error">Erreur</option>
+              <option value="warn">Avertissement</option>
+              <option value="success">Succès</option>
               <option value="info">Info</option>
             </select>
           </div>
@@ -148,22 +149,22 @@ export default function LogsViewer() {
               className={`px-4 py-2 rounded-md ${logsMode === 'logs' ? 'bg-primary text-primary-foreground' : 'bg-secondary text-secondary-foreground'} hover:opacity-80`}
               onClick={() => setLogsMode('logs')}
             >
-              Logs
+              Messages
             </button>
             <button
               className={`px-4 py-2 rounded-md ${logsMode === 'errors' ? 'bg-primary text-primary-foreground' : 'bg-secondary text-secondary-foreground'} hover:opacity-80`}
               onClick={() => setLogsMode('errors')}
             >
-              Errors
+              Erreurs
             </button>
             <button className="bg-secondary text-secondary-foreground px-4 py-2 rounded-md hover:bg-secondary/80" onClick={handleClearLogs}>
-              Clear
+              Vider l’affichage
             </button>
             <button className="bg-secondary text-secondary-foreground px-4 py-2 rounded-md hover:bg-secondary/80" onClick={handleExportLogs}>
-              Export
+              Exporter
             </button>
             <button className="bg-secondary text-secondary-foreground px-4 py-2 rounded-md hover:bg-secondary/80" onClick={() => navigate('/')}>
-              Return
+              Retour au tableau de bord
             </button>
           </div>
           <div className="flex items-center gap-2 text-sm">
@@ -173,7 +174,7 @@ export default function LogsViewer() {
               }`}
             />
             <span className="text-muted-foreground">
-              {isConnected ? 'Connected' : connectionError ? connectionError : 'Connecting...'}
+              {isConnected ? 'Connecté' : connectionError ? connectionError : 'Connexion…'}
             </span>
           </div>
         </CardContent>
@@ -184,7 +185,7 @@ export default function LogsViewer() {
           <div className="logs-container bg-muted p-4 rounded-lg min-h-96 max-h-96 overflow-y-auto font-mono text-sm">
             {filteredLogs.length === 0 ? (
               <span className="text-muted-foreground">
-                {isConnected ? 'Waiting for logs...' : connectionError ? 'Connection error - retrying...' : 'Connecting to server...'}
+                {isConnected ? 'En attente de messages…' : connectionError ? 'Reconnexion au journal…' : 'Connexion au serveur…'}
               </span>
             ) : (
               filteredLogs.map((log, index) => (

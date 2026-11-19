@@ -1,3 +1,7 @@
+import { Link } from 'react-router-dom';
+import type { WorkspacePage } from '../../navigation';
+import { DrawingGallery } from '../DrawingGallery';
+import { ConnectorQueue } from './ConnectorQueue';
 import { SimpleDrawingPanel } from './SimpleDrawingPanel';
 import { useCallback, useEffect, useState } from 'react';
 import './ConnectorDashboard.css';
@@ -57,13 +61,15 @@ const kindLabels: Record<string, string> = {
 };
 const number = (n: number | null | undefined) => (n == null ? 'Indisponible' : n.toLocaleString('fr-FR'));
 
-export function ConnectorDashboard() {
+export function ConnectorDashboard({ page }: { page: WorkspacePage }) {
     const [advanced,setAdvanced]=useState(()=>sessionStorage.getItem('geoplacer.advanced')==='true');
+    const showAdvanced = page === 'diagnostics' || (page === 'dashboard' && advanced);
     const [approvalKey, setApprovalKey] = useState('');
     const [httpReader, setHttpReader] = useState<HttpReaderInfo | null>(null);
     const [readerOrigin, setReaderOrigin] = useState('https://geopixels.net');
     const [view, setView] = useState<View | null>(null);
-    const [templates, setTemplates] = useState<TemplateInfo[]>([]);
+    const [templates, setTemplates] = useState<TemplateInfo[] | null>(null);
+    const [galleryError, setGalleryError] = useState(false);
     const [error, setError] = useState('');
     const [capability, setCapability] = useState('');
     const [busy, setBusy] = useState(false);
@@ -100,16 +106,29 @@ export function ConnectorDashboard() {
             void poll();
         });
         void poll();
-        void engineHttp
-            .get<{ templates: TemplateInfo[] }>('/templates', { signal: abort.signal })
-            .then((r) => setTemplates(r.data.templates))
-            .catch(() => {});
         return () => {
             abort.abort();
             clearTimeout(timer);
             unsubscribe();
         };
     }, []);
+    const selectionId = view?.selection?.templateId;
+    const loadTemplates = useCallback((signal?: AbortSignal) =>
+        engineHttp.get<{ templates: TemplateInfo[] }>('/templates', { signal }).then(
+            ({data}) => {
+                if (!signal?.aborted) {
+                    setTemplates(data.templates);
+                    setGalleryError(false);
+                }
+            },
+            () => { if (!signal?.aborted) setGalleryError(true); }
+        ), []);
+    useEffect(() => {
+        if (!showAdvanced && page !== 'drawings') return;
+        const controller = new AbortController();
+        void loadTemplates(controller.signal);
+        return () => controller.abort();
+    }, [showAdvanced, page, selectionId, loadTemplates]);
     const refresh = useCallback(async () => setView((await engineHttp.get<View>('/connector/status')).data), []);
     async function action(fn: () => Promise<unknown>) {
         setBusy(true);
@@ -141,7 +160,8 @@ export function ConnectorDashboard() {
         view.project.height === view.selection.height;
     async function restoreTestModel() {
         const name = 'Test GeoPixels — fantôme 8 × 5';
-        let template = templates.find((t) => t.name === name && t.width === 8 && t.height === 5);
+        const available = templates ?? (await engineHttp.get<{ templates: TemplateInfo[] }>('/templates')).data.templates;
+        let template = available.find((t) => t.name === name && t.width === 8 && t.height === 5);
         if (!template) {
             const response = await fetch('/fixtures/geoplacer-8x5.png');
             if (!response.ok) throw new Error('PNG de test indisponible');
@@ -159,48 +179,11 @@ export function ConnectorDashboard() {
         await engineHttp.put('/engine/selection', { templateId: template.templateId });
         setTemplates((await engineHttp.get<{ templates: TemplateInfo[] }>('/templates')).data.templates);
     }
-    return (
-        <section className="connector-dashboard space-y-4" id="connectorDashboard">
-            <div className="rounded border border-amber-500 bg-amber-950/40 p-4">
-                <h2 className="text-xl font-semibold">GeoPixels — connecteur expérimental</h2>
-                <p>
-                    {view?.mode === 'local-fake'
-                        ? 'Fournisseur factice local : écritures synthétiques uniquement.'
-                        : 'Lecture du cache ; dessin supervisé dans une zone et un budget autorisés, par groupes adaptés aux ressources disponibles.'}
-                </p>
-                <p>
-                    Connexion : <strong id="connectorConnection">{view?.connected ? 'Connecté' : 'Déconnecté'}</strong>{' '}
-                    · Session :{' '}
-                    {view?.session === 'present'
-                        ? 'Contexte reçu (session non authentifiée par GeoPlacer)'
-                        : 'Indisponible'}
-                </p>
-                {httpReader?.active && httpReader.expires != null && (
-                    <p id="connectorCouplingTime">
-                        Couplage navigateur : {Math.ceil((httpReader.remainingMs ?? 0) / 1000)} s
-                        restantes pour cette capacité, expiration à {new Date(httpReader.expires).toLocaleTimeString('fr-FR')}.
-                        {view?.batch.execution==='autonomous' && ['running','paused'].includes(view.batch.state)
-                          ? ' Rotation sécurisée possible pendant ce travail autorisé ; arrêt et révocation restent prioritaires.'
-                          : ' Hors dessin autonome autorisé, un nouveau couplage est requis à l’expiration.'}
-                    </p>
-                )}
-                {!httpReader?.active && httpReader?.lastTermination && (
-                    <p id="connectorTermination" role="status">
-                        {httpReader.lastTermination.reason} (
-                        {new Date(httpReader.lastTermination.at).toLocaleTimeString('fr-FR')})
-                    </p>
-                )}
-            </div>
-            {error && (
-                <p role="alert" className="text-red-300">
-                    {error}
-                </p>
-            )}
-            <label className="flex items-center gap-2"><input type="checkbox" aria-label="Réglages avancés" checked={advanced} onChange={e=>{setAdvanced(e.target.checked);sessionStorage.setItem('geoplacer.advanced',String(e.target.checked));}}/>Réglages avancés et anciens parcours</label>
-            {(!advanced || view?.batch.execution==='autonomous')&&<SimpleDrawingPanel view={view} approvalKey={approvalKey} refresh={refresh} readerReady={view?.mode==='local-fake'||(httpReader?.batchProtocol??0)>=6}/>}
+    const pairing = (
+        <section className="studio-card">
             <details className="connector-setup" open={!view?.connected || !!httpReader?.pending}>
-                <summary>1. Connexion {view?.connected ? 'établie ✓ — réglages' : 'au navigateur'}</summary>
-                <label>
+                <summary className="studio-step"><span aria-hidden="true">2</span> {view?.connected ? 'Lecteur couplé' : 'Coupler le lecteur'}</summary>
+                <label className="studio-origin">
                     Origine de la page GeoPixels
                     <select
                         aria-label="Origine GeoPixels"
@@ -213,16 +196,10 @@ export function ConnectorDashboard() {
                     </select>
                 </label>
                 <p>
-                    Choisir l’origine exacte affichée dans l’adresse du site ; aucun sous-domaine supplémentaire n’est
-                    autorisé.
+                    Sélectionnez l’adresse affichée dans votre onglet GeoPixels.
                 </p>
-                <div className="rounded border p-3 space-y-2">
-                    <h3>Couplage HTTP Tampermonkey</h3>
-                    <p>
-                        {httpReader?.enabled
-                            ? 'Transport activé. La clé d’approbation n’est jamais envoyée au lecteur.'
-                            : 'Pour activer ce transport : arrêter le serveur puis lancer npm run start:reader. La clé privée apparaît dans sa console.'}
-                    </p>
+                <div className="rounded border border-border p-3 space-y-2">
+                    {httpReader?.enabled === false && <p>Arrêtez le serveur, puis lancez <code>npm run start:reader</code> pour activer le couplage.</p>}
                     <label>
                         Clé locale d’approbation privée
                         <input
@@ -235,8 +212,7 @@ export function ConnectorDashboard() {
                         />
                     </label>
                     <p>
-                        Cette clé ne doit pas être saisie dans le lecteur. Le code temporaire ci-dessous lui est
-                        destiné.
+                        Saisissez ici la clé de la console GeoPlacer. Le lecteur reçoit seulement le code temporaire.
                     </p>
                     {httpReader?.pending && (
                         <div role="status">
@@ -266,11 +242,11 @@ export function ConnectorDashboard() {
                     )}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                    <button hidden={!advanced} disabled={busy || active} onClick={() => void action(() => pair('local-fake'))}>
+                    <button hidden={!showAdvanced} disabled={busy || active} onClick={() => void action(() => pair('local-fake'))}>
                         Coupler un navigateur factice
                     </button>
 
-                    <a hidden={!advanced} href="/connector-fixture.html" target="_blank" rel="noreferrer">
+                    <a hidden={!showAdvanced} href="/connector-fixture.html" target="_blank" rel="noreferrer">
                         Ouvrir la page factice
                     </a>
                     <button
@@ -308,8 +284,9 @@ export function ConnectorDashboard() {
                     </div>
                 )}
             </details>
+            <div className="flex flex-wrap items-center gap-2 mt-3">
             <button
-                disabled={busy}
+                disabled={busy || (!view?.connected && !httpReader?.pending && !capability)}
                 onClick={() =>
                     void action(async () => {
                         await engineHttp.post('/connector/revoke', {});
@@ -322,7 +299,72 @@ export function ConnectorDashboard() {
             <a href="/geopixels-connector.user.js" download>
                 Télécharger le lecteur Tampermonkey
             </a>
-            <div hidden={!advanced}>
+            </div>
+        </section>
+    );
+    const showWorkflow = !advanced || view?.batch.execution === 'autonomous';
+    return (
+        <section className="connector-dashboard space-y-4" id="connectorDashboard" hidden={page === 'other'}>
+            <div className="studio-connection studio-card" hidden={page !== 'dashboard' && page !== 'diagnostics'}>
+                <h2 className="text-xl font-semibold">GeoPixels — connecteur expérimental</h2>
+                <p>
+                    {view?.mode === 'local-fake'
+                        ? 'Fournisseur factice local : écritures synthétiques uniquement.'
+                        : 'Le lecteur observe les tuiles chargées et transmet les groupes autorisés.'}
+                </p>
+                <p>
+                    Connexion : <strong id="connectorConnection">{view?.connected ? 'Connecté' : 'Déconnecté'}</strong>{' '}
+                    · Session :{' '}
+                    {view?.session === 'present'
+                        ? 'Contexte reçu (session non authentifiée par GeoPlacer)'
+                        : 'Indisponible'}
+                </p>
+                {httpReader?.active && httpReader.expires != null && (
+                    <p id="connectorCouplingTime">
+                        Couplage navigateur : {Math.ceil((httpReader.remainingMs ?? 0) / 1000)} s
+                        restantes pour cette capacité, expiration à {new Date(httpReader.expires).toLocaleTimeString('fr-FR')}.
+                        {view?.batch.execution==='autonomous' && ['running','paused'].includes(view.batch.state)
+                          ? ' Rotation sécurisée possible pendant ce travail autorisé ; arrêt et révocation restent prioritaires.'
+                          : ' Hors dessin autonome autorisé, un nouveau couplage est requis à l’expiration.'}
+                    </p>
+                )}
+                {!httpReader?.active && httpReader?.lastTermination && (
+                    <p id="connectorTermination" role="status">
+                        {httpReader.lastTermination.reason} (
+                        {new Date(httpReader.lastTermination.at).toLocaleTimeString('fr-FR')})
+                    </p>
+                )}
+            </div>
+            {error && (
+                <p role="alert" className="text-red-300">
+                    {error}
+                </p>
+            )}
+            <label hidden={page !== 'dashboard'} className="studio-advanced-toggle"><input type="checkbox" aria-label="Réglages avancés" checked={advanced} onChange={e=>{setAdvanced(e.target.checked);sessionStorage.setItem('geoplacer.advanced',String(e.target.checked));}}/>Réglages avancés et anciens parcours</label>
+            {page === 'drawings' && (galleryError ? <p role="alert" className="studio-alert">Galerie indisponible. <button onClick={() => void loadTemplates()}>Réessayer</button></p> :
+                <DrawingGallery templates={templates} selected={selectionId} pending={busy} disabled={active || !!view?.batch.uncertain}
+                    onSelect={id => void action(() => engineHttp.put('/engine/selection', {templateId:id}))} />)}
+            <SimpleDrawingPanel view={view} approvalKey={approvalKey} refresh={refresh}
+                readerReady={view?.mode === 'local-fake' || (httpReader?.batchProtocol ?? 0) >= 6}
+                page={page} showWorkflow={showWorkflow} pairing={pairing} />
+            {page === 'queue' && <ConnectorQueue batch={view?.batch}
+                canReconcile={!!view?.connected && view.bound && !active && !busy && /^[a-f0-9]{64}$/.test(approvalKey)}
+                onReconcile={() => void action(() => engineHttp.post('/connector/batch/reconcile', {}, {
+                    headers: { 'X-GeoPlacer-Approval': approvalKey },
+                }))} />}
+            {page === 'resources' && (
+                <section className="studio-card">
+                    <dl className="studio-metrics studio-resource-metrics">
+                        <div><dt>Énergie observée</dt><dd>{number(view?.resources?.energy)}</dd></div>
+                        <div><dt>Énergie exploitable</dt><dd>{number(view?.batch.resources?.available)}</dd></div>
+                        <div><dt>Capacité observée</dt><dd>{number(view?.resources?.capacity)}</dd></div>
+                        <div><dt>Monnaie du jeu</dt><dd>{number(view?.resources?.currency)}</dd></div>
+                    </dl>
+                    <p>{!view?.resources ? 'Ressources indisponibles.' : view.resourcesStale ? 'Ressources anciennes ou non datées.' : 'Observation datée.'}</p>
+                </section>
+            )}
+            {page === 'settings' && <Link className="studio-link" to="/settings/legacy">Ouvrir les paramètres hérités</Link>}
+            <div hidden={!showAdvanced} className="studio-advanced space-y-4">
             <div className="rounded border p-4 space-y-2">
                 <h3 className="font-semibold">2. Choisir le modèle</h3>
                 <p>
@@ -357,7 +399,7 @@ export function ConnectorDashboard() {
                         <option value="" disabled>
                             Sélectionner
                         </option>
-                        {templates.map((t) => (
+                        {templates?.map((t) => (
                             <option
                                 key={t.templateId}
                                 value={t.templateId}

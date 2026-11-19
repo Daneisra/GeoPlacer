@@ -504,6 +504,11 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     await pair(); // Auto-observation after approved coupling must match the imported PNG hash.
     await simple.getByRole('button',{name:'Lancer le dessin',exact:true}).waitFor();
     await page.waitForFunction(()=>![...document.querySelectorAll('#simpleDrawing button')].find(b=>b.textContent==='Lancer le dessin')?.disabled);
+    const nav = page.getByRole('navigation', {name:'Navigation principale'});
+    await nav.getByRole('link',{name:'File de travail',exact:true}).click();
+    await page.getByRole('heading',{name:'Travail courant',exact:true}).waitFor();
+    await nav.getByRole('link',{name:'Tableau de bord',exact:true}).click();
+    assert.equal(await simple.getByRole('button',{name:'Lancer le dessin',exact:true}).isEnabled(),true);
     const beforeSimple=await reader.evaluate(()=>globalThis.fixtureSiteCalls);
     await reader.evaluate(()=>{
       syncWorker.postMessage({type:'sync-delta'});
@@ -561,6 +566,10 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     assert.equal(upgraded.batch.confirmed,20);assert.equal(upgraded.upgrades.history.at(-1).state,'verified');
     assert.equal(await reader.evaluate(()=>fixturePurchaseCalls),1);assert.equal(upgraded.upgrades.uncertain,0);
     await page.screenshot({path:path.join(out,'automatic-upgrade-local-fixture.png'),fullPage:true});
+    await nav.getByRole('link',{name:'Ressources et améliorations',exact:true}).click();
+    await page.getByRole('cell',{name:'Effet et débit observés',exact:true}).waitFor();
+    await page.screenshot({path:path.join(out,'ressources.png'),fullPage:true});
+    await nav.getByRole('link',{name:'Tableau de bord',exact:true}).click();
     record('OK opt-in upgrade: one launch, zero initial native energy, durable purchase intent, fixed in-game endpoint stub, exact observed debit/effect, same scheduler resumes and draws 20 targets within a 10-coin budget; no external requests');
     await page.getByRole('button',{name:'Révoquer le canal',exact:true}).click();
 

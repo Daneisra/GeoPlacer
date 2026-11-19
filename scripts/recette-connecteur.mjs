@@ -11,10 +11,11 @@ import assert from 'node:assert/strict';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.resolve(process.argv[2] ?? 'test-logs/phase2a/browser');
 const importOnly=process.argv.includes('--import-only');
+const studioOnly=process.argv.includes('--studio-only');
 mkdirSync(out, { recursive: true });
 // Independent acceptance scenarios: do not exhaust the production 300/min management
 // budget with the preceding simulator stress workflow, or weaken that protection.
-if (!importOnly && !process.argv.includes('--fake-only') && !process.argv.includes('--http-only')) {
+if (!importOnly && !studioOnly && !process.argv.includes('--fake-only') && !process.argv.includes('--http-only')) {
   for (const part of ['fake', 'http']) {
     const code = await new Promise(resolve => {
       const child=spawn(process.execPath,[fileURLToPath(import.meta.url),path.join(out,part),`--${part}-only`],{
@@ -102,6 +103,65 @@ try {
   });
   const page = await context.newPage();
   await page.goto(base);
+  if (studioOnly) {
+    const nav = page.getByRole('navigation', { name: 'Navigation principale' });
+    await page.getByRole('heading', { name: 'Tableau de bord', exact: true }).waitFor();
+    await page.locator('#simCanvas').waitFor();
+    await page.screenshot({path:path.join(out,'simulation.png'),fullPage:true});
+
+    await nav.getByRole('link', { name:'Modes de dessin', exact:true }).click();
+    await page.getByRole('heading', { name:'Modes de dessin', exact:true }).waitFor();
+    assert.equal(await page.getByRole('link',{name:'Utiliser en simulation',exact:true}).count(),8);
+    await page.screenshot({path:path.join(out,'modes.png'),fullPage:true});
+    await page.getByRole('article').filter({has:page.getByRole('heading',{name:'Contours d’abord',exact:true})}).getByRole('link').click();
+    await page.getByRole('heading', { name:'Mes dessins', exact:true }).waitFor();
+    assert.equal(await page.getByLabel('Stratégie du modèle',{exact:true}).inputValue(),'outline-first');
+    const thumbnail = page.getByRole('img', {name:/Aperçu de Phase 2A/});
+    await thumbnail.waitFor();
+    await page.waitForFunction(() => [...document.images].some(img => img.alt.startsWith('Aperçu de Phase 2A') && img.complete && img.naturalWidth === 64));
+    await page.screenshot({path:path.join(out,'dessins.png'),fullPage:true});
+
+    await nav.getByRole('link',{name:'Tableau de bord',exact:true}).click();
+    await page.getByRole('button',{name:'Ouvrir le connecteur',exact:true}).click();
+    const simple=page.locator('#simpleDrawing');
+    await simple.getByLabel('Image à dessiner',{exact:true}).setInputFiles(path.join(repo,'public/fixtures/geoplacer-20x20.png'));
+    await simple.getByRole('button',{name:'Importer l’image',exact:true}).click();
+    await simple.locator('#drawingImportNotice').filter({hasText:/Image importée.*20 × 20/}).waitFor();
+    assert.equal(await simple.getByRole('button',{name:'Lancer le dessin',exact:true}).isDisabled(), true);
+    await page.screenshot({path:path.join(out,'dashboard.png'),fullPage:true});
+
+    await nav.getByRole('link',{name:'Ressources et améliorations',exact:true}).click();
+    await page.getByText('Ressources indisponibles.',{exact:true}).waitFor();
+    await page.screenshot({path:path.join(out,'ressources.png'),fullPage:true});
+    await page.getByLabel('Autoriser avec le prochain lancement du dessin',{exact:true}).check();
+    await page.getByLabel('Budget maximal de monnaie',{exact:true}).fill('10');
+    await nav.getByRole('link',{name:'File de travail',exact:true}).click();
+    await page.getByRole('heading',{name:'Travail courant',exact:true}).waitFor();
+    await nav.getByRole('link',{name:'Journal',exact:true}).click();
+    await page.locator('#logsViewer').getByText('Connecté',{exact:true}).waitFor();
+    await nav.getByRole('link',{name:'Diagnostics',exact:true}).click();
+    await page.getByLabel('Clé locale d’approbation',{exact:true}).fill(approvalKey);
+    await nav.getByRole('link',{name:'Paramètres',exact:true}).click();
+    assert.equal(await page.getByLabel('Budget maximal de monnaie',{exact:true}).inputValue(),'10');
+    await nav.getByRole('link',{name:'Tableau de bord',exact:true}).click();
+    assert.notEqual(await page.getByLabel('Clé locale d’approbation',{exact:true}).inputValue(),'');
+    await page.getByLabel('Clé locale d’approbation',{exact:true}).fill('');
+
+    for (const width of [1024, 390]) {
+      await page.setViewportSize({width,height:900});
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),false);
+      await page.screenshot({path:path.join(out,`dashboard-${width}.png`),fullPage:true});
+    }
+    const menu = page.getByRole('button',{name:'Menu',exact:true});
+    await menu.click();
+    await nav.getByRole('link',{name:'File de travail',exact:true}).click();
+    assert.equal(await menu.getAttribute('aria-expanded'),'false');
+    await page.getByRole('heading',{name:'Travail courant',exact:true}).waitFor();
+    const state = await api('connector/status',undefined,'GET');
+    assert.equal(state.connected,false);
+    assert.equal(state.batch.confirmed,0);
+    record('OK 8 pages, strategy import, gallery PNG, simple import, live journal, settings preserved across navigation, responsive layout (1024/390 px), no sends');
+  }
   if(importOnly){
     await page.getByLabel('Source de toile').selectOption('geopixels');
     const simple=page.locator('#simpleDrawing'),notice=simple.locator('#drawingImportNotice');
@@ -135,7 +195,7 @@ try {
     record('OK stale server response gives an explicit restart instruction; existing imported model preserved');
     await page.screenshot({path:path.join(out,'import-local-regression.png'),fullPage:true});
   }
-  if (!importOnly && !process.argv.includes('--http-only')) {
+  if (!importOnly && !studioOnly && !process.argv.includes('--http-only')) {
   await page.getByLabel('Source de toile').selectOption('geopixels');
   await page.locator('#connectorDashboard').waitFor();
   await page.getByLabel('Réglages avancés',{exact:true}).check();
@@ -262,7 +322,7 @@ try {
     record(`OK browser fixture stores and reloads ${width} x ${height} without placement`);
   }
   }
-  if (!importOnly && !process.argv.includes('--fake-only'))
+  if (!importOnly && !studioOnly && !process.argv.includes('--fake-only'))
     await runHttpReaderRecipe({ browser, page, api, base, approvalKey, repo, out, record });
   assert.equal(external.length, 0, JSON.stringify(external));
   assert.equal(errors.length, 0, JSON.stringify(errors));

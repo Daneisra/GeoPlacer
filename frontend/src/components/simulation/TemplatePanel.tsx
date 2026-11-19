@@ -3,6 +3,8 @@ import { Button, Card, CardContent, CardHeader, CardTitle } from '../ui';
 import { STRATEGY_LABELS, engineHttp, type EngineStatus, type TemplateInfo } from '../../lib/engine';
 import { applyStatus } from '../../hooks/useEngine';
 import { useCommand } from './useCommand';
+import { useSearchParams } from 'react-router-dom';
+import { DrawingGallery } from '../DrawingGallery';
 
 function toBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -16,22 +18,25 @@ function toBase64(file: File): Promise<string> {
 const field = 'w-full rounded-md border bg-background px-2 py-1 text-sm';
 
 /** Select or import a template of the simulation, choose its strategy and position, move it. */
-export function TemplatePanel({ status }: { status: EngineStatus | null }) {
+export function TemplatePanel({ status, gallery = false }: { status: EngineStatus | null; gallery?: boolean }) {
   const { pending, run } = useCommand();
-  const [templates, setTemplates] = useState<TemplateInfo[]>([]);
+  const [templates, setTemplates] = useState<TemplateInfo[] | null>(null);
+  const [listingError, setListingError] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState('');
   const [x, setX] = useState(0);
   const [y, setY] = useState(0);
-  const [strategy, setStrategy] = useState('top-to-bottom');
+  const [query, setQuery] = useSearchParams();
+  const requestedStrategy = query.get('strategie');
+  const strategy = requestedStrategy && Object.prototype.hasOwnProperty.call(STRATEGY_LABELS, requestedStrategy) ? requestedStrategy : 'top-to-bottom';
   const selection = status?.selection ?? null;
   const running = status !== null && !status.commands.start && status.state !== 'stopped' && status.state !== 'completed' && status.state !== 'error';
 
   const refresh = useCallback(
     (): Promise<void> =>
       engineHttp.get<{ templates: TemplateInfo[] }>('/templates').then(
-        (r) => setTemplates(r.data.templates),
-        () => undefined
+        (r) => { setTemplates(r.data.templates); setListingError(false); },
+        () => setListingError(true)
       ),
     []
   );
@@ -68,6 +73,9 @@ export function TemplatePanel({ status }: { status: EngineStatus | null }) {
 
   const max = status?.settings.simulator;
   return (
+    <div className="space-y-4">
+    {gallery && (listingError ? <p className="studio-alert" role="alert">Galerie indisponible. <button onClick={() => void refresh()}>Réessayer</button></p> :
+      <DrawingGallery templates={templates} selected={selection?.templateId} pending={pending !== null} disabled={running} onSelect={id => void select(id)} />)}
     <Card id="templatePanel">
       <CardHeader className="pb-2">
         <CardTitle className="text-lg">Modèle</CardTitle>
@@ -77,7 +85,7 @@ export function TemplatePanel({ status }: { status: EngineStatus | null }) {
           <label className="text-muted-foreground" htmlFor="templateSelect">Modèle sélectionné</label>
           <select id="templateSelect" className={field} value={selection?.templateId ?? ''} disabled={running || pending !== null} onChange={(e) => e.target.value !== '' && void select(e.target.value)}>
             <option value="">— choisir —</option>
-            {templates.map((t) => (
+            {templates?.map((t) => (
               <option key={t.templateId} value={t.templateId}>
                 {t.name} ({t.width}×{t.height}, {t.paintablePixels} px, {STRATEGY_LABELS[t.strategy] ?? t.strategy})
               </option>
@@ -88,7 +96,7 @@ export function TemplatePanel({ status }: { status: EngineStatus | null }) {
         {selection !== null && (
           <MoveForm key={`${selection.templateId}:${selection.revision}`} x={selection.placement?.x ?? 0} y={selection.placement?.y ?? 0} disabled={pending !== null} onMove={(x, y) => void move(x, y)} />
         )}
-        <details>
+        <details id="simulation-import" open={requestedStrategy !== null || undefined}>
           <summary className="cursor-pointer">Importer un PNG</summary>
           <div className="mt-2 space-y-2">
             <input id="templateFile" type="file" accept="image/png" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
@@ -103,7 +111,11 @@ export function TemplatePanel({ status }: { status: EngineStatus | null }) {
                 <input className={field} type="number" min={0} value={y} onChange={(e) => setY(Number(e.target.value))} />
               </label>
             </div>
-            <select className={field} value={strategy} onChange={(e) => setStrategy(e.target.value)}>
+            <select aria-label="Stratégie du modèle" className={field} value={strategy} onChange={(e) => setQuery(previous => {
+              const next = new URLSearchParams(previous);
+              next.set('strategie', e.target.value);
+              return next;
+            }, { replace: true, preventScrollReset: true })}>
               {Object.entries(STRATEGY_LABELS).map(([id, label]) => (
                 <option key={id} value={id}>
                   {label}
@@ -118,6 +130,7 @@ export function TemplatePanel({ status }: { status: EngineStatus | null }) {
         </details>
       </CardContent>
     </Card>
+    </div>
   );
 }
 

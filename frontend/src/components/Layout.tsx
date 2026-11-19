@@ -3,9 +3,10 @@ import { Sidebar } from './Sidebar';
 
 export default function Layout() {
   return (
-    <div style={{ display: 'flex', minHeight: '100vh' }}>
+    <div className="studio-layout">
+      <a className="studio-skip" href="#studio-content">Aller au contenu</a>
       <Sidebar />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+      <div className="studio-main">
         <App />
       </div>
     </div>

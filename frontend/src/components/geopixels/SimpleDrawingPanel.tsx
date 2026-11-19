@@ -1,4 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { ImageIcon, Upload } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import type { WorkspacePage } from '../../navigation';
 import { engineHttp, type TemplateInfo } from '../../lib/engine';
 import { PERSONAL_GEOPIXELS_PALETTE, parsePaletteText } from '../../lib/ghost-palettes';
 import type { BatchView } from './BatchPanel';
@@ -12,6 +15,8 @@ type DrawingView = {
     tileEvidence?:{total:number;nativeUpdated:number;nativeChecked:number;missing:number;sourceDateKnown:boolean};
     upgrades?:{error?:string|null;uncertain:number;history:{id:string;kind:string;cost:number;state:string;at:number}[]};
     progress: { correct: number; incorrect: number; unknown: number; total: number } | null;
+    lastSync?: number | null;
+    captureExpired?: boolean;
 };
 const errorMessage = (e: unknown) => {
     const v = e as { response?: { status?: number; data?: { error?: { message?: string } } } };
@@ -23,17 +28,28 @@ const errorMessage = (e: unknown) => {
         'Serveur indisponible : vérifier la connexion et l’état avant de poursuivre.'
     );
 };
+const upgradeStateLabels: Record<string, string> = {
+    verified: 'Effet et débit observés', accepted: 'Acceptée, effet à vérifier',
+    uncertain: 'Incertaine. Achats concernés bloqués.', delivered: 'Résultat attendu',
+    prepared: 'Préparée', refused: 'Refusée', cancelled: 'Annulée',
+};
 /** Default workflow. Authority is granted only by the explicit launch/resume buttons. */
 export function SimpleDrawingPanel({
     view,
     approvalKey,
     refresh,
     readerReady=true,
+    page,
+    showWorkflow,
+    pairing,
 }: {
     view: DrawingView | null;
     approvalKey: string;
     refresh: () => Promise<void>;
     readerReady?:boolean;
+    page: WorkspacePage;
+    showWorkflow: boolean;
+    pairing: ReactNode;
 }) {
     const [file, setFile] = useState<File | null>(null),
         [busy, setBusy] = useState(false),
@@ -111,7 +127,7 @@ export function SimpleDrawingPanel({
             ? JSON.stringify([selected.templateId, view.project, groupSize, budget, upgradeJson, approvalKey])
             : '';
     const viewConnected = !!view?.connected;
-    const canPreview = readerReady && !!approvalKey && !!view?.connected && !active && !busy && !batch?.uncertain;
+    const canPreview = showWorkflow && readerReady && !!approvalKey && !!view?.connected && !active && !busy && !batch?.uncertain;
     useEffect(() => {
         if (!previewIdentity || !viewConnected) {
             attempted.current = '';
@@ -141,13 +157,21 @@ export function SimpleDrawingPanel({
     const consent = { batchId: batch?.id, digest: batch?.digest, approved: true };
     const preparedGroup=batch?.scope?.groupSize ?? 5;
     const previewReady=preparedGroup===groupSize && JSON.stringify(batch?.scope?.upgrades??null)===JSON.stringify(upgradeJson?JSON.parse(upgradeJson):null) && (!budget || batch?.budgets?.pixels===Number(budget));
+    const dashboard = page === 'dashboard';
+    const progress = view?.progress;
+    const counts = progress ? [
+        {label:'Conformes', value:progress.correct, type:'correct'},
+        {label:'À corriger', value:progress.incorrect, type:'incorrect'},
+        {label:'Inconnus', value:progress.unknown, type:'unknown'},
+    ] : [];
     return (
         <div className="space-y-4" id="simpleDrawing">
-            <div className="rounded border p-4 space-y-3" aria-busy={importing}>
-                <h3 className="text-lg font-semibold">1. Importer votre image</h3>
-                <p>
-                    Le PNG préparé est le modèle qui sera dessiné. Chargez ce même fichier comme fantôme dans GeoPixels.
-                </p>
+            <div className="studio-workflow" data-page={page} hidden={!dashboard && page !== 'drawings' && page !== 'diagnostics'}>
+              <div className="studio-steps">
+            <section className="studio-card space-y-3" aria-busy={importing} hidden={!(dashboard && showWorkflow) && page !== 'drawings'}>
+                <h2 className="studio-step">{dashboard && <span>1</span>} Importer votre image</h2>
+                <p className="text-muted-foreground">Choisissez un PNG, puis téléchargez le fantôme préparé pour GeoPixels.</p>
+                <div className="studio-import">
                 <input
                     aria-label="Image à dessiner"
                     type="file"
@@ -158,40 +182,25 @@ export function SimpleDrawingPanel({
                         setImportNotice(null);
                     }}
                 />
-                <button disabled={!file || active || busy} onClick={() => void importImage()}>
+                <button className="studio-primary" disabled={!file || active || busy} onClick={() => void importImage()}>
+                    <Upload size={16} aria-hidden="true" />
                     {importing ? 'Importation en cours…' : 'Importer l’image'}
                 </button>
+                </div>
                 {importNotice && (
                     <p id="drawingImportNotice" role={importNotice.kind === 'error' ? 'alert' : 'status'}>
                         {importNotice.text}
                     </p>
                 )}
-                {selected && imageUrl && (
-                    <div className="flex flex-wrap items-center gap-4">
-                        <img
-                            src={imageUrl}
-                            alt={`Modèle préparé : ${selected.name}`}
-                            className="max-h-48 max-w-full object-contain bg-slate-700 [image-rendering:pixelated]"
-                            style={{ width: Math.min(320, selected.width * 8) }}
-                        />
-                        <div>
-                            <p>
-                                {selected.name} · {selected.width} × {selected.height}
-                            </p>
-                            <a href={imageUrl} download>
-                                Télécharger le fantôme pour GeoPixels
-                            </a>
-                        </div>
-                    </div>
-                )}
-            </div>
-            <div className="rounded border border-amber-500 p-4 space-y-3">
-                <h3 className="text-lg font-semibold">2. Vérifier et lancer le dessin</h3>
+                {selected && imageUrl && <a href={imageUrl} download>Télécharger le fantôme pour GeoPixels</a>}
+            </section>
+            <div hidden={!dashboard && page !== 'diagnostics'}>{pairing}</div>
+            <section className="studio-card space-y-3" hidden={!dashboard || !showWorkflow}>
+                <h2 className="studio-step"><span>3</span> Vérifier et lancer le dessin</h2>
                 {view?.connected && !readerReady && <p>Installez le lecteur 1.1.0 proposé ci-dessous et refaites le couplage pour utiliser les groupes adaptatifs et les améliorations configurables.</p>}
                 {!view?.connected ? (
                     <p>
-                        Chargez le fantôme sur GeoPixels, puis effectuez le couplage ci-dessous. Le lecteur observe
-                        automatiquement le modèle.
+                        Chargez le fantôme sur GeoPixels, puis couplez le lecteur à l’étape 2.
                     </p>
                 ) : !view.bound || batch?.execution !== 'autonomous' ? (
                     <p>
@@ -216,14 +225,14 @@ export function SimpleDrawingPanel({
                         </p>
                     </>
                 )}
-                <p>
+                {view?.bound && batch?.execution === 'autonomous' && <p>
                     Vérifiez l’image et sa destination avant de lancer : les envois suivants seront automatiques dans ce
                     périmètre.
-                </p>
+                </p>}
                 {batch?.scope?.upgrades && <p>Améliorations autorisées avec le lancement : budget maximal {batch.scope.upgrades.maxBudget} monnaies du jeu, réserve minimale {batch.scope.upgrades.minimumReserve}. Aucun paiement en argent réel.</p>}
                 <div className="flex flex-wrap gap-3">
                     <button
-                        className="font-semibold"
+                        className="studio-primary"
                         disabled={
                             busy ||
                             !previewReady ||
@@ -293,6 +302,7 @@ export function SimpleDrawingPanel({
                     )}
                     {batch && batch.state !== 'idle' && (
                         <button
+                            className="studio-stop"
                             disabled={!approvalKey || busy}
                             onClick={() =>
                                 void action(() =>
@@ -308,7 +318,7 @@ export function SimpleDrawingPanel({
                         </button>
                     )}
                 </div>
-                {batch && (
+                {batch && batch.state !== 'idle' && (
                     <div role="status">
                         <p>
                             {batch.state === 'completed'
@@ -338,26 +348,43 @@ export function SimpleDrawingPanel({
                             {batch.resources?.available ?? 'indisponible — attente d’une nouvelle réponse native'}.
                             Aucune recharge estimée.
                         </p>
-                        {view?.progress && (
-                            <div className="space-y-1">
-                                <p>Couverture : {(view.progress.total-view.progress.unknown).toLocaleString('fr-FR')} / {view.progress.total.toLocaleString('fr-FR')} cibles connues. {view.progress.correct.toLocaleString('fr-FR')} conformes · {view.progress.incorrect.toLocaleString('fr-FR')} à corriger · {view.progress.unknown.toLocaleString('fr-FR')} inconnues.</p>
-                                <p>{view.tileEvidence?.nativeUpdated ?? 0} tuile(s) remplacée(s) par une réponse native récente · {view.tileEvidence?.nativeChecked ?? 0} vérifiée(s) sans changement · {view.tileEvidence?.missing ?? 0} absente(s) du cache observé.</p>
-                                {view.progress.unknown>0 && <p>Les régions chargées continuent d’être parcourues. Pour élargir la couverture, affichez les zones manquantes sur GeoPixels.</p>}
-                                <details><summary>Actualisation et confirmations</summary><p>Un accusé accepte la requête. La conformité est mesurée séparément dans le cache. Une réponse native récente signifie reçue depuis moins de 30 s ; son curseur n’est pas une date serveur. Une relecture locale ne renouvelle jamais cette preuve. Les tuiles fusionnées sans preuve corrélée restent non vérifiées.</p></details>
-                            </div>
-                        )}
                         <p>Prochain groupe : jusqu’à {batch.adaptiveGroupSize ?? 0} pixels, selon l’énergie et le réglage autorisé.</p>
-                        {!!view?.upgrades?.history.length && <details><summary>Améliorations du dessin ({view.upgrades.history.length})</summary>{view.upgrades.history.map(r=><p key={r.id}>{kindLabels[r.kind]??r.kind} · {r.cost} monnaies · {({verified:'Effet et débit observés',accepted:'Acceptée, effet à vérifier',uncertain:'Incertaine — achats concernés bloqués',delivered:'Résultat attendu',prepared:'Préparée',refused:'Refusée',cancelled:'Annulée'} as Record<string,string>)[r.state]}</p>)}</details>}
                         {batch.error && <p>{batch.error}</p>}
                         {view?.upgrades?.error && <p role="alert">{view.upgrades.error}</p>}
                     </div>
                 )}
                 {error && <p role="alert">{error}</p>}
+            </section>
+              </div>
+              <section className="studio-card studio-preview" hidden={!dashboard}>
+                <div className="studio-card-heading">
+                  <div><h2>{selected?.name ?? 'Aperçu du dessin'}</h2><p>{selected ? `${selected.width} × ${selected.height} px` : 'Importez votre PNG pour afficher le modèle.'}</p></div>
+                  <Link className="studio-link" to="/dessins">Mes dessins</Link>
+                </div>
+                <div className="studio-image-stage">
+                  {imageUrl && selected ? <img src={`${imageUrl}?rev=${selected.revision}`} alt={`Modèle préparé : ${selected.name}`} /> : <ImageIcon size={44} aria-hidden="true" />}
+                </div>
+                <div className="studio-card-heading">
+                  <h3>Progression observée</h3>
+                  {progress && <span>{(progress.total-progress.unknown).toLocaleString('fr-FR')} / {progress.total.toLocaleString('fr-FR')} cibles connues</span>}
+                </div>
+                {progress && progress.total > 0 && <div className="studio-progress" aria-hidden="true">{counts.map(c => <span key={c.type} data-count={c.type} style={{flexGrow:c.value}} />)}</div>}
+                {progress ? <dl className="studio-metrics">{counts.map(c => <div key={c.type}><dt>{c.label}</dt><dd data-count={c.type}>{c.value.toLocaleString('fr-FR')}</dd></div>)}</dl> : <p className="text-muted-foreground">En attente d’une observation du lecteur.</p>}
+                {view?.lastSync && <p className="text-muted-foreground">Dernière capture à {new Date(view.lastSync).toLocaleTimeString('fr-FR')}{view.captureExpired ? ' · capture expirée' : ''}</p>}
+                {view?.tileEvidence && (
+                  <details>
+                    <summary>Actualisation des tuiles</summary>
+                    <p>{view.tileEvidence.nativeUpdated} actualisées · {view.tileEvidence.nativeChecked} vérifiées sans changement · {view.tileEvidence.missing} absentes du cache.</p>
+                    <p>{view.tileEvidence.sourceDateKnown ? 'Source datée.' : 'Fraîcheur serveur non vérifiée. Une relecture locale ne rajeunit pas la preuve native.'}</p>
+                    {!!progress?.unknown && <p>Affichez les zones manquantes sur GeoPixels pour élargir la couverture.</p>}
+                  </details>
+                )}
+              </section>
             </div>
-            <details>
-                <summary>Options du dessin</summary>
+            <details className="studio-card" hidden={!(dashboard && showWorkflow) && page !== 'resources' && page !== 'settings'} open={page === 'resources' || page === 'settings' || undefined}>
+                <summary>{page === 'resources' ? 'Politique d’améliorations' : 'Options du dessin'}</summary>
                 <div className="grid gap-3 p-3 md:grid-cols-2">
-                    <label>
+                    <label hidden={page === 'resources'}>
                         Taille cible des groupes (0 : automatique)
                         <input
                             aria-label="Pixels par requête"
@@ -369,7 +396,7 @@ export function SimpleDrawingPanel({
                             onChange={(e) => setGroupSize(Number(e.target.value))}
                         />
                     </label>
-                    <label>
+                    <label hidden={page === 'resources'}>
                         Budget de pixels (vide : image entière)
                         <input
                             aria-label="Budget du dessin"
@@ -380,7 +407,7 @@ export function SimpleDrawingPanel({
                             onChange={(e) => setBudget(e.target.value)}
                         />
                     </label>
-                    <fieldset className="md:col-span-2 space-y-2" disabled={active || busy}>
+                    <fieldset className="md:col-span-2 space-y-3" disabled={active || busy}>
                         <legend>Améliorations automatiques — monnaie du jeu uniquement</legend>
                         <label><input type="checkbox" checked={autoUpgrades} onChange={e=>setAutoUpgrades(e.target.checked)}/> Autoriser avec le prochain lancement du dessin</label>
                         {autoUpgrades && <div className="grid gap-2 md:grid-cols-2">
@@ -393,7 +420,7 @@ export function SimpleDrawingPanel({
                             <p>Tarifs vérifiés dans la boutique avant chaque achat. Un tarif ou un résultat non vérifiable suspend les achats concernés.</p>
                         </div>}
                     </fieldset>
-                    <label className="md:col-span-2">
+                    <label className="md:col-span-2" hidden={page === 'resources'}>
                         Palette locale (#RRGGBB)
                         <textarea
                             aria-label="Palette du dessin"
@@ -404,6 +431,22 @@ export function SimpleDrawingPanel({
                     </label>
                 </div>
             </details>
+            {page === 'resources' && (
+                <section className="studio-card space-y-3">
+                    <h2>Historique des améliorations</h2>
+                    {view?.upgrades?.error && <p role="alert">{view.upgrades.error}</p>}
+                    {!!view?.upgrades?.uncertain && <p>Améliorations incertaines : {view.upgrades.uncertain}.</p>}
+                    {view?.upgrades?.history.length ? (
+                        <div className="observation-table">
+                            <table><thead><tr><th scope="col">Amélioration</th><th scope="col">Monnaie</th><th scope="col">État</th></tr></thead>
+                                <tbody>{[...view.upgrades.history].reverse().map(row => (
+                                    <tr key={row.id}><td>{kindLabels[row.kind] ?? row.kind}</td><td>{row.cost}</td><td>{upgradeStateLabels[row.state] ?? row.state}</td></tr>
+                                ))}</tbody>
+                            </table>
+                        </div>
+                    ) : <p className="text-muted-foreground">Aucune amélioration enregistrée.</p>}
+                </section>
+            )}
         </div>
     );
 }

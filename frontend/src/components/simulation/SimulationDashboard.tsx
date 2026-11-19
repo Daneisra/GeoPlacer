@@ -10,12 +10,14 @@ import { EngineOverview } from './EngineOverview';
 import { ResourcesPanel } from './ResourcesPanel';
 import { SimulatorPanel } from './SimulatorPanel';
 import { TemplatePanel } from './TemplatePanel';
+import { Link } from 'react-router-dom';
+import type { WorkspacePage } from '../../navigation';
 
 /**
  * Dashboard of the new engine (Phase 1B.9). Everything shown here is a
  * LOCAL SIMULATION: no account, no session, no real service.
  */
-export function SimulationDashboard() {
+export function SimulationDashboard({ page }: { page: WorkspacePage }) {
   const { status, connection, attempts, errors, notices } = useEngine();
   const toast = useToast();
   const seen = useRef(new Set<string>());
@@ -37,11 +39,12 @@ export function SimulationDashboard() {
   }, [errors, notices, toast]);
 
   return (
-    <div className="space-y-4" id="simulationDashboard">
+    <div className="space-y-4" id="simulationDashboard" hidden={page === 'other'}>
+      {page === 'dashboard' && <>
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-sky-700 bg-sky-950/60 px-4 py-2" id="simulationBanner">
         <div>
-          <span className="mr-2 rounded bg-sky-600 px-2 py-0.5 text-xs font-bold tracking-wide text-white">SIMULATION LOCALE</span>
-          <span className="text-sm">Toutes les données ci-dessous sont simulées : aucune connexion à un service réel, aucun compte.</span>
+          <strong className="mr-2 text-sm">Simulation locale</strong>
+          <span className="text-sm text-muted-foreground">Toile et ressources simulées.</span>
         </div>
         <span className={`text-xs ${connection === 'open' ? 'text-green-400' : 'text-yellow-300'}`} id="wsConnection">
           {connection === 'open' ? 'Temps réel connecté' : connection === 'connecting' ? 'Connexion…' : 'Déconnecté — reconnexion…'}
@@ -53,14 +56,12 @@ export function SimulationDashboard() {
         <EngineOverview status={status} connection={connection} />
         <CanvasView status={status} />
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <TemplatePanel status={status} />
-        <AttemptsPanel status={status} recent={attempts} />
-      </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <ResourcesPanel status={status} />
-        <SimulatorPanel status={status} />
-      </div>
+      </>}
+      {(page === 'dashboard' || page === 'drawings') && <TemplatePanel status={status} gallery={page === 'drawings'} />}
+      {page === 'queue' && <AttemptsPanel status={status} recent={attempts} />}
+      {page === 'resources' && <ResourcesPanel status={status} />}
+      {(page === 'settings' || page === 'diagnostics') && <SimulatorPanel status={status} />}
+      {page === 'settings' && <Link className="studio-link" to="/settings/legacy">Ouvrir les paramètres hérités</Link>}
     </div>
   );
 }
