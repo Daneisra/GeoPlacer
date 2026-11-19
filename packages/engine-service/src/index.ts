@@ -3,6 +3,7 @@
  * the engine packages and the server. Phase 2A adds an opt-in observation provider; the durable simulated
  * world and existing scheduler remain available. Real service writes are disabled.
  */
+export type { EnergyPolicy, GroupPolicy } from './geopixels/drawing-energy.js';
 
 export {
   FileWorldStore,

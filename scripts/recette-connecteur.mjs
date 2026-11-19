@@ -152,7 +152,7 @@ try {
     await nav.getByRole('link',{name:'Ressources et améliorations',exact:true}).click();
     await page.getByText('Ressources indisponibles.',{exact:true}).waitFor();
     await page.screenshot({path:path.join(out,'ressources.png'),fullPage:true});
-    await page.getByLabel('Autoriser avec le prochain lancement du dessin',{exact:true}).check();
+    await page.getByLabel('Budget des améliorations',{exact:true}).selectOption('limited');
     await page.getByLabel('Budget maximal de monnaie',{exact:true}).fill('10');
     await nav.getByRole('link',{name:'File de travail',exact:true}).click();
     await page.getByRole('heading',{name:'Travail courant',exact:true}).waitFor();

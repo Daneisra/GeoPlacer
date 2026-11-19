@@ -451,6 +451,11 @@ export function createScheduler(config: SchedulerConfig, deps: SchedulerDependen
         return { kind: 'sleep', ms: Math.max(1, Math.min(wait, config.maxWaitMs)) };
       }
       case 'ok': {
+        const groupWait = deps.groupWait?.({ size: plan.writes.length, candidates: plan.candidates, progress });
+        if (groupWait) {
+          setState('waiting-resources', groupWait);
+          return { kind: 'sleep', ms: config.reconcileRetryMs };
+        }
         const wanted = Math.min(config.minBatchSize, plan.candidates);
         if (plan.writes.length < wanted) {
           const wait = resources.timeUntil(agent, wanted * cost + attempts.committedEnergy(agent), now);

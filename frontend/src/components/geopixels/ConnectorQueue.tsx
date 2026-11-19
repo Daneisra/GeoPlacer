@@ -61,7 +61,9 @@ export function ConnectorQueue({
                     <dd>{batch?.uncertain ?? '—'}</dd>
                 </div>
             </dl>
-            {batch?.error && <p role="status">{batch.error}</p>}
+            {batch?.error && <p role="status">{translateReason(batch.error)}</p>}
+            {batch?.energyPolicy?.reason && batch.state === 'running' && <p>{batch.energyPolicy.reason}</p>}
+            {batch?.groupReason && <p>{batch.groupReason}</p>}
             {waiting && <p role="status">{waiting}</p>}
             <section className="space-y-2" aria-label="Groupes de dessin">
                 <h3>{group?.state === 'delivered' ? 'Groupe transmis au lecteur' : 'Prochain groupe'}</h3>
@@ -101,7 +103,7 @@ export function ConnectorQueue({
                                 <tr key={row.attemptId}>
                                     <td>{formatTime(row.startedAt)}</td>
                                     <td>{row.pixels}</td>
-                                    <td>{row.accepted ? 'Requête acceptée' : (labels[row.state] ?? row.state)}</td>
+                                    <td>{row.accepted ? 'Requête acceptée' : (labels[row.state] ?? row.state)}{row.reason && <p>{row.reason}</p>}</td>
                                 </tr>
                             ))}
                         </tbody>

@@ -21,6 +21,7 @@ import { parseObservationHistory } from './geopixels/monitor.js';
 import { parseRegions, type ImageRegion } from './geopixels/regions.js';
 import { RegionalProgressCache, summarizeCompletedCapture } from './geopixels/region-progress.js';
 import { check } from './geopixels/protocol.js';
+import type { EnergyPolicy, GroupPolicy } from './geopixels/drawing-energy.js';
 import path from 'node:path';
 import type {
     AgentId,
@@ -883,7 +884,7 @@ export class EngineService {
                 bound = false;
             }
         }
-        if (!bound && this.connector.monitoring.control().state !== 'stopped')
+        if (!bound && (view.connected || view.mode === null || !view.bound) && this.connector.monitoring.control().state !== 'stopped')
             this.connector.monitoring.stop('Liaison du modèle perdue : vérifier le modèle et recommencer le couplage.');
         let progress: ProgressSnapshot | null = null;
         let regionViews: Awaited<ReturnType<RegionalProgressCache['compute']>>['regions'] = [];
@@ -1293,7 +1294,7 @@ export class EngineService {
     }
     return { png: await exportGhostPng(pngjsCodec, template), filename };
   }
-  async previewDrawing(groupSize=0,pixelBudget?:number,upgrades?:import('./geopixels/upgrade-policy.js').AutomaticUpgradePolicy) {
+  async previewDrawing(groupSize=0,pixelBudget?:number,upgrades?:import('./geopixels/upgrade-policy.js').AutomaticUpgradePolicy, energy?: EnergyPolicy, groups?: GroupPolicy) {
     this.guard();const t=this.selectedTemplate,p=this.connector.status().project;
     check(t!==null && p!==null,'Importer une image et coupler le navigateur avec son fantôme chargé.');
     const rgba=quantizedToRgba(t.image);
@@ -1306,7 +1307,7 @@ export class EngineService {
     let retained=0;for(const color of t.image.pixels)if(color!==0xffffffff)retained++;
     const budget=pixelBudget ?? retained;
     check(Number.isSafeInteger(budget)&&budget>=1&&budget<=retained,'Budget supérieur aux pixels du modèle');
-    return this.singlePixelWriter.batch.prepare(this.connector.status().mode==='local-fake'?'fake':'real',budget,'autonomous',budget,{region:{x:0,y:0,width:t.image.width,height:t.image.height},durationMs:null,groupSize,strategy:t.strategy.id,...(upgrades?{upgrades}:{})});
+    return this.singlePixelWriter.batch.prepare(this.connector.status().mode==='local-fake'?'fake':'real',budget,'autonomous',budget,{region:{x:0,y:0,width:t.image.width,height:t.image.height},durationMs:null,groupSize,strategy:t.strategy.id,...(upgrades?{upgrades}:{}),...(energy?{energy}:{}),...(groups?{groups}:{})});
   }
   async importGhost(input: GhostImportInput): Promise<GhostInfo> {
     this.guard();

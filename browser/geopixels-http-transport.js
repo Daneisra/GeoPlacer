@@ -113,7 +113,7 @@ const GeoPlacerHttpTransport = (address, request) => {
       capability = claimed.capability;
       pending(claimed.fingerprint);
       for (let i = 0; i < 60; i++) {
-        const state = await post('status', { protocol: 1, readerVersion: 10, waitMs: 5000 });
+        const state = await post('status', { protocol: 1, readerVersion: 10, waitMs: 5000, reserveGuard: true });
         if (state.approved === true && state.lastSequence === 0) {
           if (state.pacing !== 'server-50ms' || state.regionalProtocol !== 1 || state.batchProtocol !== 6)
             throw new Error('Serveur incompatible : mettre à jour GeoPlacer et refaire le couplage.');
@@ -168,6 +168,7 @@ const GeoPlacerHttpTransport = (address, request) => {
         protocol: 1,
         readerVersion: 10,
         waitMs: 5000,
+        reserveGuard: true,
         ...(writerResources ? { writerResources } : {}),
         ...(abortedCapture ? { abortedCapture } : {}),
         ...(monitoring ? { monitoring } : {}),
@@ -217,10 +218,10 @@ const GeoPlacerHttpTransport = (address, request) => {
     async batchResult(batchId, attemptId, result) {
       return post('batch-result', { protocol: 1, batchId, attemptId, result });
     },
-    async disconnect() {
+    async disconnect(reason = 'manual') {
       active = false;
       try {
-        if (capability) await post('disconnect', { protocol: 1 });
+        if (capability) await post('disconnect', { protocol: 1, ...(reason === 'manual' ? {} : { reason }) });
       } finally {
         capability = null;
       }

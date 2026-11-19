@@ -7,6 +7,7 @@ export type WriterResources = {
     energy: number;
     available: number;
     colors: number[];
+    capacity?: number;
     shop?: import('./upgrade-policy.js').ShopObservation;
 };
 export function validWriterResources(value: unknown): value is WriterResources {
@@ -15,10 +16,11 @@ export function validWriterResources(value: unknown): value is WriterResources {
         !!r &&
         typeof r === 'object' &&
         !Array.isArray(r) &&
-        Object.keys(r).length === (r.shop ? 8 : 7) &&
+        Object.keys(r).length === 7 + Number(!!r.shop) + Number(Object.hasOwn(r, 'capacity')) &&
         ['source', 'sequence', 'requestStartedAt', 'capturedAt', 'energy', 'available', 'colors'].every((k) =>
             Object.hasOwn(r, k)
         ) &&
+        (!Object.hasOwn(r, 'capacity') || (Number.isSafeInteger(r.capacity) && r.capacity! >= 1 && r.capacity! <= 1e9)) &&
         (!r.shop ||
             (Object.keys(r.shop).length === (Object.hasOwn(r.shop, 'colorPrice') ? 5 : 4) &&
                 ['catalog', 'currency', 'capacity', 'intervalMs'].every((k) => Object.hasOwn(r.shop!, k)) &&

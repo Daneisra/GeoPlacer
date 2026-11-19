@@ -141,11 +141,20 @@ describe('Passive HTTP reader panel in a local DOM fixture', () => {
     const s = await setup();
     await s.button('Coupler').onclick!();
     s.channel.send = async () => {
+      await s.channel.disconnect(); // The real transport invalidates an uncertain sequence.
       throw new Error('Observation non confirmée');
     };
     await s.button('Observer le modèle').onclick!();
     expect(s.elements.some((e) => e.textContent === 'Observation non confirmée')).toBe(true);
     expect(s.channel.connected()).toBe(false);
+  });
+  it('retains the pairing after a local capture error with an unchanged context', async () => {
+    const s = await setup();
+    await s.button('Coupler').onclick!();
+    s.reader.observe = async () => { throw new Error('Canvas momentanément indisponible'); };
+    await s.button('Observer le modèle').onclick!();
+    expect(s.channel.connected()).toBe(true);
+    expect(s.elements.some(e => e.textContent.includes('Le couplage est conservé.'))).toBe(true);
   });
   it('shows a specific safe refusal reason without sending page credentials', async () => {
     const s=await setup();await s.button('Coupler').onclick!();

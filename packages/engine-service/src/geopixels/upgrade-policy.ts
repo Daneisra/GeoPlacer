@@ -14,7 +14,7 @@ import { check } from './protocol.js';
 export const SHOP_CATALOG = 'geopixels-shop-74783af-v1';
 export const UPGRADE_KINDS = ['energy-pack', 'max-energy', 'regen-speed', 'color-unlock'] as const;
 export type AutomaticUpgradePolicy = {
-    maxBudget: number;
+    maxBudget: number | null;
     minimumReserve: number;
     targetCapacity: number;
     energyBelow: number;
@@ -32,7 +32,8 @@ export function validateUpgradePolicy(v: unknown): asserts v is AutomaticUpgrade
     check(
         !!p &&
             Object.keys(p).length === 5 &&
-            ['maxBudget', 'minimumReserve', 'targetCapacity', 'energyBelow'].every(
+            (p.maxBudget === null || (Number.isSafeInteger(p.maxBudget) && p.maxBudget >= 0 && p.maxBudget <= 1e9)) &&
+            ['minimumReserve', 'targetCapacity', 'energyBelow'].every(
                 (k) =>
                     Number.isSafeInteger(p[k as keyof typeof p]) &&
                     (p[k as keyof typeof p] as number) >= 0 &&
@@ -108,6 +109,7 @@ export function upgradeProposals(
         },
         {
             ...policy,
+            targetCapacity: policy.targetCapacity || Number.MAX_SAFE_INTEGER,
             requiredColors: required as Rgb[],
             enabled: Object.fromEntries(
                 UPGRADE_KINDS.map((k) => [

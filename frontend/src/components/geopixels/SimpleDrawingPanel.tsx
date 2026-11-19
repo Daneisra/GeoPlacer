@@ -4,8 +4,9 @@ import { Link } from 'react-router-dom';
 import type { WorkspacePage } from '../../navigation';
 import { engineHttp, STRATEGY_LABELS, type TemplateInfo } from '../../lib/engine';
 import { PERSONAL_GEOPIXELS_PALETTE, parsePaletteText } from '../../lib/ghost-palettes';
-import type { BatchView } from './BatchPanel';
+import type { BatchView, EnergyPolicy, GroupPolicy, Threshold } from './BatchPanel';
 import { upgradeKinds as availableUpgrades, upgrades, type UpgradeKind } from './upgrade-catalog';
+import { translateReason } from '../../lib/i18n';
 type DrawingView = {
     connected: boolean;
     bound: boolean;
@@ -37,6 +38,7 @@ const upgradeStateLabels: Record<string, string> = {
 };
 
 function runningDrawingStatus(batch: BatchView) {
+    if (batch.scope?.energy?.mode === 'bursts' && batch.energyPolicy?.reason) return batch.energyPolicy.reason;
     if (batch.scheduler === 'waiting-resources') {
         if (!batch.resources) return 'En attente d’une lecture d’énergie GeoPixels.';
         if (batch.resources.available === 0) return 'En attente de recharge. Énergie exploitable : 0.';
@@ -46,6 +48,10 @@ function runningDrawingStatus(batch: BatchView) {
     if (batch.scheduler === 'waiting-reconciliation') return 'En attente de vérification d’une tentative.';
     return 'Dessin en cours';
 }
+
+const thresholdLabels = { start: 'Démarrage', restart: 'Reprise', reserve: 'Réserve énergétique' };
+const describeThreshold = ({ units, percent }: Threshold, fallback: string) => units && percent
+    ? `max. de ${units} énergies et ${percent} %` : units ? `${units} énergies` : percent ? `${percent} %` : fallback;
 
 /** Default workflow. Authority is granted only by the explicit launch/resume buttons. */
 export function SimpleDrawingPanel({
@@ -71,12 +77,17 @@ export function SimpleDrawingPanel({
     const [groupSize, setGroupSize] = useState(0),
         [budget, setBudget] = useState(''),
         [palette, setPalette] = useState(PERSONAL_GEOPIXELS_PALETTE.join('\n'));
+    const [energyMode, setEnergyMode] = useState<EnergyPolicy['mode']>('bursts');
+    const [thresholds, setThresholds] = useState({ start: { units: 0, percent: 0 }, restart: { units: 0, percent: 0 }, reserve: { units: 0, percent: 0 } });
+    const [groups, setGroups] = useState<GroupPolicy>({ mode: 'adaptive', minimum: 0, allowFinal: false });
+    const energy: EnergyPolicy = energyMode === 'bursts' ? { mode: energyMode, ...thresholds } : { mode: energyMode };
     const [importNotice, setImportNotice] = useState<{ kind: 'loading' | 'success' | 'error'; text: string } | null>(
         null
     );
-    const [autoUpgrades,setAutoUpgrades]=useState(false),[coinBudget,setCoinBudget]=useState(0),[coinReserve,setCoinReserve]=useState(50),[targetCapacity,setTargetCapacity]=useState(300),[energyBelow,setEnergyBelow]=useState(5);
+    const [upgradeMode,setUpgradeMode]=useState<'disabled' | 'limited' | 'unlimited'>('disabled'),[coinBudget,setCoinBudget]=useState(0),[coinReserve,setCoinReserve]=useState(0),[targetCapacity,setTargetCapacity]=useState(300),[energyBelow,setEnergyBelow]=useState(5);
     const [upgradeKinds,setUpgradeKinds]=useState<UpgradeKind[]>(['energy-pack']);
-    const upgradeJson=autoUpgrades?JSON.stringify({maxBudget:coinBudget,minimumReserve:coinReserve,targetCapacity,energyBelow,priority:upgradeKinds}):'';
+    const upgradeJson=upgradeMode !== 'disabled' ? JSON.stringify({maxBudget:upgradeMode === 'unlimited' ? null : coinBudget,minimumReserve:coinReserve,targetCapacity,energyBelow,priority:upgradeKinds}):'';
+    const previewBody = JSON.stringify({ groupSize, energy, groups, ...(upgradeJson ? { upgrades: JSON.parse(upgradeJson) } : {}), ...(budget ? { pixelBudget: Number(budget) } : {}) });
     function moveUpgrade(index: number, direction: -1 | 1) {
         const next = [...upgradeKinds];
         const destination = index + direction;
@@ -144,7 +155,7 @@ export function SimpleDrawingPanel({
     }
     const previewIdentity =
         selected && view?.project
-            ? JSON.stringify([selected.templateId, selected.revision, selected.strategy, view.project, groupSize, budget, upgradeJson, approvalKey])
+            ? JSON.stringify([selected.templateId, selected.revision, selected.strategy, view.project, previewBody, approvalKey])
             : '';
     const viewConnected = !!view?.connected;
     const canPreview = showWorkflow && readerReady && !!approvalKey && !!view?.connected && !active && !busy && !batch?.uncertain;
@@ -159,7 +170,7 @@ export function SimpleDrawingPanel({
         void engineHttp
             .post(
                 '/connector/drawing/preview',
-                { groupSize, ...(upgradeJson?{upgrades:JSON.parse(upgradeJson)}:{}), ...(budget ? { pixelBudget: Number(budget) } : {}) },
+                JSON.parse(previewBody),
                 { headers: { 'X-GeoPlacer-Approval': approvalKey } }
             )
             .then(() => {
@@ -173,10 +184,14 @@ export function SimpleDrawingPanel({
             });
         },300);
         return ()=>clearTimeout(timer);
-    }, [approvalKey, previewIdentity, canPreview, groupSize, budget, upgradeJson, refresh, viewConnected]);
+    }, [approvalKey, previewIdentity, canPreview, previewBody, refresh, viewConnected]);
+    function prepare() {
+        return action(() => engineHttp.post('/connector/drawing/preview', JSON.parse(previewBody), { headers: { 'X-GeoPlacer-Approval': approvalKey } }));
+    }
     const consent = { batchId: batch?.id, digest: batch?.digest, approved: true };
     const preparedGroup=batch?.scope?.groupSize ?? 5;
-    const previewReady=preparedGroup===groupSize && (!batch?.scope?.strategy || batch.scope.strategy === selected?.strategy) && JSON.stringify(batch?.scope?.upgrades??null)===JSON.stringify(upgradeJson?JSON.parse(upgradeJson):null) && (!budget || batch?.budgets?.pixels===Number(budget));
+    const previewReady=preparedGroup===groupSize && (!batch?.scope?.strategy || batch.scope.strategy === selected?.strategy) && JSON.stringify(batch?.scope?.upgrades??null)===JSON.stringify(upgradeJson?JSON.parse(upgradeJson):null) && (!budget || batch?.budgets?.pixels===Number(budget)) && JSON.stringify(batch?.scope?.energy) === JSON.stringify(energy) && JSON.stringify(batch?.scope?.groups) === JSON.stringify(groups);
+    const authorizedEnergy = batch?.scope?.energy;
     const dashboard = page === 'dashboard';
     const currentProgress = view?.progress;
     const historical = view?.lastCompleteProgress;
@@ -220,7 +235,7 @@ export function SimpleDrawingPanel({
             <div hidden={!dashboard && page !== 'diagnostics'}>{pairing}</div>
             <section className="studio-card space-y-3" hidden={!dashboard || !showWorkflow}>
                 <h2 className="studio-step"><span>3</span> Vérifier et lancer le dessin</h2>
-                {view?.connected && !readerReady && <p>Installez le lecteur proposé à l’étape 2, puis refaites le couplage pour utiliser les groupes adaptatifs et les améliorations configurables.</p>}
+                {view?.connected && !readerReady && <p>Installez le lecteur 1.1.2 proposé à l’étape 2, puis couplez-le pour utiliser les salves.</p>}
                 {!view?.connected ? (
                     <p>
                         Chargez le fantôme sur GeoPixels, puis couplez le lecteur à l’étape 2.
@@ -249,11 +264,19 @@ export function SimpleDrawingPanel({
                         </p>
                     </>
                 )}
+                {view?.connected && !view.bound && !active && <>
+                    <p>Dans GeoPixels, chargez le PNG préparé et cliquez sur « Observer le modèle ».</p>
+                    {view.project && <button disabled={!readerReady || !approvalKey || busy || !!batch?.uncertain || !!view.monitoring.inFlight}
+                        onClick={() => void prepare()}>Vérifier et lier le fantôme</button>}
+                </>}
                 {view?.bound && batch?.execution === 'autonomous' && <p>
                     Vérifiez l’image et sa destination avant de lancer : les envois suivants seront automatiques dans ce
                     périmètre.
                 </p>}
-                {batch?.scope?.upgrades && <p>Améliorations autorisées avec le lancement : budget maximal {batch.scope.upgrades.maxBudget} monnaies du jeu, réserve minimale {batch.scope.upgrades.minimumReserve}. Aucun paiement en argent réel.</p>}
+                {authorizedEnergy && <p>{active ? 'Travail autorisé' : batch?.state === 'prepared' ? 'Prévisualisation' : 'Dernier travail'} · {authorizedEnergy.mode === 'bursts'
+                    ? `Salves · Démarrage ${describeThreshold(authorizedEnergy.start, '100 %')} · Reprise ${describeThreshold(authorizedEnergy.restart, '100 %')} · Réserve ${describeThreshold(authorizedEnergy.reserve, 'aucune')}`
+                    : 'Continu, selon l’énergie disponible'}</p>}
+                {batch?.scope?.upgrades && <p>Améliorations {active ? 'autorisées' : 'prévues'} · Budget {batch.scope.upgrades.maxBudget === null ? 'illimité' : `${batch.scope.upgrades.maxBudget} monnaies du jeu`} · Réserve {batch.scope.upgrades.minimumReserve || 'aucune'}.</p>}
                 <div className="flex flex-wrap gap-3">
                     <button
                         className="studio-primary"
@@ -312,15 +335,7 @@ export function SimpleDrawingPanel({
                     {view?.connected && batch?.uncertain === 0 && ['stopped', 'completed'].includes(batch.state) && (
                         <button
                             disabled={busy}
-                            onClick={() =>
-                                void action(() =>
-                                    engineHttp.post(
-                                        '/connector/drawing/preview',
-                                        { groupSize, ...(upgradeJson?{upgrades:JSON.parse(upgradeJson)}:{}), ...(budget ? { pixelBudget: Number(budget) } : {}) },
-                                        { headers: { 'X-GeoPlacer-Approval': approvalKey } }
-                                    )
-                                )
-                            }
+                            onClick={() => void prepare()}
                         >
                             Préparer la suite
                         </button>
@@ -358,6 +373,7 @@ export function SimpleDrawingPanel({
                                         ? 'Dessin arrêté'
                                         : batch.state === 'interrupted'
                                           ? 'Travail interrompu — nouvel accord requis'
+                                          : batch.state === 'blocked' ? 'Dessin bloqué'
                                           : 'Aucun dessin lancé'}
                         </p>
                         <p>
@@ -367,13 +383,14 @@ export function SimpleDrawingPanel({
                         <p>
                             Énergie exploitable :{' '}
                             {batch.resources?.available ?? 'indisponible — attente d’une nouvelle réponse native'}.
-                            Aucune recharge estimée.
+                            {batch.resources?.capacity != null && ` Capacité observée : ${batch.resources.capacity}.`}
                         </p>
                         {batch.state === 'running' && batch.scheduler === 'waiting-resources' && !batch.resources && (
                             <p>Dans GeoPixels, ouvrez « Options du lecteur » puis « Diagnostiquer » pour vérifier la lecture de l’énergie.</p>
                         )}
-                        <p>Prochain groupe : jusqu’à {batch.adaptiveGroupSize ?? 0} pixels, selon l’énergie et le réglage autorisé.</p>
-                        {batch.error && <p>{batch.error}</p>}
+                        <p>{batch.scope?.groups?.mode === 'manual' ? 'Manuel' : 'Adaptatif'} · Taille cible {preparedGroup || batch.limits?.maxGroupPixels || 'automatique'} · Plafond actuel {batch.groupCeiling ?? '—'} · Prochain envoi jusqu’à {batch.adaptiveGroupSize ?? 0} pixels.</p>
+                        {batch.groupReason && <p>{batch.groupReason}</p>}
+                        {batch.error && <p>{translateReason(batch.error)}</p>}
                         {view?.upgrades?.error && <p role="alert">{view.upgrades.error}</p>}
                     </div>
                 )}
@@ -386,6 +403,7 @@ export function SimpleDrawingPanel({
                   <div><h2>{selected?.name ?? 'Aperçu du dessin'}</h2><p>{selected ? `${selected.width} × ${selected.height} px` : 'Importez votre PNG pour afficher le modèle.'}</p></div>
                   <Link className="studio-link" to="/dessins">Mes dessins</Link>
                 </div>
+                {selected && <p>{(selected.width * selected.height).toLocaleString('fr-FR')} positions dans le PNG · {selected.paintablePixels.toLocaleString('fr-FR')} cibles opaques · {(selected.width * selected.height - selected.paintablePixels).toLocaleString('fr-FR')} transparentes.</p>}
                 <div className="studio-image-stage">
                   {imageUrl && selected ? <img src={`${imageUrl}?rev=${selected.revision}`} alt={`Modèle préparé : ${selected.name}`} /> : <ImageIcon size={44} aria-hidden="true" />}
                 </div>
@@ -410,8 +428,29 @@ export function SimpleDrawingPanel({
             <details className="studio-card" hidden={!(dashboard && showWorkflow) && page !== 'resources' && page !== 'settings'} open={page === 'resources' || page === 'settings' || undefined}>
                 <summary>{page === 'resources' ? 'Politique d’améliorations' : 'Options du dessin'}</summary>
                 <div className="grid gap-3 p-3 md:grid-cols-2">
+                    <fieldset hidden={page === 'resources'} className="md:col-span-2 space-y-2" disabled={active || busy}>
+                        <legend>Politique énergétique</legend>
+                        <div>
+                            <label htmlFor="drawing-energy-mode">Mode énergétique</label>{' '}
+                            <select id="drawing-energy-mode" value={energyMode} onChange={e=>setEnergyMode(e.target.value as EnergyPolicy['mode'])}>
+                                <option value="bursts">Salves</option><option value="continuous">Continu</option>
+                            </select>
+                        </div>
+                        {energyMode === 'bursts' && <>
+                            <p>Le seuil le plus élevé s’applique. Deux champs à 0 ou vides demandent la capacité pleine pour démarrer ou reprendre, et aucune réserve pour le dernier réglage.</p>
+                            <div className="grid gap-2 md:grid-cols-3">{(Object.keys(thresholdLabels) as (keyof typeof thresholdLabels)[]).map(key => (
+                                <div className="space-y-2" key={key}><h3>{thresholdLabels[key]}</h3>
+                                    <label>{thresholdLabels[key]} (énergies)<input type="number" min={0} max={1e9} placeholder="0" value={thresholds[key].units || ''} onChange={e=>setThresholds(prev=>({ ...prev,[key]:{...prev[key],units:Number(e.target.value)} }))}/></label>
+                                    <label>{thresholdLabels[key]} (%)<input type="number" min={0} max={100} placeholder="0" value={thresholds[key].percent || ''} onChange={e=>setThresholds(prev=>({ ...prev,[key]:{...prev[key],percent:Number(e.target.value)} }))}/></label>
+                                </div>
+                            ))}</div>
+                        </>}
+                    </fieldset>
+                    <label hidden={page === 'resources'}>Mode des groupes<select disabled={active || busy} value={groups.mode} onChange={e=>setGroups(previous=>({...previous,mode:e.target.value as GroupPolicy['mode']}))}>
+                        <option value="adaptive">Adaptatif</option><option value="manual">Manuel</option>
+                    </select></label>
                     <label hidden={page === 'resources'}>
-                        Taille cible des groupes (0 : automatique)
+                        Taille maximale du groupe (0 = plafond local)
                         <input
                             aria-label="Pixels par requête"
                             type="number"
@@ -422,6 +461,8 @@ export function SimpleDrawingPanel({
                             onChange={(e) => setGroupSize(Number(e.target.value))}
                         />
                     </label>
+                    <label hidden={page === 'resources'}>Taille minimale souhaitée (0 = aucun minimum)<input type="number" min={0} max={batch?.limits?.maxGroupPixels} disabled={active || busy} value={groups.minimum} onChange={e=>setGroups(previous=>({...previous,minimum:Number(e.target.value)}))}/></label>
+                    <label hidden={page === 'resources'}><input type="checkbox" disabled={active || busy} checked={groups.allowFinal} onChange={e=>setGroups(previous=>({...previous,allowFinal:e.target.checked}))}/> Autoriser un dernier groupe sous le minimum</label>
                     <label hidden={page === 'resources'}>
                         Budget de pixels (vide : image entière)
                         <input
@@ -435,11 +476,16 @@ export function SimpleDrawingPanel({
                     </label>
                     <fieldset className="md:col-span-2 space-y-3" disabled={active || busy}>
                         <legend>Améliorations automatiques — monnaie du jeu uniquement</legend>
-                        <label><input type="checkbox" checked={autoUpgrades} onChange={e=>setAutoUpgrades(e.target.checked)}/> Autoriser avec le prochain lancement du dessin</label>
-                        {autoUpgrades && <div className="grid gap-2 md:grid-cols-2">
-                            <label>Budget maximal de monnaie<input type="number" min={0} value={coinBudget} onChange={e=>setCoinBudget(Number(e.target.value))}/></label>
-                            <label>Réserve minimale<input type="number" min={0} value={coinReserve} onChange={e=>setCoinReserve(Number(e.target.value))}/></label>
-                            <label>Capacité ciblée<input type="number" min={1} value={targetCapacity} onChange={e=>setTargetCapacity(Number(e.target.value))}/></label>
+                        <div>
+                            <label htmlFor="drawing-upgrade-budget">Budget des améliorations</label>{' '}
+                            <select id="drawing-upgrade-budget" value={upgradeMode} onChange={e=>setUpgradeMode(e.target.value as typeof upgradeMode)}>
+                                <option value="disabled">Désactivé</option><option value="limited">Budget limité</option><option value="unlimited">Illimité</option>
+                            </select>
+                        </div>
+                        {upgradeMode !== 'disabled' && <div className="grid gap-2 md:grid-cols-2">
+                            {upgradeMode === 'limited' ? <label>Budget maximal de monnaie<input type="number" min={0} value={coinBudget} onChange={e=>setCoinBudget(Number(e.target.value))}/></label> : <p>Budget illimité en monnaie du jeu.</p>}
+                            <label>Réserve minimale (0 = aucune)<input type="number" min={0} value={coinReserve} onChange={e=>setCoinReserve(Number(e.target.value))}/></label>
+                            <label>Capacité ciblée (0 = tant que l’offre est disponible)<input type="number" min={0} value={targetCapacity} onChange={e=>setTargetCapacity(Number(e.target.value))}/></label>
                             <label>Recharger si énergie inférieure à<input type="number" min={0} value={energyBelow} onChange={e=>setEnergyBelow(Number(e.target.value))}/></label>
                             {availableUpgrades.map((kind)=><label key={kind}><input type="checkbox" checked={upgradeKinds.includes(kind)} onChange={e=>setUpgradeKinds(v=>e.target.checked?[...v,kind]:v.filter(x=>x!==kind))}/>{upgrades[kind].name}</label>)}
                             {!!upgradeKinds.length && <div className="md:col-span-2 space-y-2">

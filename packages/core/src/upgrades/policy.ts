@@ -7,7 +7,7 @@ export interface UpgradePolicy {
   readonly priority: readonly UpgradeKind[];
   readonly targetCapacity: number;
   readonly requiredColors: readonly Rgb[];
-  readonly maxBudget: number;
+  readonly maxBudget: number | null;
   readonly minimumReserve: number;
 }
 export interface PolicyProposal {
@@ -20,7 +20,7 @@ export interface PolicyProposal {
 
 /** Policy over the existing UpgradePlanner: no second energy, cost or benefit model. */
 export function evaluateUpgradePolicy(context: UpgradeContext, policy: UpgradePolicy, spent = 0): readonly PolicyProposal[] {
-  for (const n of [policy.targetCapacity, policy.maxBudget, policy.minimumReserve, spent])
+  for (const n of [policy.targetCapacity, policy.maxBudget ?? 0, policy.minimumReserve, spent])
     if (!Number.isSafeInteger(n) || n < 0) throw new Error('invalid upgrade budget or target');
   const kinds: readonly UpgradeKind[] = ['energy-pack', 'max-energy', 'regen-speed', 'color-unlock'];
   if (
@@ -39,7 +39,7 @@ export function evaluateUpgradePolicy(context: UpgradeContext, policy: UpgradePo
       if (!proposal.possible) reasons.push('provider-refused');
       if (proposal.cost === null) reasons.push('cost-unavailable');
       else {
-        if (proposal.cost > Math.max(0, policy.maxBudget - spent)) reasons.push('budget-exceeded');
+        if (policy.maxBudget !== null && proposal.cost > Math.max(0, policy.maxBudget - spent)) reasons.push('budget-exceeded');
         if (state.currency - proposal.cost < policy.minimumReserve) reasons.push('minimum-reserve');
       }
       if (proposal.kind === 'max-energy' && capacity >= policy.targetCapacity) reasons.push('capacity-target-reached');

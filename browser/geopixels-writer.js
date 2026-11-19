@@ -96,7 +96,8 @@ const GeoPlacerPageWriter = (() => {
     }
     function continuousGrant(c,g) {
         const r=g.region, autonomous=g.execution==='autonomous';
-        return c.protocol === 2 && exact(g,['id','digest','expires','project','writes','execution','budgets','region',...(autonomous?['groupSize']:[])]) &&
+        return c.protocol === 2 && exact(g,['id','digest','expires','project','writes','execution','budgets','region',...(autonomous?['groupSize', ...(Object.hasOwn(g,'energyReserve') ? ['energyReserve'] : [])]:[])]) &&
+            (g.energyReserve === undefined || (autonomous && Number.isSafeInteger(g.energyReserve) && g.energyReserve >= 0 && g.energyReserve <= 1e9)) &&
             g.id === c.batchId && /^[a-f0-9-]{36}$/.test(g.id) && /^[a-f0-9]{64}$/.test(g.digest) &&
             Number.isSafeInteger(g.expires) && g.expires > Date.now() && g.expires <= Date.now()+(autonomous?30000:600000) &&
             exact(g.project,['id','generation','width','height','gridX','gridY','layer']) &&
@@ -262,7 +263,8 @@ const GeoPlacerPageWriter = (() => {
                 )
                     return refuse('Modèle, position, couche ou session modifié : observer et lier de nouveau.');
                 const continuous = ['continuous','autonomous'].includes(grant?.execution);
-                if (continuous && (GeoPlacerEnergy.snapshot()?.available ?? 0) < pixels.length) {
+                const costWithReserve = pixels.length + (grant?.energyReserve ?? 0);
+                if (continuous && (GeoPlacerEnergy.snapshot()?.available ?? 0) < costWithReserve) {
                     lastReason = 'En attente d’une nouvelle réponse native confirmant l’énergie disponible.';
                     return 'waiting-resources';
                 }
@@ -283,7 +285,7 @@ const GeoPlacerPageWriter = (() => {
                     return refuse('Autorisation locale retirée ou expirée : préparez un nouveau pixel.');
                 if (!(await GeoPlacerPageReader.unchanged()) || !valid(c, batch) || (batch && !validGrant(c, grant)))
                     return refuse('Modèle modifié ou autorisation expirée pendant la confirmation.');
-                if (continuous && (GeoPlacerEnergy.snapshot()?.available ?? 0) < pixels.length) {
+                if (continuous && (GeoPlacerEnergy.snapshot()?.available ?? 0) < costWithReserve) {
                     lastReason = 'Énergie non confirmée par une nouvelle réponse native.';
                     return 'waiting-resources';
                 }

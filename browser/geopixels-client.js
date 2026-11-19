@@ -93,7 +93,7 @@
   options.append(summary, pixel, disconnect, diagnose);
   panel.append(title, status, watchStatus, connect, sync, options);
   document.body.append(panel);
-  async function close(message = 'Déconnecté') {
+  async function close(message = 'Déconnecté', reason = 'manual') {
     GeoPlacerPageWriter.stop();
     GeoPlacerShop.stop();
     generation++;
@@ -107,7 +107,7 @@
     connect.disabled = false;
     status.textContent = message;
     try {
-      await previous?.disconnect();
+      await previous?.disconnect(reason);
     } catch {
       /* Revocation/expiry also closes the server session. */
     }
@@ -225,7 +225,7 @@
           } catch (error) {
             if (current === generation) {
               if(error.transient && next.connected()){status.textContent='Transport temporairement interrompu : aucun nouvel envoi, tentative de reconnexion au même canal.';await next.waitForRetry();}
-              else await close(error.message);
+              else await close(error.message, /Modèle, position, palette/.test(error.message) ? 'context' : 'transport');
             }
           } finally {
             ticking = false;
@@ -263,7 +263,9 @@
         if (error.name === 'AbortError') {
           abortedCapture = error.captureId;
           status.textContent = 'Capture interrompue ; bandes partielles conservées avec leurs dates.';
-        } else await close(error.message);
+        } else if (channel.connected() && await GeoPlacerPageReader.unchanged()) {
+          status.textContent = 'Capture interrompue : ' + error.message + ' Le couplage est conservé.';
+        } else await close(error.message, channel.connected() ? 'context' : 'observation');
       }
     } finally {
       if (current === generation) {

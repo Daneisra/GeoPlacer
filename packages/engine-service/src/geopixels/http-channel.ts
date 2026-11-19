@@ -33,6 +33,7 @@ type Session = {
   requests: number[];
   releasePoll?: () => void;
   batchProtocol?: 1 | 2 | 3 | 4 | 5 | 6;
+  reserveGuard?: true;
   rotation?: {nonce:string;capability:string;until:number};
 };
 
@@ -132,6 +133,7 @@ export class ConnectorHttpChannel {
     check((v.execution!=='grouped'||protocol>=2) && (v.execution!=='session'||protocol>=3),'reader 0.7.0 required for grouped execution');
     check(v.execution!=='continuous'||protocol>=4,'reader 0.9.0 required');
     check(v.execution!=='autonomous'||protocol>=((v.scope?.groupSize??5)===0 || (v.scope?.groupSize??5)>5?6:5),'reader 1.1.0 required');
+    check(v.scope?.energy?.mode !== 'bursts' || this.session?.reserveGuard, 'reader 1.1.2 required for energy bursts');
     return batch.claim();
   }
   batchAllowed(capability:string,batchId:string,attemptId:string){const b=this.writerAccess(capability).batch;return {allowed:b.control().id===batchId && b.allowed(attemptId)};}
@@ -164,11 +166,13 @@ export class ConnectorHttpChannel {
         readerVersion?: 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10,
         ack?: { revision: number; state: 'running' | 'paused' | 'stopped' },
         abortedCapture?: string,
-        writerResources?: unknown
+        writerResources?: unknown,
+        reserveGuard?: true
     ) {
         const s = this.authenticate(capability);
         s.lastSeen = this.now();
         if (s.approved) {
+            if (readerVersion === 10 && reserveGuard) s.reserveGuard = true;
             if(readerVersion===5 || readerVersion===6 || readerVersion===7 || readerVersion===8 || readerVersion===9 || readerVersion===10)s.batchProtocol=readerVersion===10?6:readerVersion===9?5:readerVersion===8?4:readerVersion===7?3:readerVersion===6?2:1;
             this.provider.heartbeat();
             if(writerResources !== undefined) {
@@ -203,9 +207,10 @@ export class ConnectorHttpChannel {
         ack: { revision: number; state: 'running' | 'paused' | 'stopped' } | undefined,
         signal: AbortSignal,
         abortedCapture?: string,
-        writerResources?: unknown
+        writerResources?: unknown,
+        reserveGuard?: true
     ) {
-        const initial=this.status(capability, readerVersion, ack, abortedCapture, writerResources);
+        const initial=this.status(capability, readerVersion, ack, abortedCapture, writerResources, reserveGuard);
         if(initial.upgrades?.commandReady || initial.batch?.commandReady)return initial;
         if(readerVersion===10 && this.provider.monitoring.automaticRegionCount()>0 && initial.monitoring?.state==='running'){await new Promise(r=>setTimeout(r,150));check(!signal.aborted,'reader poll aborted');return this.status(capability,readerVersion);}
         const s = this.session!;
@@ -273,9 +278,12 @@ export class ConnectorHttpChannel {
         s.lastSeen = this.now();
         return { accepted: true, sequence: last.sequence, duplicate: false };
     }
-  disconnect(capability: string) {
+  disconnect(capability: string, reason?: 'context' | 'transport' | 'observation') {
     this.authenticate(capability);
-    this.revoke('Lecteur HTTP déconnecté ; nouveau couplage requis.', 'HTTP_READER_DISCONNECTED');
+    const detail = reason === 'context' ? 'Contexte du fantôme ou de la session changé.' :
+      reason === 'transport' ? 'Le lecteur a fermé son transport après un refus ou un état invalide.' :
+      reason === 'observation' ? 'La dernière observation n’a pas pu être confirmée par le transport.' : 'Lecteur HTTP déconnecté.';
+    this.revoke(`${detail} Nouveau couplage requis.`, reason === 'context' ? 'HTTP_CONTEXT_CHANGED' : 'HTTP_READER_DISCONNECTED');
     return { disconnected: true };
   }
   private diagnostic(s: Session, code: ChannelDiagnostic['code'], reason: string) {
@@ -307,6 +315,7 @@ export class ConnectorHttpChannel {
     return {
       enabled: this.controlKey !== null,
       batchProtocol: s?.batchProtocol ?? null,
+      reserveGuard: s?.reserveGuard === true,
       pending:
         s && !s.approved
           ? { requestId: s.id, fingerprint: s.fingerprint, originClaim: s.originClaim, expires: s.approvalDeadline }

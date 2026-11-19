@@ -7,6 +7,11 @@ import { STRATEGY_IDS } from './engine-router.js';
 import { hostnameFromHostHeader } from '../../middleware/local-access.js';
 
 export const CONNECTOR_WS_PATH = '/api/v1/connector/channel';
+const threshold = z.strictObject({ units: z.number().int().min(0).max(1e9), percent: z.number().int().min(0).max(100) });
+const energyPolicy = z.discriminatedUnion('mode', [
+    z.strictObject({ mode: z.literal('continuous') }),
+    z.strictObject({ mode: z.literal('bursts'), start: threshold, restart: threshold, reserve: threshold }),
+]);
 export function isLoopbackChannel(req: { headers: { host?: string }; socket: { remoteAddress?: string } }): boolean {
     const host = hostnameFromHostHeader(req.headers.host);
     return (
@@ -167,9 +172,17 @@ export function createConnectorRouter(engine: EngineApi, httpChannel?: Connector
     });
     router.post('/drawing/preview',action(req=>{
         regionControl(req);batchControl(req);
-        const b=z.strictObject({groupSize:z.number().int().min(0).max(CONNECTOR_MAX_GROUP_PIXELS).default(0),pixelBudget:z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),upgrades:z.strictObject({maxBudget:z.number().int().nonnegative().max(1e9),minimumReserve:z.number().int().nonnegative().max(1e9),targetCapacity:z.number().int().nonnegative().max(1e9),energyBelow:z.number().int().nonnegative().max(1e9),priority:z.array(z.enum(['energy-pack','max-energy','regen-speed','color-unlock'])).max(4)}).optional()}).parse(req.body);
+        const b=z.strictObject({
+            groupSize:z.number().int().min(0).max(CONNECTOR_MAX_GROUP_PIXELS).default(0),
+            pixelBudget:z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+            energy: energyPolicy.optional(),
+            groups: z.strictObject({mode:z.enum(['adaptive','manual']),minimum:z.number().int().min(0).max(CONNECTOR_MAX_GROUP_PIXELS),allowFinal:z.boolean()}).optional(),
+            upgrades:z.strictObject({maxBudget:z.number().int().nonnegative().max(1e9).nullable(),minimumReserve:z.number().int().nonnegative().max(1e9),targetCapacity:z.number().int().nonnegative().max(1e9),energyBelow:z.number().int().nonnegative().max(1e9),priority:z.array(z.enum(['energy-pack','max-energy','regen-speed','color-unlock'])).max(4)}).optional(),
+        }).parse(req.body);
         if(engine.connector!.status().mode !== 'local-fake' && (httpChannel!.info().batchProtocol ?? 0) < (b.groupSize===0 || b.groupSize>5 ? 6 : 5))throw new ConnectorError('CONNECTOR_UNAVAILABLE','Installer et coupler le lecteur 1.1.0 pour les groupes adaptatifs.');
-        return engine.previewDrawing!(b.groupSize,b.pixelBudget,b.upgrades);
+        if(engine.connector!.status().mode !== 'local-fake' && b.energy?.mode === 'bursts' && !httpChannel!.info().reserveGuard)
+            throw new ConnectorError('CONNECTOR_UNAVAILABLE','Installer et coupler le lecteur 1.1.2 pour les salves.');
+        return engine.previewDrawing!(b.groupSize,b.pixelBudget,b.upgrades,b.energy,b.groups);
     }));
     const consent = z.strictObject({
         batchId: z.string().uuid(),
@@ -183,6 +196,8 @@ export function createConnectorRouter(engine: EngineApi, httpChannel?: Connector
                 b = consent.parse(req.body);
             if (batch.view().mode === 'real') {
                 regionControl(req);
+                if (batch.view().scope?.energy?.mode === 'bursts' && !httpChannel!.info().reserveGuard)
+                    throw new ConnectorError('CONNECTOR_UNAVAILABLE','Installer et coupler le lecteur 1.1.2 pour les salves.');
                 if(batch.view().execution === 'autonomous' && (httpChannel!.info().batchProtocol ?? 0) < (batch.view().scope?.groupSize===0 || (batch.view().scope?.groupSize ?? 0)>5 ? 6 : 5))throw new ConnectorError('CONNECTOR_UNAVAILABLE','Lecteur 1.0.0 requis.');
                 if (batch.view().execution === 'continuous' && (httpChannel!.info().batchProtocol ?? 0) < 4)
                     throw new ConnectorError('CONNECTOR_UNAVAILABLE', 'Lecteur 0.9.0 requis.');
@@ -201,6 +216,8 @@ export function createConnectorRouter(engine: EngineApi, httpChannel?: Connector
                 b = consent.parse(req.body);
             if (batch.view().mode === 'real') {
                 regionControl(req);
+                if (batch.view().scope?.energy?.mode === 'bursts' && !httpChannel!.info().reserveGuard)
+                    throw new ConnectorError('CONNECTOR_UNAVAILABLE','Installer et coupler le lecteur 1.1.2 pour les salves.');
                 if(batch.view().execution === 'autonomous' && (httpChannel!.info().batchProtocol ?? 0) < (batch.view().scope?.groupSize===0 || (batch.view().scope?.groupSize ?? 0)>5 ? 6 : 5))throw new ConnectorError('CONNECTOR_UNAVAILABLE','Lecteur 1.0.0 requis.');
                 if (batch.view().execution === 'continuous' && (httpChannel!.info().batchProtocol ?? 0) < 4)
                     throw new ConnectorError('CONNECTOR_UNAVAILABLE', 'Lecteur 0.9.0 requis.');

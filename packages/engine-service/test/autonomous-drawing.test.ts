@@ -139,6 +139,72 @@ async function fixture(lost = false, width = 20, height = 20) {
     };
 }
 describe('Autonomous drawing: same scheduler, explicit whole-image authority', () => {
+    it('ignores 7 then 1, drains a 200-energy manual burst and waits for 200 again', async () => {
+        const f = await fixture(), batch = f.s.singlePixelWriter.batch;
+        const threshold = { units: 200, percent: 0 };
+        const preview = await f.s.previewDrawing(250, 400, undefined,
+            { mode: 'bursts', start: threshold, restart: threshold, reserve: { units: 0, percent: 0 } },
+            { mode: 'manual', minimum: 0, allowFinal: false });
+        f.energy(7);
+        await batch.approve(preview.id!, preview.digest!);
+        await wait(() => batch.view().scheduler === 'waiting-resources');
+        expect(f.calls()).toBe(0);
+        f.energy(1);
+        expect(batch.view().adaptiveGroupSize).toBe(0);
+        f.energy(200);
+        await wait(() => batch.view().confirmed === 200);
+        expect(batch.view().history[0]!.pixels).toBe(200);
+        await new Promise(r => setTimeout(r, 5));
+        f.energy(1);
+        await wait(() => batch.view().scheduler === 'waiting-resources');
+        expect(batch.view().energyPolicy).toMatchObject({ phase: 'recharge', target: 200 });
+        expect(f.calls()).toBe(1);
+        f.energy(200);
+        await wait(() => batch.view().state === 'completed');
+        expect(batch.view().history.map(h => h.pixels)).toEqual([200, 200]);
+        expect(new Set(f.writes.map(w => `${w.x},${w.y}`)).size).toBe(400);
+    });
+
+    it.each([false,true])('allows a smaller final group only by explicit policy (%s)', async (allowFinal) => {
+        const f = await fixture(false, 3, 2), batch = f.s.singlePixelWriter.batch;
+        const threshold = { units: 8, percent: 0 };
+        const preview = await f.s.previewDrawing(250, 6, undefined,
+            { mode: 'bursts', start: threshold, restart: threshold, reserve: { units: 2, percent: 0 } },
+            { mode: 'manual', minimum: 8, allowFinal });
+        f.energy(8);
+        await batch.approve(preview.id!, preview.digest!);
+        if (allowFinal) await wait(() => batch.view().state === 'completed');
+        else await wait(() => !!batch.view().groupReason?.includes('Minimum 8'));
+        expect(batch.view().confirmed).toBe(allowFinal ? 6 : 0);
+        expect(f.calls()).toBe(allowFinal ? 1 : 0);
+    });
+
+    it('uses two verified upgrades during a burst wait with unlimited game currency and zero reserve', async () => {
+        const f = await fixture(), batch = f.s.singlePixelWriter.batch, upgrades = f.s.singlePixelWriter.upgrades;
+        const threshold = { units: 200, percent: 0 };
+        const policy = { maxBudget: null, minimumReserve: 0, targetCapacity: 0, energyBelow: 0, priority: ['max-energy', 'regen-speed'] as ('max-energy'|'regen-speed')[] };
+        const preview = await f.s.previewDrawing(250, 20, policy, { mode: 'bursts', start: threshold, restart: threshold, reserve: { units: 0, percent: 0 } });
+        const shop = { catalog: 'geopixels-shop-74783af-v1', currency: 100, capacity: 100, intervalMs: 20_000 };
+        f.energy(0, shop);
+        await batch.approve(preview.id!, preview.digest!);
+        for (let i = 0; i < 2; i++) {
+            await wait(() => upgrades.view().commandReady);
+            const command = await upgrades.claim();
+            expect(command).toMatchObject({ kind: 'max-energy', cost: 50 });
+            await upgrades.result(command!.id, 'accepted');
+            await new Promise(r => setTimeout(r, 5));
+            shop.currency -= 50;
+            shop.capacity += 5;
+            f.energy(0, shop);
+            await wait(() => upgrades.view().history.at(-1)?.state === 'verified');
+            await new Promise(r => setTimeout(r, 5));
+            f.energy(0, shop);
+        }
+        expect(upgrades.view(preview.id).budgetUsed).toBe(100);
+        expect(upgrades.view().history.map(h => h.state)).toEqual(['verified', 'verified']);
+        expect(f.calls()).toBe(0);
+    });
+
     it('seals the saved strategy into the drawing and retains confirmations across modes and restart', async () => {
         const f = await fixture(false, 4, 3), batch = f.s.singlePixelWriter.batch;
         f.energy(12);

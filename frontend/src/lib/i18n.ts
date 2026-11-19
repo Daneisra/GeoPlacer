@@ -91,6 +91,7 @@ export const SETTING_LABELS: Record<string, string> = {
 
 /** Reasons of the scheduler state (free texts): known patterns. */
 const REASONS: [RegExp, (m: RegExpExecArray) => string][] = [
+  [/^TEMPLATE_UNAVAILABLE: browser project needs an explicit binding$/, () => 'Liaison du fantôme perdue. Reconnectez le lecteur et vérifiez de nouveau le PNG sur le tableau de bord.'],
   [/^waiting for changed or newly covered pixels$/, () => 'En attente de pixels modifiés ou nouvellement observés.'],
   [/^the canvas matches the template$/, () => 'La toile correspond au modèle.'],
   [/^recovering the journal$/, () => 'Reprise du journal.'],

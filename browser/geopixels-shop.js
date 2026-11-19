@@ -44,6 +44,13 @@ const GeoPlacerShop = (() => {
         return owned.length < 34 ? 0 : 100;
     }
     let purchaseSession = null;
+    function offerAvailable(kind) {
+        const ids = { 'energy-pack': 'EnergyInput', 'max-energy': 'EnergyCapacityInput', 'regen-speed': 'FasterRechargeInput', 'color-unlock': 'ExtraColorInput' };
+        const input = document.getElementById(ids[kind]);
+        const buttons = input?.parentElement?.parentElement?.querySelectorAll?.('button') ?? [];
+        const buy = [...buttons].find(button => /^Buy$/i.test(button.textContent?.trim() ?? ''));
+        return !!input && !input.disabled && !buy?.disabled;
+    }
     async function execute(c, allowed) {
         let sent = false,
             timer;
@@ -84,7 +91,8 @@ const GeoPlacerShop = (() => {
                 new Set(p.priority).size !== p.priority.length ||
                 p.priority.some((k) => !types[k]) ||
                 !p.priority.includes(c.kind) ||
-                ![p.maxBudget, p.minimumReserve, p.targetCapacity, p.energyBelow].every(
+                (p.maxBudget !== null && (!Number.isSafeInteger(p.maxBudget) || p.maxBudget < 0)) ||
+                ![p.minimumReserve, p.targetCapacity, p.energyBelow].every(
                     (n) => Number.isSafeInteger(n) && n >= 0
                 )
             )
@@ -104,7 +112,8 @@ const GeoPlacerShop = (() => {
                 return 'not-sent';
             if (
                 (c.kind === 'energy-pack' && r.available >= p.energyBelow) ||
-                (c.kind === 'max-energy' && r.shop.capacity >= p.targetCapacity) ||
+                !offerAvailable(c.kind) ||
+                (c.kind === 'max-energy' && p.targetCapacity > 0 && r.shop.capacity >= p.targetCapacity) ||
                 (c.kind === 'regen-speed' && r.shop.intervalMs <= 15000) ||
                 (c.kind === 'color-unlock' &&
                     (!Number.isSafeInteger(c.color) || c.color < 0 || c.color > 0xffffff || r.colors.includes(c.color)))
@@ -116,7 +125,7 @@ const GeoPlacerShop = (() => {
             if (
                 !Number.isSafeInteger(spent) ||
                 spent < 0 ||
-                spent + c.cost > p.maxBudget ||
+                (p.maxBudget !== null && spent + c.cost > p.maxBudget) ||
                 r.shop.currency - c.cost < p.minimumReserve ||
                 sessionStorage.getItem(key) ||
                 !(await allowed(c.id))
@@ -126,6 +135,7 @@ const GeoPlacerShop = (() => {
                 !(await GeoPlacerPageReader.unchanged()) ||
                 GeoPlacerEnergy.snapshot()?.sequence !== r.sequence ||
                 c.catalog !== catalog() ||
+                !offerAvailable(c.kind) ||
                 Date.now() >= c.deadline ||
                 queuedPixelsObjects.size !== 0 ||
                 isPlacingRequestInProgress

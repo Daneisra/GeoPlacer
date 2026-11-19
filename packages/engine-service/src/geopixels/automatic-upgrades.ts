@@ -131,7 +131,15 @@ export class AutomaticUpgrades {
             frame.capturedAt
         );
         this.proposalJob = active.job;
-        const proposal = this.proposals.find((p) => p.allowed && !blocked.has(p.proposal.kind))?.proposal;
+        this.proposals = this.proposals.map(p => {
+            const kind = p.proposal.kind;
+            if (blocked.has(kind)) return { ...p, allowed: false, reasons: [...p.reasons, 'uncertain-purchase'] };
+            const refused = relevant.some(r => r.state === 'refused' && r.kind === kind && r.color === p.proposal.color &&
+                JSON.stringify(r.before.shop) === JSON.stringify(frame.shop) && JSON.stringify(r.before.colors) === JSON.stringify(frame.colors) &&
+                (kind !== 'energy-pack' || r.before.available === frame.available));
+            return refused ? { ...p, allowed: false, reasons: [...p.reasons, 'refused-with-same-resources'] } : p;
+        });
+        const proposal = this.proposals.find((p) => p.allowed)?.proposal;
         if (!proposal || !(await this.d.lock())) return;
         if (
             this.d.active()?.job !== active.job ||

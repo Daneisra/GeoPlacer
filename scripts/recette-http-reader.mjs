@@ -500,6 +500,7 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     await simple.getByLabel('Image à dessiner',{exact:true}).setInputFiles(path.join(repo,'public/fixtures/geoplacer-20x20.png'));
     await simple.getByRole('button',{name:'Importer l’image',exact:true}).click();
     await simple.getByText('Options du dessin',{exact:true}).click();
+    await simple.getByLabel('Mode énergétique',{exact:true}).selectOption('continuous');
     await simple.getByLabel('Budget du dessin',{exact:true}).fill('20');
     await simple.locator('#drawingImportNotice').filter({hasText:/^Image importée :/}).waitFor();
     await reader.evaluate(()=>{
@@ -600,8 +601,13 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
         return response;
       };
     });
-    await simple.getByLabel('Autoriser avec le prochain lancement du dessin',{exact:true}).check();
-    await simple.getByLabel('Budget maximal de monnaie',{exact:true}).fill('10');
+    if (!(await simple.getByLabel('Mode énergétique',{exact:true}).isVisible())) {
+      await simple.getByText('Options du dessin',{exact:true}).click();
+    }
+    await simple.getByLabel('Mode énergétique',{exact:true}).selectOption('bursts');
+    await simple.getByLabel('Démarrage (énergies)',{exact:true}).fill('20');
+    await simple.getByLabel('Reprise (énergies)',{exact:true}).fill('20');
+    await simple.getByLabel('Budget des améliorations',{exact:true}).selectOption('unlimited');
     await pair();
     await reader.evaluate(()=>{
       syncWorker.postMessage({type:'sync-delta'});
@@ -612,6 +618,8 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     await simple.getByText('Envois terminés — vérifier les observations',{exact:true}).waitFor();
     const upgraded=await api('connector/status',undefined,'GET');
     assert.equal(upgraded.batch.confirmed,20);assert.equal(upgraded.upgrades.history.at(-1).state,'verified');
+    assert.equal(upgraded.batch.scope.upgrades.maxBudget,null);
+    assert.equal(upgraded.batch.scope.upgrades.minimumReserve,0);
     assert.equal(await reader.evaluate(()=>fixturePurchaseCalls),1);assert.equal(upgraded.upgrades.uncertain,0);
     await page.screenshot({path:path.join(out,'automatic-upgrade-local-fixture.png'),fullPage:true});
     await nav.getByRole('link',{name:'Ressources et améliorations',exact:true}).click();
@@ -621,7 +629,7 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     }
     await page.screenshot({path:path.join(out,'ressources.png'),fullPage:true});
     await nav.getByRole('link',{name:'Tableau de bord',exact:true}).click();
-    record('OK opt-in upgrade: one launch, zero initial native energy, durable purchase intent, fixed in-game endpoint stub, exact observed debit/effect, same scheduler resumes and draws 20 targets within a 10-coin budget; no external requests');
+    record('OK unlimited upgrades with zero reserve: a stub recharge is verified while bursts wait, crossed threshold then draws 20 targets; no external requests');
     await page.getByRole('button',{name:'Révoquer le canal',exact:true}).click();
 
     assert.deepEqual(external, []);

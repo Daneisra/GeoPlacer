@@ -74,6 +74,7 @@ const GeoPlacerEnergy = (() => {
             capturedAt: Date.now(),
             energy,
             colors: owned,
+            ...(Number.isSafeInteger(raw.maxEnergy) && raw.maxEnergy > 0 && raw.maxEnergy <= 1e9 ? { capacity: raw.maxEnergy } : {}),
             ...(typeof GeoPlacerShop!=='undefined' && GeoPlacerShop.catalog() && Number.isSafeInteger(raw.pixels) && raw.pixels>=0 && Number.isSafeInteger(raw.maxEnergy) && raw.maxEnergy>0 && Number.isSafeInteger(raw.energyRate) && raw.energyRate>=15 ? {shop:{catalog:GeoPlacerShop.catalog(),currency:Math.floor(raw.pixels/5),capacity:raw.maxEnergy,intervalMs:raw.energyRate*1000,colorPrice:GeoPlacerShop.colorPrice?.(owned)??null}} : {}),
         };
         direct=!!request.direct && energy === raw.energy;

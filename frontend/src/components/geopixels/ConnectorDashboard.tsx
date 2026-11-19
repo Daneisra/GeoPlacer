@@ -44,6 +44,7 @@ type View = {
 };
 type HttpReaderInfo = {
     batchProtocol?: number | null;
+    reserveGuard?: boolean;
     enabled: boolean;
     active: boolean;
     approvedAt?: number | null;
@@ -156,6 +157,7 @@ export function ConnectorDashboard({ page }: { page: WorkspacePage }) {
     const wallet = view?.batch.resources;
     const shop = wallet?.shop;
     const policy = view?.batch.scope?.upgrades;
+    const nextUpgrade = view?.upgrades?.proposals?.find(proposal => proposal.allowed);
     async function pair(mode: 'local-fake' | 'read-only') {
         setCapability('');
         const origin = mode === 'local-fake' ? location.origin : readerOrigin;
@@ -390,16 +392,19 @@ export function ConnectorDashboard({ page }: { page: WorkspacePage }) {
                             {kind === 'regen-speed' && shop?.intervalMs === 15000 && <p>Minimum atteint</p>}
                         </article>
                     ))}</div>
-                    {policy && <p>Budget du travail {number(policy.maxBudget)} monnaies · dépensé ou réservé {number(view?.upgrades?.budgetUsed)} · réserve {number(policy.minimumReserve)} · priorité {policy.priority.map(kind => upgrades[kind as UpgradeKind]?.name ?? kind).join(' → ')}</p>}
+                    {policy && <p>Budget du travail {policy.maxBudget === null ? 'illimité' : `${number(policy.maxBudget)} monnaies`} · dépensé ou réservé {number(view?.upgrades?.budgetUsed)} · réserve {policy.minimumReserve === 0 ? 'aucune' : number(policy.minimumReserve)} · priorité {policy.priority.map(kind => upgrades[kind as UpgradeKind]?.name ?? kind).join(' → ')}</p>}
+                    {policy && nextUpgrade && <p>Prochaine amélioration visée · {upgrades[nextUpgrade.kind].name} · {number(nextUpgrade.cost)} monnaies.</p>}
                     {!!view?.upgrades?.proposals?.length && <details><summary>Dernières propositions du moteur</summary>
                         <ul>{view.upgrades.proposals.map(p => <li key={`${p.kind}:${p.color}`}>
                             {upgrades[p.kind].name}{p.color !== null && ` #${p.color.toString(16).padStart(6,'0')}`} · {number(p.cost)} monnaies · {p.allowed ? 'Admissible' : 'Non admissible'}
+                            {p.reasons.includes('uncertain-purchase') && ' · résultat précédent incertain'}
+                            {p.reasons.includes('refused-with-same-resources') && ' · offre refusée pour cet état des ressources'}
                         </li>)}</ul>
                     </details>}
                 </section>
             </>}
             <SimpleDrawingPanel view={view} approvalKey={approvalKey} refresh={refresh}
-                readerReady={view?.mode === 'local-fake' || (httpReader?.batchProtocol ?? 0) >= 6}
+                readerReady={view?.mode === 'local-fake' || httpReader?.reserveGuard === true}
                 page={page} showWorkflow={showWorkflow} pairing={pairing} />
             {page === 'settings' && <Link className="studio-link" to="/settings/legacy">Ouvrir les paramètres hérités</Link>}
             <div hidden={!showAdvanced} className="studio-advanced space-y-4">

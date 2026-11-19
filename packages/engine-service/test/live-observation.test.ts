@@ -77,6 +77,20 @@ describe('Repeated cache observation, without service freshness claims', () => {
     expect((await s.provider.reader.readRegion({minX:0,minY:0,width:2,height:2})).get({x:0,y:0})).toBe(-2);
     expect(s.provider.status()).toMatchObject({ connected:true, captureExpired:true, freshness:'unverified' });
   });
+  it('retains the same binding during a heartbeat gap but expires the operational canvas', async () => {
+    const s = setup();
+    s.send([0,0,0,0]);
+    const template = { id:'local', revision:1, image:{width:2,height:2}, coordinateSystem:{yAxis:'down'}, placement:{topLeft:{x:0,y:0}} } as Template;
+    s.provider.bind(template);
+    const epoch = s.provider.channelEpoch;
+    s.advance(45_000);
+    expect(() => s.provider.assertBinding(template)).toThrow();
+    expect(() => s.provider.assertBinding(template, true)).not.toThrow();
+    expect((await s.provider.reader.readRegion({minX:0,minY:0,width:2,height:2})).get({x:0,y:0})).toBe(-2);
+    s.http.status(s.claim.capability, 3);
+    expect(() => s.provider.assertBinding(template)).not.toThrow();
+    expect(s.provider.channelEpoch).toBe(epoch);
+  });
   it('separates changed colors, erasure, newly loaded values and missing tiles', () => {
     const s = setup(); s.send([0, 0, -2, 0]); s.advance(1000); s.send([0xffffff, -1, 0, -2]);
     expect(s.provider.monitoring.view().lastCapture).toMatchObject({ changedKnown: 2, newlyKnown: 1, becameUnknown: 1, unknown: 1 });

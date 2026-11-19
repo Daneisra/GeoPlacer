@@ -37,7 +37,7 @@ export interface EngineApi {
     setDrawingStrategy?(templateId: string, strategy: import('@geoplacer/core').DrawingStrategyId): Promise<unknown>;
     deleteDrawing?(templateId: string, confirmName: string): Promise<unknown>;
     exportDrawing?(templateId: string, thumbnail?: boolean): Promise<{ png: Uint8Array; filename: string }>;
-    previewDrawing?(groupSize?:number,pixelBudget?:number,upgrades?:import('@geoplacer/engine-service').AutomaticUpgradePolicy):Promise<unknown>;
+    previewDrawing?(groupSize?: number, pixelBudget?: number, upgrades?: import('@geoplacer/engine-service').AutomaticUpgradePolicy, energy?: import('@geoplacer/engine-service').EnergyPolicy, groups?: import('@geoplacer/engine-service').GroupPolicy): Promise<unknown>;
     configureConnectorRegions?(regions: unknown, restore?: boolean): Promise<unknown>;
     connectorProposals?(policy: import('@geoplacer/core').UpgradePolicy): Promise<unknown>;
 

@@ -152,6 +152,7 @@ export function createPrivilegedReaderRouter(channel: ConnectorHttpChannel): Rou
                         .union([z.literal(3), z.literal(4), z.literal(5), z.literal(6), z.literal(7), z.literal(8), z.literal(9), z.literal(10)])
                         .optional(),
                     waitMs: z.literal(5000).optional(),
+                    reserveGuard: z.literal(true).optional(),
                     writerResources: z.custom(validWriterResources).optional(),
                     abortedCapture: z
                         .string()
@@ -177,14 +178,16 @@ export function createPrivilegedReaderRouter(channel: ConnectorHttpChannel): Rou
                       b.monitoring,
                       abort.signal,
                       b.abortedCapture,
-                      b.writerResources
+                      b.writerResources,
+                      b.reserveGuard
                   )
                 : channel.status(
                       res.locals.capability as string,
                       b.readerVersion,
                       b.monitoring,
                       b.abortedCapture,
-                      b.writerResources
+                      b.writerResources,
+                      b.reserveGuard
                   );
             await pace(start);
             channel.verify(res.locals.capability as string);
@@ -209,8 +212,8 @@ export function createPrivilegedReaderRouter(channel: ConnectorHttpChannel): Rou
     });
     router.post('/disconnect', small, (req, res) => {
         try {
-            z.strictObject({ protocol: z.literal(1) }).parse(req.body);
-            res.json(channel.disconnect(res.locals.capability as string));
+            const { reason } = z.strictObject({ protocol: z.literal(1), reason: z.enum(['context','transport','observation']).optional() }).parse(req.body);
+            res.json(channel.disconnect(res.locals.capability as string, reason));
         } catch {
             fail(res);
         }

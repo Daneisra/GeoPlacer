@@ -107,6 +107,8 @@ export interface SchedulerDependencies {
   readonly resourceSource: ResourceSource;
   readonly resources: ResourceManager;
   readonly attempts: AttemptManager;
+  /** Optional policy veto on a planned group, before any reservation is created. */
+  readonly groupWait?: (group: { size: number; candidates: number; progress: ProgressSnapshot }) => string | null;
   /** To prepare the random order (and its verified cache); optional. */
   readonly hasher?: Hasher;
   readonly orderCache?: OrderCacheStore;

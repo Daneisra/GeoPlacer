@@ -1,6 +1,10 @@
 import { useState } from 'react';
 import { engineHttp } from '../../lib/engine';
 
+export type Threshold = { units: number; percent: number };
+export type EnergyPolicy = { mode: 'continuous' } | { mode: 'bursts'; start: Threshold; restart: Threshold; reserve: Threshold };
+export type GroupPolicy = { mode: 'adaptive' | 'manual'; minimum: number; allowFinal: boolean };
+
 export type BatchView = {
     id: string | null;
     templateId?: string | null;
@@ -12,9 +16,12 @@ export type BatchView = {
     limits?: {maxGroupPixels:number;commandBytes:number};
     adaptiveGroupSize?:number;
     budgets?: { pixels: number; energy: number };
-    scope?: { region: { x: number; y: number; width: number; height: number }; durationMs: number | null; groupSize?: number; strategy?: string; upgrades?:{maxBudget:number;minimumReserve:number;priority:string[]} } | null;
+    scope?: { region: { x: number; y: number; width: number; height: number }; durationMs: number | null; groupSize?: number; strategy?: string; energy?: EnergyPolicy; groups?: GroupPolicy; upgrades?: {maxBudget:number | null;minimumReserve:number;priority:string[]} } | null;
     spent?: number;
-    resources?: { available: number; capturedAt: number; shop?: { currency: number; capacity: number; intervalMs: number; colorPrice?: 0 | 100 | null } } | null;
+    resources?: { available: number; capacity?: number | null; capturedAt: number; shop?: { currency: number; capacity: number; intervalMs: number; colorPrice?: 0 | 100 | null } } | null;
+    energyPolicy?: { phase: 'start' | 'draining' | 'recharge'; spendable: number; reserve: number | null; target: number | null; reason: string | null };
+    groupCeiling?: number;
+    groupReason?: string | null;
     regionProgress?: { correct: number; incorrect: number; unknown: number; percent: number | null } | null;
     history?: {
         attemptId: string;
@@ -23,6 +30,7 @@ export type BatchView = {
         startedAt: number | null;
         closedAt: number | null;
         accepted: boolean;
+        reason?: string | null;
     }[];
     acceptedRequests?: number;
     targets: {

@@ -230,8 +230,8 @@ export class GeoPixelsProvider implements ReadWriteCanvasProvider {
     this.observationRevision++;
   }
 
-  assertBinding(template: Template): void {
-    check(this.connected() && this.binding !== null && this.binding.key === this.key(), 'browser project needs an explicit binding');
+  assertBinding(template: Template, allowHeartbeatGap = false): void {
+    check((allowHeartbeatGap ? this.send !== null : this.connected()) && this.binding !== null && this.binding.key === this.key(), 'browser project needs an explicit binding');
     check(
       this.binding.templateId === template.id &&
         this.binding.revision === template.revision &&
