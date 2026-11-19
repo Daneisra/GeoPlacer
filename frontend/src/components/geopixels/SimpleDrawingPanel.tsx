@@ -50,8 +50,50 @@ function runningDrawingStatus(batch: BatchView) {
 }
 
 const thresholdLabels = { start: 'Démarrage', restart: 'Reprise', reserve: 'Réserve énergétique' };
+type ThresholdKind = keyof typeof thresholdLabels;
+type ThresholdUnit = keyof Threshold | 'both';
+const thresholdKinds = ['start', 'restart', 'reserve'] as const;
 const describeThreshold = ({ units, percent }: Threshold, fallback: string) => units && percent
-    ? `max. de ${units} énergies et ${percent} %` : units ? `${units} énergies` : percent ? `${percent} %` : fallback;
+    ? `${units} énergies ou ${percent} % (seuil le plus élevé)` : units ? `${units} énergies` : percent ? `${percent} %` : fallback;
+
+function EnergyThresholdField({ kind, threshold, onChange }: {
+    kind: ThresholdKind;
+    threshold: Threshold;
+    onChange: (value: Threshold) => void;
+}) {
+    const [unit, setUnit] = useState<ThresholdUnit>(() => threshold.percent ? (threshold.units ? 'both' : 'percent') : 'units');
+    const label = thresholdLabels[kind];
+    const unitId = `drawing-energy-${kind}-unit`;
+    const hint = kind === 'reserve' ? 'Aucune réserve' : 'Capacité pleine';
+    return (
+        <div className="drawing-threshold">
+            <div className="drawing-option-field">
+                <label htmlFor={unitId}>{label}</label>
+                <select id={unitId} value={unit} aria-describedby="drawing-threshold-help" onChange={(event) => {
+                    const next = event.target.value as ThresholdUnit;
+                    setUnit(next);
+                    onChange({ units: next === 'percent' ? 0 : threshold.units, percent: next === 'units' ? 0 : threshold.percent });
+                }}>
+                    <option value="units">Valeur absolue</option>
+                    <option value="percent">Pourcentage</option>
+                    <option value="both">Combiner les deux</option>
+                </select>
+            </div>
+            <div className="drawing-threshold-values" data-paired={unit === 'both'}>
+                {unit !== 'percent' && <label className="drawing-option-field">
+                    <span>Énergies</span>
+                    <input aria-label={`${label} (énergies)`} type="number" min={0} max={1e9} placeholder={unit === 'both' ? '0' : hint}
+                        value={threshold.units || ''} onChange={(event) => onChange({ ...threshold, units: Number(event.target.value) })} />
+                </label>}
+                {unit !== 'units' && <label className="drawing-option-field">
+                    <span>% capacité</span>
+                    <input aria-label={`${label} (%)`} type="number" min={0} max={100} placeholder={unit === 'both' ? '0' : hint}
+                        value={threshold.percent || ''} onChange={(event) => onChange({ ...threshold, percent: Number(event.target.value) })} />
+                </label>}
+            </div>
+        </div>
+    );
+}
 
 /** Default workflow. Authority is granted only by the explicit launch/resume buttons. */
 export function SimpleDrawingPanel({
@@ -425,89 +467,154 @@ export function SimpleDrawingPanel({
                 )}
               </section>
             </div>
-            <details className="studio-card" hidden={!(dashboard && showWorkflow) && page !== 'resources' && page !== 'settings'} open={page === 'resources' || page === 'settings' || undefined}>
+            <details className="studio-card drawing-options" hidden={!(dashboard && showWorkflow) && page !== 'resources' && page !== 'settings'} open={page === 'resources' || page === 'settings' || undefined}>
                 <summary>{page === 'resources' ? 'Politique d’améliorations' : 'Options du dessin'}</summary>
-                <div className="grid gap-3 p-3 md:grid-cols-2">
-                    <fieldset hidden={page === 'resources'} className="md:col-span-2 space-y-2" disabled={active || busy}>
-                        <legend>Politique énergétique</legend>
-                        <div>
-                            <label htmlFor="drawing-energy-mode">Mode énergétique</label>{' '}
-                            <select id="drawing-energy-mode" value={energyMode} onChange={e=>setEnergyMode(e.target.value as EnergyPolicy['mode'])}>
-                                <option value="bursts">Salves</option><option value="continuous">Continu</option>
-                            </select>
+                <div className="drawing-options-body">
+                    <div className="drawing-options-summary space-y-2">
+                        <h3>Au prochain lancement</h3>
+                        <dl className="drawing-options-grid">
+                            {page !== 'resources' && <>
+                                <div><dt>Énergie</dt><dd>{energy.mode === 'continuous'
+                                    ? 'En continu, dès que l’énergie est disponible.'
+                                    : <>Démarrage à {describeThreshold(energy.start, 'pleine capacité (100 %)')}. Reprise à {describeThreshold(energy.restart, 'pleine capacité (100 %)')}. Réserve {describeThreshold(energy.reserve, 'nulle')}.</>}</dd></div>
+                                <div><dt>Groupes de pixels</dt><dd>{groups.mode === 'adaptive' ? 'Adaptatifs' : 'Manuels'}, {groupSize ? <>jusqu’à {groupSize} pixels</> : 'jusqu’au plafond local'}. {groups.minimum ? <>Minimum {groups.minimum}{groups.allowFinal ? ', sauf le dernier groupe' : ''}. </> : 'Aucun minimum. '}{budget ? <>Budget de {budget} pixels.</> : 'Image entière.'}</dd></div>
+                            </>}
+                            <div><dt>Améliorations</dt><dd>{upgradeMode === 'disabled' ? 'Achats automatiques désactivés.' : <>
+                                {upgradeMode === 'unlimited' ? 'Budget illimité en monnaie du jeu.' : <>Budget de {coinBudget} en monnaie du jeu.</>} {coinReserve ? <>Réserve de {coinReserve}.</> : 'Aucune réserve.'} {upgradeKinds.length ? upgradeKinds.map(kind => upgrades[kind].name).join(' → ') : 'Aucune amélioration sélectionnée.'}
+                            </>}</dd></div>
+                        </dl>
+                    </div>
+                    <fieldset className="drawing-option-section" hidden={page === 'resources'} disabled={active || busy}>
+                        <legend>Énergie et salves</legend>
+                        <div className="drawing-options-grid">
+                            <div className="drawing-option-field">
+                                <label htmlFor="drawing-energy-mode">Mode énergétique</label>
+                                <select id="drawing-energy-mode" value={energyMode} onChange={event => setEnergyMode(event.target.value as EnergyPolicy['mode'])}>
+                                    <option value="bursts">Salves</option><option value="continuous">Continu</option>
+                                </select>
+                            </div>
                         </div>
-                        {energyMode === 'bursts' && <>
-                            <p>Le seuil le plus élevé s’applique. Deux champs à 0 ou vides demandent la capacité pleine pour démarrer ou reprendre, et aucune réserve pour le dernier réglage.</p>
-                            <div className="grid gap-2 md:grid-cols-3">{(Object.keys(thresholdLabels) as (keyof typeof thresholdLabels)[]).map(key => (
-                                <div className="space-y-2" key={key}><h3>{thresholdLabels[key]}</h3>
-                                    <label>{thresholdLabels[key]} (énergies)<input type="number" min={0} max={1e9} placeholder="0" value={thresholds[key].units || ''} onChange={e=>setThresholds(prev=>({ ...prev,[key]:{...prev[key],units:Number(e.target.value)} }))}/></label>
-                                    <label>{thresholdLabels[key]} (%)<input type="number" min={0} max={100} placeholder="0" value={thresholds[key].percent || ''} onChange={e=>setThresholds(prev=>({ ...prev,[key]:{...prev[key],percent:Number(e.target.value)} }))}/></label>
-                                </div>
+                        <div className="space-y-3" hidden={energyMode !== 'bursts'}>
+                            <div className="drawing-options-grid">{thresholdKinds.map(kind => (
+                                <EnergyThresholdField key={kind} kind={kind} threshold={thresholds[kind]}
+                                    onChange={value => setThresholds(previous => ({ ...previous, [kind]: value }))} />
                             ))}</div>
+                            <p className="drawing-option-note" id="drawing-threshold-help">Pour un seuil laissé vide ou entièrement à 0, le démarrage et la reprise attendent la pleine capacité (100 %) et la réserve est nulle. Si les deux formats sont renseignés, le seuil le plus élevé s’applique.</p>
+                        </div>
+                        {energyMode === 'continuous' && <p className="drawing-option-note">Le dessin utilise l’énergie disponible dès qu’il peut envoyer un groupe.</p>}
+                    </fieldset>
+                    <fieldset className="drawing-option-section" hidden={page === 'resources'} disabled={active || busy}>
+                        <legend>Groupes de pixels</legend>
+                        <div className="drawing-options-grid">
+                            <div className="drawing-option-field">
+                                <label htmlFor="drawing-group-mode">Mode des groupes</label>
+                                <select id="drawing-group-mode" value={groups.mode} onChange={event => setGroups(previous => ({ ...previous, mode: event.target.value as GroupPolicy['mode'] }))}>
+                                    <option value="adaptive">Adaptatif</option><option value="manual">Manuel</option>
+                                </select>
+                            </div>
+                            <label className="drawing-option-field">
+                                <span>Pixels par requête</span>
+                                <input aria-label="Pixels par requête" aria-describedby="drawing-group-max-help" type="number"
+                                    min={0} max={batch?.limits?.maxGroupPixels} value={groupSize} onChange={event => setGroupSize(Number(event.target.value))} />
+                                <small id="drawing-group-max-help">Maximum par envoi. 0 ou vide = plafond local{batch?.limits ? <> ({batch.limits.maxGroupPixels} pixels)</> : ''}.</small>
+                            </label>
+                            <label className="drawing-option-field">
+                                <span>Budget du dessin</span>
+                                <input aria-label="Budget du dessin" aria-describedby="drawing-pixel-budget-help" type="number" min={1}
+                                    placeholder="Image entière" value={budget} onChange={event => setBudget(event.target.value)} />
+                                <small id="drawing-pixel-budget-help">En pixels. Champ vide = image entière.</small>
+                            </label>
+                        </div>
+                        <p className="drawing-option-note">{groups.mode === 'adaptive'
+                            ? 'La taille augmente après les envois acceptés, dans la limite du maximum.'
+                            : 'Chaque requête utilise jusqu’au maximum, selon l’énergie, les cibles disponibles et le transport.'}</p>
+                        <details className="drawing-option-advanced">
+                            <summary>Taille minimale et dernier groupe</summary>
+                            <div className="drawing-options-grid">
+                                <div className="drawing-option-field">
+                                    <label htmlFor="drawing-group-min">Minimum souhaité</label>
+                                    <input id="drawing-group-min" type="number" min={0} max={batch?.limits?.maxGroupPixels} value={groups.minimum}
+                                        aria-describedby="drawing-group-min-help" onChange={event => setGroups(previous => ({ ...previous, minimum: Number(event.target.value) }))} />
+                                    <small id="drawing-group-min-help">0 ou vide = aucun minimum.</small>
+                                </div>
+                                <label className="drawing-option-check"><input type="checkbox" checked={groups.allowFinal}
+                                    onChange={event => setGroups(previous => ({ ...previous, allowFinal: event.target.checked }))} /> Autoriser un dernier groupe sous le minimum</label>
+                            </div>
+                        </details>
+                    </fieldset>
+                    <fieldset className="drawing-option-section" disabled={active || busy}>
+                        <legend>Améliorations automatiques</legend>
+                        <div className="drawing-options-grid">
+                            <div className="drawing-option-field">
+                                <label htmlFor="drawing-upgrade-budget">Budget des améliorations</label>
+                                <select id="drawing-upgrade-budget" value={upgradeMode} aria-describedby="drawing-upgrade-help"
+                                    onChange={event => setUpgradeMode(event.target.value as typeof upgradeMode)}>
+                                    <option value="disabled">Désactivé</option><option value="limited">Budget limité</option><option value="unlimited">Illimité</option>
+                                </select>
+                            </div>
+                            {upgradeMode === 'limited' && <div className="drawing-option-field">
+                                <label htmlFor="drawing-coin-budget">Budget maximal de monnaie</label>
+                                <input id="drawing-coin-budget" type="number" min={0} value={coinBudget} aria-describedby="drawing-coin-budget-help"
+                                    onChange={event => setCoinBudget(Number(event.target.value))} />
+                                <small id="drawing-coin-budget-help">0 ou vide = aucune dépense.</small>
+                            </div>}
+                            {upgradeMode !== 'disabled' && <div className="drawing-option-field">
+                                <label htmlFor="drawing-coin-reserve">Réserve de monnaie</label>
+                                <input id="drawing-coin-reserve" type="number" min={0} value={coinReserve} aria-describedby="drawing-coin-reserve-help"
+                                    onChange={event => setCoinReserve(Number(event.target.value))} />
+                                <small id="drawing-coin-reserve-help">0 ou vide = aucune réserve.</small>
+                            </div>}
+                        </div>
+                        <p className="drawing-option-note" id="drawing-upgrade-help">{upgradeMode === 'unlimited'
+                            ? 'Illimité = aucun plafond de dépenses en monnaie du jeu.'
+                            : 'Seule la monnaie du jeu peut servir aux achats automatiques.'}</p>
+                        {upgradeMode !== 'disabled' && <>
+                            <div className="drawing-upgrade-selections">
+                                <div>
+                                    <h4>Améliorations autorisées</h4>
+                                    {availableUpgrades.map(kind => <label className="drawing-option-check" key={kind}><input type="checkbox"
+                                        checked={upgradeKinds.includes(kind)} onChange={event => setUpgradeKinds(current => event.target.checked ? [...current, kind] : current.filter(item => item !== kind))}
+                                    /> {upgrades[kind].name}</label>)}
+                                </div>
+                                {!!upgradeKinds.length && <div>
+                                    <h4>Ordre de priorité</h4>
+                                    <ol className="drawing-priorities">{upgradeKinds.map((kind, index) => <li key={kind}>
+                                        <span>{index + 1}. {upgrades[kind].name}</span>
+                                        <div>
+                                            <button type="button" aria-label={'Avancer ' + upgrades[kind].name} disabled={index === 0} onClick={() => moveUpgrade(index, -1)}>↑</button>
+                                            <button type="button" aria-label={'Reculer ' + upgrades[kind].name} disabled={index === upgradeKinds.length - 1} onClick={() => moveUpgrade(index, 1)}>↓</button>
+                                        </div>
+                                    </li>)}</ol>
+                                </div>}
+                            </div>
+                            <details className="drawing-option-advanced">
+                                <summary>Conditions d’achat avancées</summary>
+                                <div className="drawing-options-grid">
+                                    <div className="drawing-option-field">
+                                        <label htmlFor="drawing-target-capacity">Capacité ciblée</label>
+                                        <input id="drawing-target-capacity" type="number" min={0} value={targetCapacity} aria-describedby="drawing-capacity-help"
+                                            onChange={event => setTargetCapacity(Number(event.target.value))} />
+                                        <small id="drawing-capacity-help">0 ou vide = jusqu’à la limite proposée par GeoPixels.</small>
+                                    </div>
+                                    <div className="drawing-option-field">
+                                        <label htmlFor="drawing-buy-energy-below">Recharger si énergie inférieure à</label>
+                                        <input id="drawing-buy-energy-below" type="number" min={0} value={energyBelow} aria-describedby="drawing-buy-energy-help"
+                                            onChange={event => setEnergyBelow(Number(event.target.value))} />
+                                        <small id="drawing-buy-energy-help">0 ou vide = aucune recharge automatique.</small>
+                                    </div>
+                                </div>
+                            </details>
+                            <p className="drawing-option-note">Tarifs vérifiés avant chaque achat. Un résultat incertain suspend l’amélioration concernée.</p>
                         </>}
                     </fieldset>
-                    <label hidden={page === 'resources'}>Mode des groupes<select disabled={active || busy} value={groups.mode} onChange={e=>setGroups(previous=>({...previous,mode:e.target.value as GroupPolicy['mode']}))}>
-                        <option value="adaptive">Adaptatif</option><option value="manual">Manuel</option>
-                    </select></label>
-                    <label hidden={page === 'resources'}>
-                        Taille maximale du groupe (0 = plafond local)
-                        <input
-                            aria-label="Pixels par requête"
-                            type="number"
-                            min={0}
-                            max={batch?.limits?.maxGroupPixels}
-                            value={active ? preparedGroup : groupSize}
-                            disabled={active || busy}
-                            onChange={(e) => setGroupSize(Number(e.target.value))}
-                        />
-                    </label>
-                    <label hidden={page === 'resources'}>Taille minimale souhaitée (0 = aucun minimum)<input type="number" min={0} max={batch?.limits?.maxGroupPixels} disabled={active || busy} value={groups.minimum} onChange={e=>setGroups(previous=>({...previous,minimum:Number(e.target.value)}))}/></label>
-                    <label hidden={page === 'resources'}><input type="checkbox" disabled={active || busy} checked={groups.allowFinal} onChange={e=>setGroups(previous=>({...previous,allowFinal:e.target.checked}))}/> Autoriser un dernier groupe sous le minimum</label>
-                    <label hidden={page === 'resources'}>
-                        Budget de pixels (vide : image entière)
-                        <input
-                            aria-label="Budget du dessin"
-                            type="number"
-                            min={1}
-                            value={budget}
-                            disabled={active || busy}
-                            onChange={(e) => setBudget(e.target.value)}
-                        />
-                    </label>
-                    <fieldset className="md:col-span-2 space-y-3" disabled={active || busy}>
-                        <legend>Améliorations automatiques — monnaie du jeu uniquement</legend>
-                        <div>
-                            <label htmlFor="drawing-upgrade-budget">Budget des améliorations</label>{' '}
-                            <select id="drawing-upgrade-budget" value={upgradeMode} onChange={e=>setUpgradeMode(e.target.value as typeof upgradeMode)}>
-                                <option value="disabled">Désactivé</option><option value="limited">Budget limité</option><option value="unlimited">Illimité</option>
-                            </select>
-                        </div>
-                        {upgradeMode !== 'disabled' && <div className="grid gap-2 md:grid-cols-2">
-                            {upgradeMode === 'limited' ? <label>Budget maximal de monnaie<input type="number" min={0} value={coinBudget} onChange={e=>setCoinBudget(Number(e.target.value))}/></label> : <p>Budget illimité en monnaie du jeu.</p>}
-                            <label>Réserve minimale (0 = aucune)<input type="number" min={0} value={coinReserve} onChange={e=>setCoinReserve(Number(e.target.value))}/></label>
-                            <label>Capacité ciblée (0 = tant que l’offre est disponible)<input type="number" min={0} value={targetCapacity} onChange={e=>setTargetCapacity(Number(e.target.value))}/></label>
-                            <label>Recharger si énergie inférieure à<input type="number" min={0} value={energyBelow} onChange={e=>setEnergyBelow(Number(e.target.value))}/></label>
-                            {availableUpgrades.map((kind)=><label key={kind}><input type="checkbox" checked={upgradeKinds.includes(kind)} onChange={e=>setUpgradeKinds(v=>e.target.checked?[...v,kind]:v.filter(x=>x!==kind))}/>{upgrades[kind].name}</label>)}
-                            {!!upgradeKinds.length && <div className="md:col-span-2 space-y-2">
-                                <h3>Ordre de priorité</h3>
-                                <ol className="space-y-2">{upgradeKinds.map((kind, index) => <li key={kind} className="flex flex-wrap items-center gap-2">
-                                    <span>{index + 1}. {upgrades[kind].name}</span>
-                                    <button type="button" aria-label={`Avancer ${upgrades[kind].name}`} disabled={index === 0} onClick={() => moveUpgrade(index, -1)}>↑</button>
-                                    <button type="button" aria-label={`Reculer ${upgrades[kind].name}`} disabled={index === upgradeKinds.length - 1} onClick={() => moveUpgrade(index, 1)}>↓</button>
-                                </li>)}</ol>
-                            </div>}
-                            <p className="md:col-span-2">Tarifs vérifiés avant chaque achat. Un résultat incertain suspend l’amélioration concernée.</p>
-                        </div>}
-                    </fieldset>
-                    <label className="md:col-span-2" hidden={page === 'resources'}>
-                        Palette locale (#RRGGBB)
-                        <textarea
-                            aria-label="Palette du dessin"
-                            value={palette}
-                            disabled={active || busy}
-                            onChange={(e) => setPalette(e.target.value)}
-                        />
-                    </label>
+                    <details className="drawing-options-palette" hidden={page === 'resources'}>
+                        <summary>Palette</summary>
+                        <label className="drawing-option-field">
+                            <span>Palette locale (#RRGGBB)</span>
+                            <textarea aria-label="Palette du dessin" value={palette} disabled={active || busy}
+                                onChange={event => setPalette(event.target.value)} />
+                        </label>
+                    </details>
                 </div>
             </details>
             {page === 'resources' && (

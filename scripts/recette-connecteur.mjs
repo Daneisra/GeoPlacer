@@ -130,6 +130,46 @@ try {
     assert.equal(await simple.getByRole('button',{name:'Lancer le dessin',exact:true}).isDisabled(), true);
     await page.screenshot({path:path.join(out,'dashboard.png'),fullPage:true});
 
+    const options = simple.locator('.drawing-options');
+    const summary = options.locator('.drawing-options-summary');
+    assert.equal(await summary.isVisible(), false);
+    await options.getByText('Options du dessin',{exact:true}).click();
+    await summary.getByText(/Démarrage à pleine capacité/).waitFor();
+    assert.equal(await options.getByLabel('Démarrage (%)',{exact:true}).count(), 0);
+    await options.getByLabel('Démarrage (énergies)',{exact:true}).fill('100');
+    await options.getByLabel('Démarrage',{exact:true}).selectOption('percent');
+    await options.getByLabel('Démarrage (%)',{exact:true}).fill('80');
+    assert.equal(await options.getByLabel('Démarrage (énergies)',{exact:true}).count(), 0);
+    await options.getByLabel('Reprise',{exact:true}).selectOption('both');
+    await options.getByLabel('Reprise (énergies)',{exact:true}).fill('200');
+    await options.getByLabel('Reprise (%)',{exact:true}).fill('70');
+    await summary.getByText(/Démarrage à 80 %.*Reprise à 200 énergies ou 70 % \(seuil le plus élevé\).*Réserve nulle/).waitFor();
+    await options.getByLabel('Mode énergétique',{exact:true}).selectOption('continuous');
+    await summary.getByText('En continu, dès que l’énergie est disponible.',{exact:true}).waitFor();
+    assert.equal(await options.getByLabel('Reprise (%)',{exact:true}).isVisible(), false);
+    await options.getByLabel('Mode énergétique',{exact:true}).selectOption('bursts');
+    assert.equal(await options.getByLabel('Reprise (%)',{exact:true}).inputValue(), '70');
+
+    await options.getByLabel('Mode des groupes',{exact:true}).selectOption('manual');
+    await options.getByLabel('Pixels par requête',{exact:true}).fill('250');
+    await options.getByText('Taille minimale et dernier groupe',{exact:true}).click();
+    await options.getByLabel('Minimum souhaité',{exact:true}).fill('100');
+    await options.getByLabel('Autoriser un dernier groupe sous le minimum',{exact:true}).check();
+    await options.getByLabel('Budget du dessin',{exact:true}).fill('350');
+    await summary.getByText(/Manuels, jusqu’à 250 pixels.*Minimum 100, sauf le dernier groupe.*Budget de 350 pixels/).waitFor();
+    await options.getByLabel('Budget des améliorations',{exact:true}).selectOption('unlimited');
+    await summary.getByText(/Budget illimité.*Aucune réserve/).waitFor();
+    assert.equal(await options.getByLabel('Budget maximal de monnaie',{exact:true}).count(), 0);
+    await options.getByText('Conditions d’achat avancées',{exact:true}).click();
+    await options.getByLabel('Capacité ciblée',{exact:true}).fill('0');
+    const palette = options.getByLabel('Palette du dessin',{exact:true});
+    assert.equal(await palette.isVisible(), false);
+    await options.getByText('Palette',{exact:true}).click();
+    const originalPalette = await palette.inputValue();
+    await palette.fill('#000000\n#ffffff');
+    assert.equal(await palette.inputValue(), '#000000\n#ffffff');
+    await palette.fill(originalPalette);
+
     const statusUrl = '**/api/v1/connector/status';
     const expiredCapture = async (route) => {
       const response = await route.fetch();
@@ -162,13 +202,26 @@ try {
     await page.getByLabel('Clé locale d’approbation',{exact:true}).fill(approvalKey);
     await nav.getByRole('link',{name:'Paramètres',exact:true}).click();
     assert.equal(await page.getByLabel('Budget maximal de monnaie',{exact:true}).inputValue(),'10');
+    assert.equal(await options.getByLabel('Démarrage (%)',{exact:true}).inputValue(),'80');
+    assert.equal(await options.getByLabel('Reprise (énergies)',{exact:true}).inputValue(),'200');
+    assert.equal(await options.getByLabel('Pixels par requête',{exact:true}).inputValue(),'250');
+    assert.equal(await options.getByLabel('Capacité ciblée',{exact:true}).inputValue(),'0');
     await nav.getByRole('link',{name:'Tableau de bord',exact:true}).click();
     assert.notEqual(await page.getByLabel('Clé locale d’approbation',{exact:true}).inputValue(),'');
     await page.getByLabel('Clé locale d’approbation',{exact:true}).fill('');
 
     for (const width of [1024, 390]) {
       await page.setViewportSize({width,height:900});
+      if (!(await summary.isVisible())) await options.getByText('Options du dessin',{exact:true}).click();
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),false);
+      const start = await options.getByLabel('Démarrage',{exact:true}).boundingBox();
+      const restart = await options.getByLabel('Reprise',{exact:true}).boundingBox();
+      const restartUnits = await options.getByLabel('Reprise (énergies)',{exact:true}).boundingBox();
+      const restartPercent = await options.getByLabel('Reprise (%)',{exact:true}).boundingBox();
+      assert.ok(start && restart);
+      assert.ok(restartUnits && restartPercent && restartUnits.y === restartPercent.y && restartUnits.x < restartPercent.x);
+      assert.equal(start.y === restart.y, width === 1024);
+      await options.screenshot({path:path.join(out,`options-${width}.png`)});
       await page.screenshot({path:path.join(out,`dashboard-${width}.png`),fullPage:true});
     }
     const menu = page.getByRole('button',{name:'Menu',exact:true});
@@ -179,6 +232,7 @@ try {
     const state = await api('connector/status',undefined,'GET');
     assert.equal(state.connected,false);
     assert.equal(state.batch.confirmed,0);
+    record('OK drawing options: energy formats, draft summary, groups and budgets, palette and advanced fields, navigation persistence, desktop and mobile alignment');
     record('OK 8 pages, strategy import, gallery PNG, simple import, live journal, settings preserved across navigation, responsive layout (1024/390 px), no sends');
   }
   if(importOnly){

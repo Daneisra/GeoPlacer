@@ -50,3 +50,119 @@
 .connector-dashboard fieldset summary { cursor:pointer; }
 
 .connector-dashboard textarea { display:block; width:100%; min-height:6rem; padding:.5rem; border:1px solid #64748b; border-radius:.35rem; background:#0f172a; color:#f8fafc; }
+
+.drawing-options > summary,
+.drawing-options-palette > summary {
+  font-weight: 650;
+  cursor: pointer;
+}
+.drawing-options-body {
+  display: grid;
+  gap: 1.1rem;
+  margin-top: 1rem;
+  min-width: 0;
+}
+.drawing-options-summary {
+  padding: .85rem 1rem;
+  border: 1px solid var(--line);
+  border-inline-start: 3px solid var(--violet);
+  border-radius: .55rem;
+  background: var(--rail);
+}
+.drawing-options-summary dt { font-weight: 600; }
+.connector-dashboard .drawing-options-summary dd {
+  margin: .2rem 0 0;
+  font-size: .875rem;
+  color: hsl(var(--muted-foreground));
+}
+.drawing-options-grid,
+.drawing-upgrade-selections {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: .75rem 1rem;
+  align-items: start;
+}
+.drawing-options-grid > :only-child { max-width: 25rem; }
+.drawing-option-section {
+  display: grid;
+  gap: .75rem;
+  min-width: 0;
+  margin: 0;
+  padding: .75rem 1rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: .65rem;
+}
+.drawing-option-section legend {
+  padding-inline: .35rem;
+  font-weight: 650;
+}
+.drawing-option-field {
+  display: grid;
+  gap: .3rem;
+  min-width: 0;
+  font-size: .875rem;
+  font-weight: 550;
+}
+.drawing-option-note,
+.drawing-option-field small {
+  color: hsl(var(--muted-foreground));
+  font-size: .8rem;
+  font-weight: 400;
+}
+.connector-dashboard .drawing-options input[type='number'],
+.connector-dashboard .drawing-options select {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.4rem;
+  margin: 0;
+}
+.drawing-threshold {
+  display: grid;
+  gap: .65rem;
+  padding: .65rem;
+  border: 1px solid var(--line);
+  border-radius: .5rem;
+}
+.drawing-threshold-values {
+  display: grid;
+  gap: .55rem;
+}
+.drawing-threshold-values[data-paired='true'] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.drawing-option-check {
+  display: flex;
+  align-items: baseline;
+  gap: .4rem;
+  padding-block: .25rem;
+}
+.drawing-option-check input { flex: none; }
+.drawing-upgrade-selections h4 { margin-bottom: .35rem; font-weight: 600; }
+.drawing-priorities li,
+.drawing-priorities li > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .35rem;
+}
+.drawing-priorities li { justify-content: space-between; padding-block: .2rem; }
+.drawing-priorities button { min-width: 2.2rem; }
+.connector-dashboard fieldset .drawing-option-advanced {
+  margin-top: 0;
+  padding-top: .55rem;
+  border-top: 1px solid var(--line);
+}
+.drawing-option-advanced[open] > summary,
+.drawing-options-palette[open] > summary { margin-bottom: .65rem; }
+.drawing-options-palette {
+  padding: .65rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: .65rem;
+}
+.drawing-options-palette textarea { resize: vertical; font-family: ui-monospace, monospace; }
+.drawing-options :is(summary, textarea):focus-visible { outline: 2px solid var(--violet); outline-offset: 3px; }
+
+@media (max-width: 520px) {
+  .drawing-option-section, .drawing-options-palette { padding-inline: .65rem; }
+  .drawing-options-grid, .drawing-upgrade-selections { grid-template-columns: minmax(0, 1fr); }
+}
