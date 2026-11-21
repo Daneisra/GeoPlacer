@@ -19,6 +19,7 @@ import {
 } from '@geoplacer/adapters-node';
 import { AutomaticUpgrades } from './automatic-upgrades.js';
 import { ControlledBatch } from './controlled-batch.js';
+import type { AccountPaletteSample } from './writer-resources.js';
 import { check, type BrowserProject } from './protocol.js';
 import { nativePoint, type GeoPixelsProvider } from './provider.js';
 
@@ -104,7 +105,8 @@ export class SinglePixelWriter {
         saveBatch: (value: unknown) => Promise<void> = async () => {
             throw new Error('batch storage unavailable');
         },
-        saveUpgrades:(v:unknown)=>Promise<void>=async()=>{throw new Error('upgrade storage unavailable');}
+        saveUpgrades:(v:unknown)=>Promise<void>=async()=>{throw new Error('upgrade storage unavailable');},
+        palette?: { restored?: AccountPaletteSample; observe: (sample: AccountPaletteSample) => void }
     ) {
         this.journal = new FileAttemptJournal(lock, { namespace: 'geopixels-writer' });
         this.history = new FileHistoryStore(lock, { namespace: 'geopixels-writer' });
@@ -121,6 +123,7 @@ export class SinglePixelWriter {
             agent: AGENT,
             template,
             save: saveBatch,
+            palette,
             initialize: (t, n) => {
                 this.resources = createResourceManager(allowance(t, n));
             },

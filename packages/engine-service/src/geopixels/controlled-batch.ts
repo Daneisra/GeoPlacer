@@ -26,7 +26,7 @@ import { monotonicClock } from '../clock.js';
 import { STRATEGIES } from '../settings.js';
 import { check, type BrowserProject } from './protocol.js';
 import { nativePoint, type GeoPixelsProvider } from './provider.js';
-import { validWriterResources, type WriterResources } from './writer-resources.js';
+import { validWriterResources, type AccountPaletteSample, type WriterResources } from './writer-resources.js';
 import { burstBudget, validEnergyPolicy, type BurstPhase, type EnergyPolicy, type GroupPolicy } from './drawing-energy.js';
 import type { SinglePixelCommand } from './single-pixel-writer.js';
 
@@ -82,6 +82,7 @@ type Dependencies = {
     initialize: (t: Template, n: number) => void;
     save: (value: Saved) => Promise<void>;
     legacy: () => { attemptId: AttemptId; identity: string; write: PixelWrite } | null;
+    palette?: { restored?: AccountPaletteSample; observe: (sample: AccountPaletteSample) => void } | undefined;
 };
 const key = (w: PixelWrite) => canvasPointKey(w.point.x, w.point.y);
 const same = (a: PixelWrite, b: PixelWrite) => a.taskId === b.taskId && key(a) === key(b) && a.color === b.color;
@@ -110,7 +111,7 @@ export class ControlledBatch {
     private readonly completedRegions = new Set<string>();
     private generation = 0;
     private wallet: { epoch: number; baseline: number; value: WriterResources } | null = null;
-    private paletteEvidence: { epoch: number; sequence: number; capturedAt: number; source: WriterResources['source']; colors: number[] } | null = null;
+    private paletteEvidence: { epoch: number; sequence: number; sample: AccountPaletteSample } | null = null;
     private saveQueue: Promise<void> = Promise.resolve();
     private healthy = true;
     private controlling = false;
@@ -290,12 +291,14 @@ export class ControlledBatch {
         if (value.capturedAt > now || now - value.capturedAt > 30000) return;
         if (this.d.provider.status().mode === 'read-only') {
             const previous = this.paletteEvidence?.epoch === epoch ? this.paletteEvidence : null;
-            if (previous && (value.sequence < previous.sequence || value.capturedAt < previous.capturedAt ||
-                (value.sequence === previous.sequence && (value.capturedAt !== previous.capturedAt ||
-                    value.source !== previous.source || value.colors.length !== previous.colors.length ||
-                    value.colors.some((color, index) => color !== previous.colors[index]))))) return;
+            if (previous && (value.sequence < previous.sequence || value.capturedAt < previous.sample.capturedAt ||
+                (value.sequence === previous.sequence && (value.capturedAt !== previous.sample.capturedAt ||
+                    value.source !== previous.sample.source || value.colors.length !== previous.sample.colors.length ||
+                    value.colors.some((color, index) => color !== previous.sample.colors[index]))))) return;
             if (!previous || value.sequence > previous.sequence) {
-                this.paletteEvidence = { epoch, sequence: value.sequence, capturedAt: value.capturedAt, source: value.source, colors: [...value.colors] };
+                const sample = { capturedAt: value.capturedAt, source: value.source, colors: [...value.colors] };
+                this.paletteEvidence = { epoch, sequence: value.sequence, sample };
+                this.d.palette?.observe(sample);
             }
         }
         // Native color evidence does not replenish energy or change the spending journal.
@@ -329,10 +332,12 @@ export class ControlledBatch {
     }
     accountPalette() {
         const { connected, mode } = this.d.provider.status();
-        const sample = connected && mode === 'read-only' && this.paletteEvidence?.epoch === this.d.provider.channelEpoch
-            ? this.paletteEvidence : null;
+        const sample = this.paletteEvidence?.sample ?? this.d.palette?.restored;
+        const age = sample ? Date.now() - sample.capturedAt : Infinity;
+        const fresh = connected && mode === 'read-only' && this.paletteEvidence?.epoch === this.d.provider.channelEpoch &&
+            age >= 0 && age <= 30000;
         return {
-            state: !sample ? 'unknown' as const : Date.now() - sample.capturedAt > 30000 ? 'stale' as const : 'fresh' as const,
+            state: fresh ? 'fresh' as const : sample ? 'stale' as const : 'unknown' as const,
             source: sample?.source ?? null,
             capturedAt: sample?.capturedAt ?? null,
             colors: sample?.colors.slice() ?? [],

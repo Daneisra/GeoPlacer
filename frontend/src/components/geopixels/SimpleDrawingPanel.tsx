@@ -5,7 +5,7 @@ import type { DrawingPreferencesView, ThresholdFormat } from '@geoplacer/engine-
 import type { WorkspacePage } from '../../navigation';
 import { engineHttp, STRATEGY_LABELS, type TemplateInfo } from '../../lib/engine';
 import { MAX_GHOST_COLORS, PERSONAL_GEOPIXELS_PALETTE, parsePaletteText } from '../../lib/ghost-palettes';
-import { type AccountPalette } from '../../lib/account-palette';
+import { accountColors, type AccountPalette } from '../../lib/account-palette';
 import { AccountPaletteStatus } from './AccountPaletteStatus';
 import { DrawingProfiles } from './DrawingProfiles';
 import { useDrawingPreferences } from './useDrawingPreferences';
@@ -128,7 +128,10 @@ function DrawingWorkflow({ view, approvalKey, refresh, readerReady = true, page,
     const groups = { mode, minimum, allowFinal };
     const importPalette = nextOptions.palette;
     const accountPalette = view?.accountPalette;
-    const accountPaletteReady = !importPalette.manualOnly && accountPalette?.state === 'fresh' && accountPalette.colors.length > 0;
+    const synchronizedColors = accountColors(accountPalette);
+    const canPrepareWithAccount = !importPalette.manualOnly && synchronizedColors.length > 0;
+    const manualPaletteText = paletteSettings.manual ?? defaultManualPalette;
+    const localPaletteText = !paletteSettings.manualOnly && synchronizedColors.length ? synchronizedColors.join('\n') : manualPaletteText;
     const energy: EnergyPolicy = energyMode === 'bursts' ? { mode: energyMode, start: thresholds.start, restart: thresholds.restart, reserve: thresholds.reserve } : { mode: energyMode };
     const [importNotice, setImportNotice] = useState<{ kind: 'loading' | 'success' | 'error'; text: string } | null>(
         null
@@ -166,7 +169,7 @@ function DrawingWorkflow({ view, approvalKey, refresh, readerReady = true, page,
         if (!file || busy) return;
         const colors = parsePaletteText(importPalette.manual ?? defaultManualPalette);
         const validManual = !colors.invalid.length && colors.colors.length > 0 && colors.colors.length <= MAX_GHOST_COLORS;
-        if (!accountPaletteReady && !validManual) {
+        if (!canPrepareWithAccount && !validManual) {
             setImportNotice({ kind: 'error', text: 'Palette invalide : codes #RRGGBB requis.' });
             return;
         }
@@ -637,14 +640,21 @@ function DrawingWorkflow({ view, approvalKey, refresh, readerReady = true, page,
                         <label className="drawing-option-check">
                             <input type="checkbox" checked={paletteSettings.manualOnly} disabled={optionsLocked}
                                 onChange={event => update({ palette: { ...paletteSettings, manualOnly: event.target.checked } })} />
-                            Toujours utiliser la palette locale pour préparer les images
+                            Utiliser la palette manuelle dans cette configuration
                         </label>
-                        <label className="drawing-option-field">
-                            <span>Palette locale (#RRGGBB)</span>
-                            <textarea aria-label="Palette du dessin" value={paletteSettings.manual ?? defaultManualPalette} maxLength={4096} disabled={optionsLocked}
-                                onChange={event => update({ palette: { ...paletteSettings, manual: event.target.value } })} />
-                        </label>
-                        <p className="drawing-option-note">La palette locale sert de secours. Pour choisir des couleurs à débloquer, utilisez-la pour préparer le modèle. La synchronisation s’applique aux nouveaux imports.</p>
+                        <div className="drawing-option-field">
+                            <label htmlFor="drawing-local-palette">Palette locale (#RRGGBB)</label>
+                            <textarea id="drawing-local-palette" value={localPaletteText} readOnly />
+                        </div>
+                        <details className="drawing-option-advanced">
+                            <summary>Palette manuelle conservée</summary>
+                            <div className="drawing-option-field">
+                                <label htmlFor="drawing-manual-palette">Codes de la palette manuelle</label>
+                                <textarea id="drawing-manual-palette" value={manualPaletteText} maxLength={4096} disabled={optionsLocked}
+                                    onChange={event => update({ palette: { ...paletteSettings, manual: event.target.value } })} />
+                            </div>
+                        </details>
+                        <p className="drawing-option-note">La synchronisation s’applique aux nouveaux imports configurés pour utiliser la palette du compte. Un nouveau couplage permet de vérifier la disponibilité des couleurs.</p>
                         </div>
                     </details>
                 </div>

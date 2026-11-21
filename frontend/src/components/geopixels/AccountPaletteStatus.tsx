@@ -1,4 +1,4 @@
-import { colorHex, PUBLIC_BASE_COLORS, type AccountPalette } from '../../lib/account-palette';
+import { accountColors, PUBLIC_BASE_COLORS, type AccountPalette } from '../../lib/account-palette';
 import { COMMUNITY_GEOPIXELS_PALETTE } from '../../lib/ghost-palettes';
 
 function Swatches({ label, colors }: { label: string; colors: readonly string[] }) {
@@ -17,13 +17,14 @@ export function AccountPaletteStatus({ sample, manual = false, details = false }
   details?: boolean;
 }) {
   const fresh = sample?.state === 'fresh';
-  const colors = fresh ? sample.colors.map(colorHex) : [];
+  const colors = accountColors(sample);
   const stamp = sample?.capturedAt == null ? null : new Date(sample.capturedAt);
-  const source = manual || !colors.length ? 'Palette locale' : 'Compte GeoPixels';
+  const source = manual || !colors.length ? 'Palette manuelle' : fresh ? 'Compte GeoPixels' : 'Compte GeoPixels, dernière palette connue';
   return <div className="space-y-2 text-sm">
     <p><strong>Source de préparation</strong> · {source}.</p>
     <p className="text-muted-foreground">{fresh ? <>{colors.length} couleurs disponibles sur le compte.</>
-      : sample?.state === 'stale' ? 'Palette du compte périmée. Disponibilité actuelle inconnue.' : 'Palette du compte en attente d’une observation native.'}
+      : sample?.state === 'stale' ? <>{colors.length} couleurs dans la dernière palette connue. Disponibilité actuelle non vérifiée.</>
+      : 'Palette du compte en attente d’une observation native.'}
         {stamp && <> Dernière synchronisation à <time dateTime={stamp.toISOString()}>{stamp.toLocaleString('fr-FR')}</time>.</>}
     </p>
     {details && fresh && <details className="drawing-option-advanced">

@@ -15,5 +15,5 @@ export const PUBLIC_BASE_COLORS = new Set([
 ]);
 
 export function accountColors(sample?: AccountPalette | null): string[] {
-  return sample?.state === 'fresh' ? sample.colors.map(colorHex) : [];
+  return sample?.colors.map(colorHex) ?? [];
 }

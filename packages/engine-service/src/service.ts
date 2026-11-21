@@ -84,6 +84,7 @@ import { SimulatedCanvasProvider, type WorldCommit } from '@geoplacer/simulator'
 import { monotonicClock, type MonotonicClock } from './clock.js';
 import { GHOST_PROJECT, exportGhostPng, ghostInfo, hexOf, importGhost, type GhostImportInput, type GhostInfo } from './ghost.js';
 import { EMPTY_DRAWING_PREFERENCES, INITIAL_DRAWING, nextDrawing, validDrawingOptions, type DrawingOptions, type DrawingPreferencesEdit, type DrawingPreferencesView, type DrawingPreset } from './geopixels/drawing-preferences.js';
+import type { AccountPaletteSample } from './geopixels/writer-resources.js';
 import { EngineEventHub, type EngineEventEnvelope } from './events.js';
 import {
   DEMO_PALETTE,
@@ -245,7 +246,7 @@ export interface EngineStatus {
   };
   readonly journal: { readonly openAttempts: number; readonly toReconcileAtStart: number; readonly damaged: boolean; readonly compacting: boolean };
   readonly instance: { readonly lock: string; readonly guard: string; readonly guardDetail: string | null };
-  readonly settings: Omit<EngineSettings, 'drawingPreferences'>;
+  readonly settings: Omit<EngineSettings, 'drawingPreferences' | 'lastAccountPalette'>;
   readonly lastActivityAt: number | null;
 }
 
@@ -316,6 +317,8 @@ export class EngineService {
 
   private settingsValue: EngineSettings;
   private settingsWrite: Promise<void> = Promise.resolve();
+  private pendingAccountPalette: AccountPaletteSample | null = null;
+  private accountPaletteSave: Promise<void> | null = null;
   private rules: ResourceRules;
   private world: { canvas: SimulatedCanvasProvider; store: FileWorldStore } | null = null;
   private worldError: { code: string; message: string } | null = null;
@@ -403,7 +406,14 @@ export class EngineService {
         this.singlePixelWriter = new SinglePixelWriter(lock, this.connector,
             () => !this.closed && this.source === 'geopixels' && !this.active && !this.stopping && !this.connectorControl && !this.backingUp && this.attempts?.open().length === 0 ? this.selectedTemplate : null,
             value => this.durableConnectorJson('connector-writer-intent.json', value), Date.now,
-            value => this.batchMetadata.save(value),value=>this.durableConnectorJson('connector-upgrades.json',value));
+            value => this.batchMetadata.save(value), value => this.durableConnectorJson('connector-upgrades.json',value), {
+                ...(settings.lastAccountPalette ? { restored: settings.lastAccountPalette } : {}),
+                observe: sample => {
+                    if (this.closed) return;
+                    this.pendingAccountPalette = sample;
+                    this.flushAccountPalette();
+                },
+            });
         this.connector.monitoring.subscribe((kind) => {
             this.hub.connector();
             if (kind === 'capture') {
@@ -1395,7 +1405,7 @@ export class EngineService {
     }
     check(!this.singlePixelWriter.view().locked, 'Le dessin est encore verrouillé ; vérifier son état avant l’import.');
     const account = this.singlePixelWriter.batch.accountPalette();
-    const palette = input.useAccountPalette && account.state === 'fresh' && account.colors.length
+    const palette = input.useAccountPalette && account.colors.length
       ? account.colors.map(hexOf) : input.palette;
     check(palette.length > 0, 'Palette du compte indisponible : attendre la synchronisation ou renseigner une palette manuelle valide.');
     const preset = nextDrawing(this.settingsValue.drawingPreferences ?? EMPTY_DRAWING_PREFERENCES);
@@ -1479,6 +1489,20 @@ export class EngineService {
   }
 
   // ───────────────────────── Settings ─────────────────────────
+
+  private flushAccountPalette(): void {
+    if (!this.pendingAccountPalette || this.accountPaletteSave || this.backingUp) return;
+    this.accountPaletteSave = this.saveSettingsValue(settings => {
+      const lastAccountPalette = this.pendingAccountPalette!;
+      this.pendingAccountPalette = null;
+      return { ...settings, lastAccountPalette };
+    }).catch(() => {
+      this.hub.notice('warning', 'Impossible de sauvegarder la palette du compte.');
+    }).then(() => {
+      this.accountPaletteSave = null;
+      this.flushAccountPalette();
+    });
+  }
 
   private saveSettingsValue(update: (settings: EngineSettings) => EngineSettings): Promise<void> {
     const pending = this.settingsWrite.then(async () => {
@@ -1864,6 +1888,7 @@ export class EngineService {
     try {
       if (this.singlePixelWriter.view().locked) await this.singlePixelWriter.stop('Sauvegarde : autorisation retirée, envoi commencé à réconcilier.');
       await this.checkpointing;
+      await this.settingsWrite;
       let result: { dir: string; manifest: BackupManifest };
       try {
         result = await createBackup(this.root, this.backupDir, { lock: this.lock });
@@ -1874,6 +1899,7 @@ export class EngineService {
       return { name: path.basename(result.dir), files: result.manifest.summary.files, bytes: result.manifest.summary.bytes, createdAt: result.manifest.createdAt };
     } finally {
       this.backingUp = false;
+      if (!this.closed) this.flushAccountPalette();
     }
   }
 
@@ -1907,6 +1933,7 @@ export class EngineService {
     await this.connectorJournal.close();
     await this.connectorHistory.close();
     await this.observationSave;
+    while (this.accountPaletteSave) await this.accountPaletteSave;
     await this.settingsWrite;
     await this.lock.release();
   }

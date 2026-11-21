@@ -10,6 +10,22 @@ export type WriterResources = {
     capacity?: number;
     shop?: import('./upgrade-policy.js').ShopObservation;
 };
+
+export type AccountPaletteSample = Pick<WriterResources, 'source' | 'capturedAt' | 'colors'>;
+
+export function validAccountPaletteSample(value: unknown): value is AccountPaletteSample {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const sample = value as AccountPaletteSample;
+    return Object.keys(sample).length === 3 && validPaletteFields(sample);
+}
+
+function validPaletteFields(sample: AccountPaletteSample) {
+    return (sample.source === 'native-worker-response' || sample.source === 'native-user-response') &&
+        Number.isSafeInteger(sample.capturedAt) && sample.capturedAt > 0 && sample.capturedAt <= 8.64e15 &&
+        Array.isArray(sample.colors) && sample.colors.length <= 256 &&
+        new Set(sample.colors).size === sample.colors.length &&
+        sample.colors.every(c => Number.isSafeInteger(c) && c >= 0 && c <= 0xffffff);
+}
 export function validWriterResources(value: unknown): value is WriterResources {
     const r = value as WriterResources;
     return (
@@ -33,7 +49,7 @@ export function validWriterResources(value: unknown): value is WriterResources {
                 r.shop.capacity <= 1e9 &&
                 r.shop.intervalMs >= 15000 &&
                 r.shop.intervalMs <= 86400000)) &&
-        ['native-worker-response', 'native-user-response'].includes(r.source) &&
+        validPaletteFields(r) &&
         [r.sequence, r.requestStartedAt, r.capturedAt, r.energy, r.available].every(Number.isSafeInteger) &&
         r.sequence > 0 &&
         r.requestStartedAt > 0 &&
@@ -41,10 +57,6 @@ export function validWriterResources(value: unknown): value is WriterResources {
         r.energy >= 0 &&
         r.energy <= 1e9 &&
         r.available >= 0 &&
-        r.available <= r.energy &&
-        Array.isArray(r.colors) &&
-        r.colors.length <= 256 &&
-        new Set(r.colors).size === r.colors.length &&
-        r.colors.every((c) => Number.isSafeInteger(c) && c >= 0 && c <= 0xffffff)
+        r.available <= r.energy
     );
 }

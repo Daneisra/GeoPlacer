@@ -162,9 +162,10 @@ try {
     assert.equal(await options.getByLabel('Budget maximal de monnaie',{exact:true}).count(), 0);
     await options.getByText('Conditions d’achat avancées',{exact:true}).click();
     await options.getByLabel('Capacité ciblée',{exact:true}).fill('0');
-    const palette = options.getByLabel('Palette du dessin',{exact:true});
+    const palette = options.getByLabel('Codes de la palette manuelle',{exact:true});
     assert.equal(await palette.isVisible(), false);
     await options.getByText('Palette',{exact:true}).click();
+    await options.getByText('Palette manuelle conservée',{exact:true}).click();
     const originalPalette = await palette.inputValue();
     await palette.fill('#000000\n#ffffff');
     assert.equal(await palette.inputValue(), '#000000\n#ffffff');
@@ -186,7 +187,7 @@ try {
     assert.equal(await simple.locator('[data-count="correct"]').last().textContent(),'24');
     await simple.getByText(/Couverture exploitable actuellement : 0 cibles/).waitFor();
     await page.screenshot({path:path.join(out,'capture-expiree.png'),fullPage:true});
-    await page.unroute(statusUrl, expiredCapture);
+    await page.unrouteAll({behavior:'wait'});
     record('OK historical capture stays visible when operational coverage expires');
 
     await nav.getByRole('link',{name:'Ressources et améliorations',exact:true}).click();

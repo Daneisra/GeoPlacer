@@ -639,18 +639,24 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     await palettePanel.getByText('Couleurs du compte',{exact:true}).click();
     const unavailable = palettePanel.getByRole('list',{name:'Couleurs du préréglage communautaire indisponibles sur le compte'});
     await unavailable.locator('[title="#FF9F1C"]').waitFor();
-    const manualPalette = palettePanel.getByLabel('Palette du dessin',{exact:true});
+    const displayedPalette = palettePanel.getByLabel('Palette locale (#RRGGBB)',{exact:true});
+    await palettePanel.getByText('Palette manuelle conservée',{exact:true}).click();
+    const manualPalette = palettePanel.getByLabel('Codes de la palette manuelle',{exact:true});
     await manualPalette.fill('#ffffff');
-    await reader.evaluate(() => {
-      fixtureShopBalance.colors = '0,16777215,16752412';
+    const nativeColors = [0, 0xffffff, 0xff9f1c, ...Array.from({length:31}, (_, index) => index + 1)];
+    const expectedPalette = nativeColors.map(value => '#' + value.toString(16).padStart(6,'0')).join('\n');
+    await reader.evaluate(colors => {
+      Colors.push('#00000000'); // The page adds transparency separately from account RGB values.
+      fixtureShopBalance.colors = [...colors, 0xff9f1c].join(',');
       syncWorker.postMessage({type:'sync-delta'});
       for (const listener of fixtureEnergyListeners) listener({data:{ok:true,userData:{...fixtureShopBalance}}});
-    });
-    await palettePanel.getByText('3 couleurs disponibles sur le compte.',{exact:false}).waitFor();
+    }, nativeColors);
+    await palettePanel.getByText('34 couleurs disponibles sur le compte.',{exact:false}).waitFor();
     const extra = palettePanel.getByRole('list',{name:'Couleurs supplémentaires disponibles'});
     await extra.locator('[title="#FF9F1C"]').waitFor();
     assert.equal(await unavailable.locator('[title="#FF9F1C"]').count(),0);
     assert.equal(await manualPalette.inputValue(),'#ffffff');
+    assert.equal(await displayedPalette.inputValue(),expectedPalette);
     const orange = new PNG({width: 1, height: 1});
     Buffer.from([255, 159, 28, 255]).copy(orange.data);
     await simple.getByLabel('Image à dessiner',{exact:true}).setInputFiles({name:'palette-orange.png',mimeType:'image/png',buffer:PNG.sync.write(orange)});
@@ -664,15 +670,21 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     try {
       await ghostPage.goto(`${base}/geopixels`);
       await ghostPage.locator('#ghostPaletteMode').selectOption('account');
-      await ghostPage.getByText('3 couleurs disponibles sur le compte.',{exact:false}).waitFor();
+      await ghostPage.getByText('34 couleurs disponibles sur le compte.',{exact:false}).waitFor();
       assert.match(await ghostPage.locator('#ghostPalette').inputValue(), /#ff9f1c/);
     } finally {
       await ghostPage.close();
     }
     await page.getByRole('button',{name:'Révoquer le canal',exact:true}).click();
-    await palettePanel.getByText('Palette du compte en attente d’une observation native.',{exact:true}).waitFor();
+    await palettePanel.getByText(/34 couleurs dans la dernière palette connue\. Disponibilité actuelle non vérifiée/).waitFor();
+    assert.equal(await displayedPalette.inputValue(),expectedPalette);
     assert.equal(await manualPalette.inputValue(),'#ffffff');
-    record('OK account colors: native update adds #FF9F1C to an exact PNG import, revocation clears evidence and the manual palette is preserved');
+    const manualMode = palettePanel.getByLabel('Utiliser la palette manuelle dans cette configuration',{exact:true});
+    await manualMode.check();
+    assert.equal(await displayedPalette.inputValue(),'#ffffff');
+    await manualMode.uncheck();
+    assert.equal(await displayedPalette.inputValue(),expectedPalette);
+    record('OK native palette is deduplicated, stays visible unverified after revocation, and the separate manual list can be restored');
 
     assert.deepEqual(external, []);
     assert.deepEqual(errors, []);

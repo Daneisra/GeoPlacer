@@ -12,16 +12,17 @@ afterEach(async () => {
     await cleanup();
 });
 describe('Synchronized GeoPixels account palette', () => {
-    it('updates new imports from native evidence and keeps saved and manually prepared colors', async () => {
-        const { service } = await openFast(await tempDir());
+    it('keeps the last native palette across disconnect and restart while preserving prepared and manual colors', async () => {
+        const dir = await tempDir();
+        const { service } = await openFast(dir);
         opened.push(service);
         const batch = service.singlePixelWriter.batch;
         const orange = 0xff9f1c;
         const white = 0xffffff;
         const png = await pngjsCodec.encode({ width: 1, height: 1, rgba: Uint8Array.of(255, 159, 28, 255) });
-        const importColor = async (useAccountPalette = true) => {
-            const info = await service.importDrawing({ name: 'Orange fixture', png, palette: ['#ffffff'], useAccountPalette });
-            const drawn = await service.exportDrawing(info.templateId);
+        const importColor = async (useAccountPalette = true, engine = service) => {
+            const info = await engine.importDrawing({ name: 'Orange fixture', png, palette: ['#ffffff'], useAccountPalette });
+            const drawn = await engine.exportDrawing(info.templateId);
             return { id: info.templateId, rgb: [...(await pngjsCodec.decode(drawn.png)).rgba.slice(0, 3)] };
         };
         const at = Date.now();
@@ -47,13 +48,28 @@ describe('Synchronized GeoPixels account palette', () => {
         try {
             service.connector.heartbeat();
             expect(batch.accountPalette()).toMatchObject({ state: 'stale', capturedAt: updated.capturedAt });
-            expect((await importColor()).rgb).toEqual([255, 255, 255]);
+            expect((await importColor()).rgb).toEqual([255, 159, 28]);
         } finally {
             clock.mockRestore();
         }
         service.connector.disconnect();
-        expect(batch.accountPalette()).toEqual({ state: 'unknown', source: null, capturedAt: null, colors: [] });
-        expect((await importColor()).rgb).toEqual([255, 255, 255]);
+        const known = { state: 'stale', source: 'native-user-response', capturedAt: updated.capturedAt, colors: [white, orange] };
+        expect(batch.accountPalette()).toEqual(known);
+        expect((await importColor()).rgb).toEqual([255, 159, 28]);
+
+        await service.close();
+        const { service: reopened } = await openFast(dir);
+        opened.push(reopened);
+        expect(reopened.singlePixelWriter.batch.accountPalette()).toEqual(known);
+        expect(reopened.singlePixelWriter.batch.upgradeResources()).toBeNull();
+        expect(Object.hasOwn(reopened.status().settings, 'lastAccountPalette')).toBe(false);
+        expect((await importColor(true, reopened)).rgb).toEqual([255, 159, 28]);
+        expect((await importColor(false, reopened)).rgb).toEqual([255, 255, 255]);
+        reopened.connector.connect('read-only', () => undefined);
+        expect(reopened.singlePixelWriter.batch.accountPalette()).toEqual(known);
+        const nextAt = Date.now();
+        reopened.singlePixelWriter.batch.observeResources({ ...frame, capturedAt: nextAt, requestStartedAt: nextAt, colors: [0] });
+        expect(reopened.singlePixelWriter.batch.accountPalette()).toMatchObject({ state: 'fresh', colors: [0], capturedAt: nextAt });
     });
 });
 async function wait(fn: () => boolean, progress: () => number = () => 0) {
