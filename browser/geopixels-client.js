@@ -144,6 +144,8 @@
           try {
             if (!observing && !(await GeoPlacerPageReader.unchanged()))
               throw new Error('Modèle, position, palette, couche ou session modifié : nouveau couplage nécessaire.');
+            if (GeoPlacerPageReader.sameAccount?.() === false)
+              throw new Error('Session GeoPixels modifiée : nouveau couplage nécessaire.');
             const answer = await next.poll(
               monitoring ? { revision: monitoring.revision, state: monitoring.state } : undefined,
               abortedCapture,
@@ -225,7 +227,7 @@
           } catch (error) {
             if (current === generation) {
               if(error.transient && next.connected()){status.textContent='Transport temporairement interrompu : aucun nouvel envoi, tentative de reconnexion au même canal.';await next.waitForRetry();}
-              else await close(error.message, /Modèle, position, palette/.test(error.message) ? 'context' : 'transport');
+              else await close(error.message, /Modèle, position, palette|Session GeoPixels modifiée/.test(error.message) ? 'context' : 'transport');
             }
           } finally {
             ticking = false;

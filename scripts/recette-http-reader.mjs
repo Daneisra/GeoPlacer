@@ -630,7 +630,49 @@ document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective=
     await page.screenshot({path:path.join(out,'ressources.png'),fullPage:true});
     await nav.getByRole('link',{name:'Tableau de bord',exact:true}).click();
     record('OK unlimited upgrades with zero reserve: a stub recharge is verified while bursts wait, crossed threshold then draws 20 targets; no external requests');
+
+    // The account palette changes only after a native fixture observation, independently of the user's fallback.
+    const palettePanel = simple.locator('.drawing-options-palette');
+    if (!(await palettePanel.isVisible())) await simple.getByText('Options du dessin',{exact:true}).click();
+    await palettePanel.getByText('Palette',{exact:true}).click();
+    await palettePanel.getByText('2 couleurs disponibles sur le compte.',{exact:false}).waitFor();
+    await palettePanel.getByText('Couleurs du compte',{exact:true}).click();
+    const unavailable = palettePanel.getByRole('list',{name:'Couleurs du préréglage communautaire indisponibles sur le compte'});
+    await unavailable.locator('[title="#FF9F1C"]').waitFor();
+    const manualPalette = palettePanel.getByLabel('Palette du dessin',{exact:true});
+    await manualPalette.fill('#ffffff');
+    await reader.evaluate(() => {
+      fixtureShopBalance.colors = '0,16777215,16752412';
+      syncWorker.postMessage({type:'sync-delta'});
+      for (const listener of fixtureEnergyListeners) listener({data:{ok:true,userData:{...fixtureShopBalance}}});
+    });
+    await palettePanel.getByText('3 couleurs disponibles sur le compte.',{exact:false}).waitFor();
+    const extra = palettePanel.getByRole('list',{name:'Couleurs supplémentaires disponibles'});
+    await extra.locator('[title="#FF9F1C"]').waitFor();
+    assert.equal(await unavailable.locator('[title="#FF9F1C"]').count(),0);
+    assert.equal(await manualPalette.inputValue(),'#ffffff');
+    const orange = new PNG({width: 1, height: 1});
+    Buffer.from([255, 159, 28, 255]).copy(orange.data);
+    await simple.getByLabel('Image à dessiner',{exact:true}).setInputFiles({name:'palette-orange.png',mimeType:'image/png',buffer:PNG.sync.write(orange)});
+    await simple.getByRole('button',{name:'Importer l’image',exact:true}).click();
+    await simple.locator('#drawingImportNotice').filter({hasText:/Image importée : palette-orange/}).waitFor();
+    const { selection } = await api('connector/status',undefined,'GET');
+    const prepared = await page.request.get(`${base}/api/v1/connector/drawing/${selection.templateId}/image`);
+    assert.equal(prepared.ok(),true);
+    assert.deepEqual([...PNG.sync.read(await prepared.body()).data],[255,159,28,255]);
+    const ghostPage = await page.context().newPage();
+    try {
+      await ghostPage.goto(`${base}/geopixels`);
+      await ghostPage.locator('#ghostPaletteMode').selectOption('account');
+      await ghostPage.getByText('3 couleurs disponibles sur le compte.',{exact:false}).waitFor();
+      assert.match(await ghostPage.locator('#ghostPalette').inputValue(), /#ff9f1c/);
+    } finally {
+      await ghostPage.close();
+    }
     await page.getByRole('button',{name:'Révoquer le canal',exact:true}).click();
+    await palettePanel.getByText('Palette du compte en attente d’une observation native.',{exact:true}).waitFor();
+    assert.equal(await manualPalette.inputValue(),'#ffffff');
+    record('OK account colors: native update adds #FF9F1C to an exact PNG import, revocation clears evidence and the manual palette is preserved');
 
     assert.deepEqual(external, []);
     assert.deepEqual(errors, []);

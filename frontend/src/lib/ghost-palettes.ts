@@ -17,13 +17,13 @@ export const COMMUNITY_GEOPIXELS_PALETTE = Object.freeze([
   '#f4f59f', '#ffffff',
 ]);
 
-export type PaletteMode = 'personal28' | 'community30' | 'custom' | 'image';
+export type PaletteMode = 'personal28' | 'community30' | 'custom' | 'image' | 'account';
 export interface PalettePreferences {
   mode: PaletteMode;
   customText: string;
 }
 export const PALETTE_STORAGE_KEY = 'geoplacer.geopixels.palette.v1';
-const isMode = (mode: unknown): mode is PaletteMode => ['personal28', 'community30', 'custom', 'image'].includes(String(mode));
+const isMode = (mode: unknown): mode is PaletteMode => ['personal28', 'community30', 'custom', 'image', 'account'].includes(String(mode));
 
 /** Six RGB digits only; alpha is an image property, not a palette color. Order is stable. */
 export function parsePaletteText(text: string): { colors: string[]; invalid: string[]; duplicates: string[] } {
@@ -49,6 +49,7 @@ export function paletteTextFor(preferences: PalettePreferences, image: readonly 
     case 'community30': return COMMUNITY_GEOPIXELS_PALETTE.join('\n');
     case 'custom': return preferences.customText;
     case 'image': return image?.join('\n') ?? '';
+    case 'account': return preferences.customText.trim() || PERSONAL_GEOPIXELS_PALETTE.join('\n');
   }
 }
 

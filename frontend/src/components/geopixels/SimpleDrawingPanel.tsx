@@ -3,7 +3,9 @@ import { ImageIcon, Upload } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import type { WorkspacePage } from '../../navigation';
 import { engineHttp, STRATEGY_LABELS, type TemplateInfo } from '../../lib/engine';
-import { PERSONAL_GEOPIXELS_PALETTE, parsePaletteText } from '../../lib/ghost-palettes';
+import { MAX_GHOST_COLORS, PERSONAL_GEOPIXELS_PALETTE, parsePaletteText } from '../../lib/ghost-palettes';
+import { type AccountPalette } from '../../lib/account-palette';
+import { AccountPaletteStatus } from './AccountPaletteStatus';
 import type { BatchView, EnergyPolicy, GroupPolicy, Threshold } from './BatchPanel';
 import { upgradeKinds as availableUpgrades, upgrades, type UpgradeKind } from './upgrade-catalog';
 import { translateReason } from '../../lib/i18n';
@@ -14,6 +16,7 @@ type DrawingView = {
     project: { id: string; generation?: string; width: number; height: number; gridX: number; gridY: number } | null;
     batch: BatchView;
     monitoring: { inFlight: unknown };
+    accountPalette?: AccountPalette;
     tileEvidence?:{total:number;nativeUpdated:number;nativeChecked:number;missing:number;sourceDateKnown:boolean};
     upgrades?:{error?:string|null;uncertain:number;history:{id:string;kind:string;cost:number;state:string;at:number}[]};
     progress: { correct: number; incorrect: number; unknown: number; total: number } | null;
@@ -53,6 +56,17 @@ const thresholdLabels = { start: 'Démarrage', restart: 'Reprise', reserve: 'Ré
 type ThresholdKind = keyof typeof thresholdLabels;
 type ThresholdUnit = keyof Threshold | 'both';
 const thresholdKinds = ['start', 'restart', 'reserve'] as const;
+const drawingPaletteKey = 'geoplacer.drawing.palette.v1';
+const drawingPaletteDefaults = { manualOnly: false, manual: PERSONAL_GEOPIXELS_PALETTE.join('\n') };
+
+function readDrawingPalette() {
+    try {
+        const saved = JSON.parse(window.localStorage.getItem(drawingPaletteKey) ?? 'null');
+        if (typeof saved?.manual === 'string' && typeof saved.manualOnly === 'boolean') return { manual: saved.manual, manualOnly: saved.manualOnly };
+    } catch { /* Local storage may be unavailable. */ }
+    return drawingPaletteDefaults;
+}
+
 const describeThreshold = ({ units, percent }: Threshold, fallback: string) => units && percent
     ? `${units} énergies ou ${percent} % (seuil le plus élevé)` : units ? `${units} énergies` : percent ? `${percent} %` : fallback;
 
@@ -117,8 +131,10 @@ export function SimpleDrawingPanel({
         [busy, setBusy] = useState(false),
         [error, setError] = useState('');
     const [groupSize, setGroupSize] = useState(0),
-        [budget, setBudget] = useState(''),
-        [palette, setPalette] = useState(PERSONAL_GEOPIXELS_PALETTE.join('\n'));
+        [budget, setBudget] = useState('');
+    const [paletteSettings, setPaletteSettings] = useState(readDrawingPalette);
+    const accountPalette = view?.accountPalette;
+    const accountPaletteReady = !paletteSettings.manualOnly && accountPalette?.state === 'fresh' && accountPalette.colors.length > 0;
     const [energyMode, setEnergyMode] = useState<EnergyPolicy['mode']>('bursts');
     const [thresholds, setThresholds] = useState({ start: { units: 0, percent: 0 }, restart: { units: 0, percent: 0 }, reserve: { units: 0, percent: 0 } });
     const [groups, setGroups] = useState<GroupPolicy>({ mode: 'adaptive', minimum: 0, allowFinal: false });
@@ -135,6 +151,10 @@ export function SimpleDrawingPanel({
         const destination = index + direction;
         [next[index], next[destination]] = [next[destination], next[index]];
         setUpgradeKinds(next);
+    }
+    function updatePalette(next: typeof drawingPaletteDefaults) {
+        setPaletteSettings(next);
+        try { window.localStorage.setItem(drawingPaletteKey, JSON.stringify(next)); } catch { /* Keep the settings in memory. */ }
     }
     const importing = importNotice?.kind === 'loading';
     const attempted = useRef('');
@@ -156,8 +176,9 @@ export function SimpleDrawingPanel({
     }
     async function importImage() {
         if (!file || busy) return;
-        const colors = parsePaletteText(palette);
-        if (colors.invalid.length || !colors.colors.length) {
+        const colors = parsePaletteText(paletteSettings.manual);
+        const validManual = !colors.invalid.length && colors.colors.length > 0 && colors.colors.length <= MAX_GHOST_COLORS;
+        if (!accountPaletteReady && !validManual) {
             setImportNotice({ kind: 'error', text: 'Palette invalide : codes #RRGGBB requis.' });
             return;
         }
@@ -174,7 +195,8 @@ export function SimpleDrawingPanel({
             const { data: imported } = await engineHttp.post<TemplateInfo>('/connector/drawing/import', {
                 name: file.name.replace(/\.png$/i, ''),
                 pngBase64: data,
-                palette: colors.colors,
+                palette: validManual ? colors.colors : [],
+                ...(!paletteSettings.manualOnly ? { useAccountPalette: true } : {}),
             }); // Local preparation does not require pairing or a private approval key.
             attempted.current = '';
             setImportNotice({
@@ -251,6 +273,7 @@ export function SimpleDrawingPanel({
             <section className="studio-card space-y-3" aria-busy={importing} hidden={!(dashboard && showWorkflow) && page !== 'drawings'}>
                 <h2 className="studio-step">{dashboard && <span>1</span>} Importer votre image</h2>
                 <p className="text-muted-foreground">Choisissez un PNG, puis téléchargez le fantôme préparé pour GeoPixels.</p>
+                <AccountPaletteStatus sample={accountPalette} manual={paletteSettings.manualOnly} />
                 <div className="studio-import">
                 <input
                     aria-label="Image à dessiner"
@@ -609,11 +632,20 @@ export function SimpleDrawingPanel({
                     </fieldset>
                     <details className="drawing-options-palette" hidden={page === 'resources'}>
                         <summary>Palette</summary>
+                        <div className="space-y-3">
+                        <AccountPaletteStatus sample={accountPalette} manual={paletteSettings.manualOnly} details />
+                        <label className="drawing-option-check">
+                            <input type="checkbox" checked={paletteSettings.manualOnly} disabled={active || busy}
+                                onChange={event => updatePalette({ ...paletteSettings, manualOnly: event.target.checked })} />
+                            Toujours utiliser la palette locale pour préparer les images
+                        </label>
                         <label className="drawing-option-field">
                             <span>Palette locale (#RRGGBB)</span>
-                            <textarea aria-label="Palette du dessin" value={palette} disabled={active || busy}
-                                onChange={event => setPalette(event.target.value)} />
+                            <textarea aria-label="Palette du dessin" value={paletteSettings.manual} disabled={active || busy}
+                                onChange={event => updatePalette({ ...paletteSettings, manual: event.target.value })} />
                         </label>
+                        <p className="drawing-option-note">La palette locale sert de secours. Pour choisir des couleurs à débloquer, utilisez-la pour préparer le modèle. La synchronisation s’applique aux nouveaux imports.</p>
+                        </div>
                     </details>
                 </div>
             </details>

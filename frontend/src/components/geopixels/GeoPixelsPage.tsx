@@ -3,7 +3,9 @@ import { Button, Card, CardContent, CardHeader, CardTitle } from '../ui';
 import { engineHttp } from '../../lib/engine';
 import { MAX_GHOST_COLORS, exportUrl, imageColors, parsePaletteText, type GhostInfo } from '../../lib/geopixels';
 import { loadPalettePreferences, paletteTextFor, savePalettePreferences, type PaletteMode } from '../../lib/ghost-palettes';
+import { accountColors, type AccountPalette } from '../../lib/account-palette';
 import { useCommand } from '../simulation/useCommand';
+import { AccountPaletteStatus } from './AccountPaletteStatus';
 
 function toBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -16,6 +18,7 @@ function toBase64(file: File): Promise<string> {
 
 const field = 'w-full rounded-md border bg-background px-2 py-1 text-sm';
 const optionalInt = (text: string): number | undefined => (text.trim() === '' ? undefined : Number(text));
+const readAccountPalette = (signal?: AbortSignal) => engineHttp.get<AccountPalette>('/connector/palette', { signal }).then(r => r.data, () => null);
 /** A light checkerboard behind the preview: the transparent pixels stay visible as such. */
 const checkerboard = {
   backgroundImage: 'linear-gradient(45deg,#ccc 25%,transparent 25%),linear-gradient(-45deg,#ccc 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#ccc 75%),linear-gradient(-45deg,transparent 75%,#ccc 75%)',
@@ -35,6 +38,8 @@ export function GeoPixelsPage() {
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState('');
   const [palettePreferences, setPalettePreferences] = useState(() => loadPalettePreferences({ getItem: (key) => window.localStorage.getItem(key) }));
+  const [accountPalette, setAccountPalette] = useState<AccountPalette | null>(null);
+  const useAccount = palettePreferences.mode === 'account';
   const [copyMessage, setCopyMessage] = useState('');
   const [width, setWidth] = useState('');
   const [height, setHeight] = useState('');
@@ -49,6 +54,19 @@ export function GeoPixelsPage() {
   useEffect(() => {
     savePalettePreferences({ setItem: (key, value) => window.localStorage.setItem(key, value) }, palettePreferences);
   }, [palettePreferences]);
+  useEffect(() => {
+    if (!useAccount) return;
+    const abort = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    async function refreshAccount() {
+      const sample = await readAccountPalette(abort.signal);
+      if (abort.signal.aborted) return;
+      setAccountPalette(sample);
+      timer = setTimeout(refreshAccount, 5000);
+    }
+    void refreshAccount();
+    return () => { abort.abort(); clearTimeout(timer); };
+  }, [useAccount]);
   useEffect(() => {
     if (file === null || !alphaValid) return;
     let cancelled = false;
@@ -74,7 +92,8 @@ export function GeoPixelsPage() {
     void refresh();
   }, [refresh]);
 
-  const paletteText = paletteTextFor(palettePreferences, fileColors);
+  const fallbackPalette = paletteTextFor(palettePreferences, fileColors);
+  const paletteText = (useAccount ? accountColors(accountPalette).join('\n') : '') || fallbackPalette;
   const palette = parsePaletteText(paletteText);
   const current = ghosts.find((g) => g.templateId === selected) ?? null;
   const usedColors = new Set(current?.colors.map((c) => c.hex));
@@ -93,10 +112,15 @@ export function GeoPixelsPage() {
       'Préparation de l’image fantôme',
       async () => {
         if (file === null) throw new Error('no file');
+        const pngBase64 = await toBase64(file);
+        const synchronized = useAccount ? accountColors(await readAccountPalette()) : [];
+        const fallback = parsePaletteText(fallbackPalette);
+        if (useAccount && !synchronized.length && fallback.invalid.length)
+          throw new Error('Palette du compte indisponible. Corrigez les codes de la palette personnalisée de secours.');
         const body = {
           name: name.trim() || file.name.replace(/\.png$/i, ''),
-          pngBase64: await toBase64(file),
-          palette: palette.colors,
+          pngBase64,
+          palette: synchronized.length ? synchronized : fallback.colors,
           ...(optionalInt(width) === undefined ? {} : { width: optionalInt(width) }),
           ...(optionalInt(height) === undefined ? {} : { height: optionalInt(height) }),
           ...(optionalInt(x) === undefined ? {} : { x: optionalInt(x) }),
@@ -129,7 +153,7 @@ export function GeoPixelsPage() {
     <div className="space-y-4" id="geopixelsPage">
       <div className="rounded-md border border-sky-700 bg-sky-950/40 px-4 py-2 text-sm">
         <b>Préparer une image fantôme pour GeoPixels</b> : GeoPlacer convertit votre image avec <b>vos</b> couleurs et produit un PNG standard. Vous l’importez
-        ensuite <b>vous-même</b> dans l’outil « image fantôme » de GeoPixels et vous placez les pixels à la main. GeoPlacer ne se connecte jamais à GeoPixels.
+        ensuite <b>vous-même</b> dans l’outil « image fantôme » de GeoPixels. La préparation se fait dans GeoPlacer.
       </div>
 
       <Card>
@@ -155,15 +179,20 @@ export function GeoPixelsPage() {
               <option value="community30">Palette communautaire GeoPixels (30 couleurs)</option>
               <option value="custom">Palette personnalisée</option>
               <option value="image">Couleurs originales de l’image</option>
+              <option value="account">Palette synchronisée du compte</option>
             </select>
           </label>
-          <p className="text-muted-foreground md:col-span-2" id="ghostPaletteProvenance">
+          {!useAccount && <p className="text-muted-foreground md:col-span-2" id="ghostPaletteProvenance">
             {palettePreferences.mode === 'personal28' && 'Liste de 28 couleurs fournie par l’utilisateur, dans son ordre original.'}
             {palettePreferences.mode === 'community30' && <>Liste communautaire de Manako sur <a className="underline" href="https://lospec.com/palette-list/geopixels-free-colors" target="_blank" rel="noopener noreferrer">Lospec</a>, consultée le 16 novembre 2026.</>}
             {palettePreferences.mode === 'custom' && 'Votre liste reste conservée lorsque vous sélectionnez un autre préréglage.'}
             {palettePreferences.mode === 'image' && 'Couleurs des pixels retenus selon le seuil de transparence, sans réduction préalable (256 au plus).'}
-            {' '}Ces listes ne garantissent pas les couleurs débloquées de votre compte et ne sont pas présentées comme officielles.
-          </p>
+            {' '}Les palettes locales servent à préparer le PNG. La disponibilité des couleurs dépend du compte.
+          </p>}
+          {useAccount && <div className="md:col-span-2 space-y-2">
+            <AccountPaletteStatus sample={accountPalette} details />
+            <p className="text-muted-foreground">En secours, GeoPlacer utilise votre palette personnalisée si elle est renseignée, ou le préréglage de 28 couleurs.</p>
+          </div>}
           <label className="space-y-1 md:col-span-2">
             <span className="text-muted-foreground">
               Codes hexadécimaux à six chiffres, par exemple <code>#ff0000</code>, séparés par des espaces, virgules ou lignes ; {MAX_GHOST_COLORS} couleurs au plus

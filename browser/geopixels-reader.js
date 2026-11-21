@@ -7,6 +7,7 @@ const GeoPlacerPageReader = (() => {
     ).join('');
   let maxModelPixels=16777216;
   let previousIdentity = null,
+    pairedIdentity = null,
     session = crypto.randomUUID(),
     lastCapture = null,
     lastContract = null,
@@ -14,6 +15,7 @@ const GeoPlacerPageReader = (() => {
     decodedCache = GeoPlacerCapture.createReadCache?.(),
     decodedIdentity = null;
   const identity = () => (typeof userID === 'undefined' ? '' : String(userID));
+  const sameAccount = () => pairedIdentity === null || identity() === pairedIdentity;
   const filters = () =>
     typeof ghostActivePaletteColors === 'undefined' ? '' : [...ghostActivePaletteColors].sort().join('|');
   const eventScripts = () =>
@@ -103,6 +105,7 @@ const GeoPlacerPageReader = (() => {
   }
   async function observe(send, connected, region = null, cancelled = () => false, initial = false) {
     const c = await contract();
+    if (!sameAccount()) throw new Error('Session GeoPixels modifiée : nouveau couplage nécessaire.');
     if (c.layer !== 'base')
       throw new Error(
         c.layer === 'event'
@@ -195,14 +198,17 @@ const GeoPlacerPageReader = (() => {
     project: () => lastProject,
     inspect,
     observe,
+    sameAccount,
     reset: () => {
+      pairedIdentity = identity();
       lastCapture = null;
       lastProject = null;
       lastContract = null;
       decodedCache?.clear(); decodedIdentity=null;
     },
     unchanged: async () =>
-      lastCapture === null ||
-      (lastCapture() && (await contract()).id === lastContract && (await contract()).layer === 'base'),
+      sameAccount() &&
+      (lastCapture === null ||
+        (lastCapture() && (await contract()).id === lastContract && (await contract()).layer === 'base')),
   };
 })();

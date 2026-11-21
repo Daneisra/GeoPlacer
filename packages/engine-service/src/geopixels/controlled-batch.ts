@@ -110,6 +110,7 @@ export class ControlledBatch {
     private readonly completedRegions = new Set<string>();
     private generation = 0;
     private wallet: { epoch: number; baseline: number; value: WriterResources } | null = null;
+    private paletteEvidence: { epoch: number; sequence: number; capturedAt: number; source: WriterResources['source']; colors: number[] } | null = null;
     private saveQueue: Promise<void> = Promise.resolve();
     private healthy = true;
     private controlling = false;
@@ -286,7 +287,19 @@ export class ControlledBatch {
         check(validWriterResources(value), 'invalid writer resources');
         const now = Date.now(),
             epoch = this.d.provider.channelEpoch;
-        if (value.capturedAt > now || now - value.capturedAt > 30000 || value.requestStartedAt<=this.resourcesAfter) return;
+        if (value.capturedAt > now || now - value.capturedAt > 30000) return;
+        if (this.d.provider.status().mode === 'read-only') {
+            const previous = this.paletteEvidence?.epoch === epoch ? this.paletteEvidence : null;
+            if (previous && (value.sequence < previous.sequence || value.capturedAt < previous.capturedAt ||
+                (value.sequence === previous.sequence && (value.capturedAt !== previous.capturedAt ||
+                    value.source !== previous.source || value.colors.length !== previous.colors.length ||
+                    value.colors.some((color, index) => color !== previous.colors[index]))))) return;
+            if (!previous || value.sequence > previous.sequence) {
+                this.paletteEvidence = { epoch, sequence: value.sequence, capturedAt: value.capturedAt, source: value.source, colors: [...value.colors] };
+            }
+        }
+        // Native color evidence does not replenish energy or change the spending journal.
+        if (value.requestStartedAt <= this.resourcesAfter) return;
         const previous = this.wallet?.epoch === epoch ? this.wallet.value : null;
         if (
             previous &&
@@ -313,6 +326,17 @@ export class ControlledBatch {
             value: structuredClone(value),
         };
         this.emit();
+    }
+    accountPalette() {
+        const { connected, mode } = this.d.provider.status();
+        const sample = connected && mode === 'read-only' && this.paletteEvidence?.epoch === this.d.provider.channelEpoch
+            ? this.paletteEvidence : null;
+        return {
+            state: !sample ? 'unknown' as const : Date.now() - sample.capturedAt > 30000 ? 'stale' as const : 'fresh' as const,
+            source: sample?.source ?? null,
+            capturedAt: sample?.capturedAt ?? null,
+            colors: sample?.colors.slice() ?? [],
+        };
     }
     private energy() {
         const value = this.wallet?.epoch === this.d.provider.channelEpoch ? this.wallet.value : null;
@@ -616,6 +640,9 @@ export class ControlledBatch {
                 wallet = this.energy();
             const energy = this.budgetRemaining();
             const spendable = this.energyPlan(true).spendable;
+            const palette = this.accountPalette();
+            const owned = new Set(this.d.provider.status().mode === 'read-only'
+                ? (palette.state === 'fresh' ? palette.colors : []) : wallet?.colors);
             return {
                 type: 'resource-observation' as const,
                 agent: this.d.agent,
@@ -623,7 +650,7 @@ export class ControlledBatch {
                 energy: Math.min(energy, this.auxiliary ? 0 : spendable, b.execution==='autonomous' ? Math.min(this.groupLimit(),this.adaptiveWindow) : Number.MAX_SAFE_INTEGER),
                 capacity,
                 currency: 0,
-                unlockedColors: t.palette.colors.map((c) => c.rgb).filter((c) => wallet?.colors.includes(c)),
+                unlockedColors: t.palette.colors.map((c) => c.rgb).filter((c) => owned.has(c) && wallet?.colors.includes(c)),
                 upgrades: { maxEnergy: 0, regenSpeed: 0, energyPacks: 0 },
                 availability:
                     spendable < 1 || energy < 1 || this.auxiliary
@@ -650,6 +677,7 @@ export class ControlledBatch {
     upgradeResources(){
         const frame=this.wallet?.epoch===this.d.provider.channelEpoch && Date.now()-this.wallet.value.capturedAt<=30000 ? this.wallet.value:null;
         if(!frame)return null;
+        if (this.d.provider.status().mode === 'read-only' && this.paletteEvidence?.sequence !== frame.sequence) return null;
         // A conservative debit is spendable for paint, but is NOT a new account/shop observation.
         for(const record of this.saved.records){const a=this.d.attempts.get(record.attemptId);if(a?.state==='finished' && !('reconciled' in a && a.reconciled) && (a.closedAt??a.startedAt??0)>=frame.requestStartedAt){try{if(JSON.parse(record.identity).at(-1)===this.d.provider.status().mode)return null;}catch{return null;}}}
         return structuredClone(frame);

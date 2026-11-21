@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -10,6 +10,51 @@ const opened: EngineService[] = [];
 afterEach(async () => {
     for (const s of opened.splice(0)) await s.close();
     await cleanup();
+});
+describe('Synchronized GeoPixels account palette', () => {
+    it('updates new imports from native evidence and keeps saved and manually prepared colors', async () => {
+        const { service } = await openFast(await tempDir());
+        opened.push(service);
+        const batch = service.singlePixelWriter.batch;
+        const orange = 0xff9f1c;
+        const white = 0xffffff;
+        const png = await pngjsCodec.encode({ width: 1, height: 1, rgba: Uint8Array.of(255, 159, 28, 255) });
+        const importColor = async (useAccountPalette = true) => {
+            const info = await service.importDrawing({ name: 'Orange fixture', png, palette: ['#ffffff'], useAccountPalette });
+            const drawn = await service.exportDrawing(info.templateId);
+            return { id: info.templateId, rgb: [...(await pngjsCodec.decode(drawn.png)).rgba.slice(0, 3)] };
+        };
+        const at = Date.now();
+        const frame = { source: 'native-worker-response', sequence: 1, requestStartedAt: at, capturedAt: at, energy: 10, available: 10, colors: [orange] };
+        service.connector.connect('local-fake', () => undefined);
+        batch.observeResources(frame);
+        expect(batch.accountPalette().state).toBe('unknown');
+        service.connector.connect('read-only', () => undefined);
+        batch.observeResources({ ...frame, colors: [white] });
+        expect(batch.accountPalette()).toMatchObject({ state: 'fresh', colors: [white], capturedAt: at });
+        const saved = await importColor();
+        expect(saved.rgb).toEqual([255, 255, 255]);
+        const updated = { ...frame, sequence: 2, source: 'native-user-response', capturedAt: Date.now(), colors: [white, orange] };
+        batch.observeResources(updated);
+        batch.observeResources(frame); // An older response may arrive after the unlock.
+        batch.observeResources({ ...updated, colors: [white] }); // Conflicting replay of the same response.
+        expect(batch.accountPalette()).toMatchObject({ state: 'fresh', colors: [white, orange], source: 'native-user-response' });
+        expect((await importColor()).rgb).toEqual([255, 159, 28]);
+        expect((await importColor(false)).rgb).toEqual([255, 255, 255]);
+        expect([...(await pngjsCodec.decode((await service.exportDrawing(saved.id)).png)).rgba.slice(0, 3)]).toEqual(saved.rgb);
+        const realNow = Date.now;
+        const clock = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + 31_000);
+        try {
+            service.connector.heartbeat();
+            expect(batch.accountPalette()).toMatchObject({ state: 'stale', capturedAt: updated.capturedAt });
+            expect((await importColor()).rgb).toEqual([255, 255, 255]);
+        } finally {
+            clock.mockRestore();
+        }
+        service.connector.disconnect();
+        expect(batch.accountPalette()).toEqual({ state: 'unknown', source: null, capturedAt: null, colors: [] });
+        expect((await importColor()).rgb).toEqual([255, 255, 255]);
+    });
 });
 async function wait(fn: () => boolean, progress: () => number = () => 0) {
     let deadline = Date.now() + 10000,

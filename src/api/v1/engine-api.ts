@@ -32,7 +32,7 @@ export interface EngineApi {
     selectSource?(source: 'simulation' | 'geopixels'): Promise<CommandResultLike>;
     bindConnector?(): Promise<unknown>;
     connectorView?(): Promise<unknown>;
-    importDrawing?(input:import('@geoplacer/engine-service').GhostImportInput):Promise<unknown>;
+    importDrawing?(input:import('@geoplacer/engine-service').GhostImportInput & { useAccountPalette?: boolean }):Promise<unknown>;
     drawingLibrary?(): Promise<unknown>;
     setDrawingStrategy?(templateId: string, strategy: import('@geoplacer/core').DrawingStrategyId): Promise<unknown>;
     deleteDrawing?(templateId: string, confirmName: string): Promise<unknown>;

@@ -71,6 +71,7 @@ export function createConnectorRouter(engine: EngineApi, httpChannel?: Connector
         '/http',
         action(() => httpChannel?.info() ?? { enabled: false, pending: null, active: false })
     );
+    router.get('/palette', action(() => engine.singlePixelWriter!.batch.accountPalette()));
     const regionControl = (req: Request) => {
         if (!httpChannel?.info().active)
             throw new ConnectorError('CONNECTOR_UNAVAILABLE', 'Coupler le lecteur régional avant cette commande.');
@@ -163,8 +164,9 @@ export function createConnectorRouter(engine: EngineApi, httpChannel?: Connector
     }));
     router.post('/drawing/import',action(async req=>{
         // Local image preparation grants no reader/writer authority; same-origin loopback guard above applies.
-        const b=z.strictObject({name:z.string().trim().min(1).max(100),pngBase64:z.string().min(1),palette:z.array(z.string()).min(1).max(256)}).parse(req.body);
-        return engine.importDrawing!({name:b.name,png:Buffer.from(b.pngBase64,'base64'),palette:b.palette});
+        const b = z.strictObject({name:z.string().trim().min(1).max(100),pngBase64:z.string().min(1),palette:z.array(z.string()).max(256),useAccountPalette:z.boolean().optional()})
+            .refine(body => body.useAccountPalette || body.palette.length > 0).parse(req.body);
+        return engine.importDrawing!({name:b.name,png:Buffer.from(b.pngBase64,'base64'),palette:b.palette,...(b.useAccountPalette ? { useAccountPalette: true } : {})});
     }));
     router.get('/drawing/:id/image',async(req,res)=>{
         try {const {png,filename}=await engine.exportDrawing!(z.string().uuid().parse(req.params.id),req.query.thumbnail === '1');res.setHeader('Content-Type','image/png');res.setHeader('Content-Disposition',`inline; filename="${filename}"`);res.send(Buffer.from(png));}

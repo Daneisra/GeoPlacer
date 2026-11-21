@@ -82,7 +82,7 @@ import {
 } from '@geoplacer/adapters-node';
 import { SimulatedCanvasProvider, type WorldCommit } from '@geoplacer/simulator';
 import { monotonicClock, type MonotonicClock } from './clock.js';
-import { GHOST_PROJECT, exportGhostPng, ghostInfo, importGhost, type GhostImportInput, type GhostInfo } from './ghost.js';
+import { GHOST_PROJECT, exportGhostPng, ghostInfo, hexOf, importGhost, type GhostImportInput, type GhostInfo } from './ghost.js';
 import { EngineEventHub, type EngineEventEnvelope } from './events.js';
 import {
   DEMO_PALETTE,
@@ -911,6 +911,7 @@ export class EngineService {
             ...this.connector.status(),
             singlePixel: this.singlePixelWriter.view(),
             batch,
+            accountPalette: this.singlePixelWriter.batch.accountPalette(),
             upgrades: this.singlePixelWriter.upgrades.view(batch.id),
             error: this.connector.status().error ?? calculationError,
             bound,
@@ -1269,7 +1270,7 @@ export class EngineService {
     return (await this.templates.load(ref)).template;
   }
 
-  async importDrawing(input: GhostImportInput) {
+  async importDrawing(input: GhostImportInput & { useAccountPalette?: boolean }) {
     this.guard();this.requireIdle('importing a drawing');
     const batch = this.singlePixelWriter.batch, previous = batch.view();
     check(!['running', 'paused'].includes(previous.state), 'Arrêter le dessin en cours avant d’importer une autre image.');
@@ -1280,7 +1281,11 @@ export class EngineService {
       await batch.stop('Nouveau modèle importé : ancien accord inactif retiré, confirmations conservées.');
     }
     check(!this.singlePixelWriter.view().locked, 'Le dessin est encore verrouillé ; vérifier son état avant l’import.');
-    const t=await importGhost(this.templates,pngjsCodec,{...input,x:0,y:0},SIMULATION_PROJECT);
+    const account = this.singlePixelWriter.batch.accountPalette();
+    const palette = input.useAccountPalette && account.state === 'fresh' && account.colors.length
+      ? account.colors.map(hexOf) : input.palette;
+    check(palette.length > 0, 'Palette du compte indisponible : attendre la synchronisation ou renseigner une palette manuelle valide.');
+    const t=await importGhost(this.templates,pngjsCodec,{...input,palette,x:0,y:0},SIMULATION_PROJECT);
     await this.selectTemplate(t.id);return this.templateInfo(t);
   }
   async exportDrawing(templateId: string, thumbnail = false) {

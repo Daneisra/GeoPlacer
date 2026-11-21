@@ -50,10 +50,21 @@ async function setup(hashPending = false) {
     inspect: () => Promise<string>;
     observe: (send: (v: unknown) => Promise<void>, connected: () => boolean, region?:unknown, cancelled?:()=>boolean,initial?:boolean) => Promise<unknown>;
     unchanged: () => Promise<boolean>;
+    reset: () => void;
   };
   return { context, reader, project, finish: () => release!(project) };
 }
 describe('Versioned read-only page contracts', () => {
+  it('rejects a switched account on the same pairing before any model observation', async () => {
+    const s = await setup();
+    s.reader.reset();
+    expect(await s.reader.unchanged()).toBe(true);
+    s.context.userID = 'another-account';
+    expect(await s.reader.unchanged()).toBe(false);
+    await expect(s.reader.observe(async () => {}, () => true)).rejects.toThrow('nouveau couplage');
+    s.reader.reset();
+    expect(await s.reader.unchanged()).toBe(true);
+  });
   it('reads only the requested image rectangle in native Y-up coordinates',async()=>{
     const s=await setup(),sent:Record<string,unknown>[]=[];
     const region={id:'right',x:3,y:1,width:2,height:3,revision:1};

@@ -1,5 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom';
 import type { WorkspacePage } from '../../navigation';
+import type { AccountPalette } from '../../lib/account-palette';
 import { DrawingGallery, type DrawingInfo } from '../DrawingGallery';
 import { DrawingModes } from '../DrawingModes';
 import { ConnectorQueue } from './ConnectorQueue';
@@ -38,6 +39,7 @@ type View = {
     resourcesStale: boolean;
     error: string | null;
     resources: { energy: number | null; capacity: number | null; currency: number | null } | null;
+    accountPalette?: AccountPalette;
     progress: { correct: number; incorrect: number; unknown: number; total: number } | null;
     lastCompleteProgress?: { correct: number; incorrect: number; unknown: number; total: number; capturedAt: number } | null;
     scheduler: { state: string; reason: string | null; openAttempts: number; uncertainAttempts: string[] } | null;
@@ -103,7 +105,11 @@ export function ConnectorDashboard({ page }: { page: WorkspacePage }) {
                     setHttpReader(http.data);
                 }
             } catch {
-                if (!abort.signal.aborted) setError('État du connecteur indisponible');
+                if (!abort.signal.aborted) {
+                    setError('État du connecteur indisponible');
+                    setView(previous => previous?.accountPalette?.state === 'fresh'
+                        ? { ...previous, accountPalette: { ...previous.accountPalette, state: 'stale' } } : previous);
+                }
             }
             inFlight = false;
             if (!abort.signal.aborted) timer = setTimeout(poll, 1500);
