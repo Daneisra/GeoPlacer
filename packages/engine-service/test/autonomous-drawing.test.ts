@@ -184,6 +184,68 @@ async function fixture(lost = false, width = 20, height = 20) {
     };
 }
 describe('Autonomous drawing: same scheduler, explicit whole-image authority', () => {
+    it('persists drawing preferences, named profiles and defaults across projects and restart', async () => {
+        const dir = await tempDir();
+        const { service } = await openFast(dir);
+        opened.push(service);
+        const png = await demoPng(2, 1, () => 0);
+        const newDrawing = (name: string) => service.importDrawing({ name, png, palette: ['#000000'] });
+        const first = await newDrawing('First');
+        await service.setDrawingStrategy(first.templateId, 'bottom-to-top');
+        const options = structuredClone(service.drawingPreferences().current.options);
+        options.thresholds.start = { units: 180, percent: 80 };
+        options.formats.start = 'both';
+        options.groups = { mode: 'manual', minimum: 10, allowFinal: true };
+        options.groupSize = 100;
+        options.pixelBudget = 75;
+        options.upgradeMode = 'unlimited';
+        options.upgrades = { ...options.upgrades, minimumReserve: 25, priority: ['regen-speed', 'color-unlock'] };
+        options.palette = { manualOnly: false, manual: '#ffffff\n#000000' };
+        await service.editDrawingPreferences({ action: 'save', templateId: first.templateId, options });
+        expect(Object.hasOwn(service.status().settings, 'drawingPreferences')).toBe(false);
+        const profile = (await service.editDrawingPreferences({ action: 'create', templateId: first.templateId, name: 'Grand format' })).profiles[0]!;
+        await service.editDrawingPreferences({ action: 'rename', id: profile.id, name: 'Salves' });
+        await service.editDrawingPreferences({ action: 'default', templateId: first.templateId });
+        await service.editDrawingPreferences({ action: 'reset', templateId: first.templateId });
+        expect(service.drawingPreferences().current.options.groupSize).toBe(0);
+        expect(service.drawingPreferences().current.strategy).toBe('top-to-bottom');
+
+        const second = await newDrawing('Second');
+        expect(second.strategy).toBe('bottom-to-top');
+        expect(service.drawingPreferences().current.options).toEqual(options);
+        await service.editDrawingPreferences({ action: 'save', templateId: second.templateId, options: { ...options, groupSize: 50 } });
+        expect(service.drawingPreferences().next.options.groupSize).toBe(100);
+        await service.close();
+
+        const { service: reopened } = await openFast(dir);
+        opened.push(reopened);
+        expect(reopened.drawingPreferences()).toMatchObject({ templateId: second.templateId, explicitDefault: true,
+            current: { options: { groupSize: 50, upgradeMode: 'unlimited', palette: options.palette } }, profiles: [{ id: profile.id, name: 'Salves' }] });
+        await reopened.selectTemplate(first.templateId);
+        expect(reopened.drawingPreferences().current.options.groupSize).toBe(0);
+        await expect(reopened.editDrawingPreferences({ action: 'load', id: profile.id, templateId: second.templateId })).rejects.toThrow('dessin a changé');
+        await reopened.editDrawingPreferences({ action: 'load', id: profile.id, templateId: first.templateId });
+        expect(reopened.drawingPreferences().current).toEqual({ strategy: 'bottom-to-top', options });
+        await reopened.editDrawingPreferences({ action: 'delete', id: profile.id });
+        expect(reopened.drawingPreferences().profiles).toEqual([]);
+        expect(reopened.drawingPreferences().current.options).toEqual(options);
+    });
+
+    it('stores a draft during a job without extending an active authorization', async () => {
+        const f = await fixture(false, 4, 3), batch = f.s.singlePixelWriter.batch;
+        const original = await f.s.previewDrawing(1, 5);
+        await batch.approve(original.id!, original.digest!);
+        const options = { ...f.s.drawingPreferences().current.options, groupSize: 20, upgradeMode: 'unlimited' as const };
+        await f.s.editDrawingPreferences({ action: 'save', templateId: f.t.templateId, options });
+        const profile = (await f.s.editDrawingPreferences({ action: 'create', templateId: f.t.templateId, name: 'Draft' })).profiles[0]!;
+        await expect(f.s.editDrawingPreferences({ action: 'load', templateId: f.t.templateId, id: profile.id })).rejects.toThrow('dessin en cours');
+        const current = batch.view();
+        expect(current).toMatchObject({ state: 'running', digest: original.digest, scope: { groupSize: 1 } });
+        expect(current.scope?.upgrades).toBeUndefined();
+        expect(f.s.singlePixelWriter.upgrades.view().commandReady).toBe(false);
+        expect(f.calls()).toBe(0);
+    });
+
     it('ignores 7 then 1, drains a 200-energy manual burst and waits for 200 again', async () => {
         const f = await fixture(), batch = f.s.singlePixelWriter.batch;
         const threshold = { units: 200, percent: 0 };

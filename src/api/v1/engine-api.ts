@@ -34,6 +34,7 @@ export interface EngineApi {
     connectorView?(): Promise<unknown>;
     importDrawing?(input:import('@geoplacer/engine-service').GhostImportInput & { useAccountPalette?: boolean }):Promise<unknown>;
     drawingLibrary?(): Promise<unknown>;
+    editDrawingPreferences?(edit: import('@geoplacer/engine-service').DrawingPreferencesEdit): Promise<unknown>;
     setDrawingStrategy?(templateId: string, strategy: import('@geoplacer/core').DrawingStrategyId): Promise<unknown>;
     deleteDrawing?(templateId: string, confirmName: string): Promise<unknown>;
     exportDrawing?(templateId: string, thumbnail?: boolean): Promise<{ png: Uint8Array; filename: string }>;

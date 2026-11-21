@@ -1,6 +1,6 @@
 import { Router, type Request } from 'express';
 import { z } from 'zod';
-import { ConnectorError, CONNECTOR_MAX_GROUP_PIXELS, type ConnectorHttpChannel } from '@geoplacer/engine-service';
+import { ConnectorError, CONNECTOR_MAX_GROUP_PIXELS, validDrawingOptions, type ConnectorHttpChannel, type DrawingOptions } from '@geoplacer/engine-service';
 import { asRgb } from '@geoplacer/core';
 import type { EngineApi } from './engine-api.js';
 import { STRATEGY_IDS } from './engine-router.js';
@@ -154,6 +154,20 @@ export function createConnectorRouter(engine: EngineApi, httpChannel?: Connector
         })
     );
     router.get('/drawing', action(() => engine.drawingLibrary!()));
+    router.put('/drawing/preferences', action(req => {
+        const id = z.string().uuid();
+        const name = z.string().trim().min(1).max(80);
+        const edit = z.discriminatedUnion('action', [
+            z.strictObject({ action: z.literal('save'), templateId: id.nullable(), options: z.custom<DrawingOptions>(validDrawingOptions) }),
+            z.strictObject({ action: z.literal('create'), templateId: id.nullable(), name }),
+            z.strictObject({ action: z.literal('rename'), id, name }),
+            z.strictObject({ action: z.literal('delete'), id }),
+            z.strictObject({ action: z.literal('load'), id, templateId: id.nullable() }),
+            z.strictObject({ action: z.literal('default'), templateId: id.nullable() }),
+            z.strictObject({ action: z.literal('reset'), templateId: id.nullable() }),
+        ]).parse(req.body);
+        return engine.editDrawingPreferences!(edit);
+    }));
     router.put('/drawing/:id/strategy', action((req) => {
         const { strategy } = z.strictObject({ strategy: z.enum(STRATEGY_IDS) }).parse(req.body);
         return engine.setDrawingStrategy!(z.string().uuid().parse(req.params.id), strategy);

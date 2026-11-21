@@ -80,3 +80,4 @@ export { validWriterResources, type WriterResources } from './geopixels/writer-r
 export { CONNECTOR_COMMAND_BYTES, CONNECTOR_MAX_GROUP_PIXELS } from './geopixels/batch-limits.js';
 
 export type { AutomaticUpgradePolicy } from './geopixels/upgrade-policy.js';
+export { validDrawingOptions, type DrawingOptions, type DrawingPreferencesEdit, type DrawingPreferencesView, type ThresholdFormat } from './geopixels/drawing-preferences.js';

@@ -1,6 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import type { WorkspacePage } from '../../navigation';
 import type { AccountPalette } from '../../lib/account-palette';
+import type { DrawingPreferencesView } from '@geoplacer/engine-service';
 import { DrawingGallery, type DrawingInfo } from '../DrawingGallery';
 import { DrawingModes } from '../DrawingModes';
 import { ConnectorQueue } from './ConnectorQueue';
@@ -40,6 +41,7 @@ type View = {
     error: string | null;
     resources: { energy: number | null; capacity: number | null; currency: number | null } | null;
     accountPalette?: AccountPalette;
+    drawingPreferences?: DrawingPreferencesView;
     progress: { correct: number; incorrect: number; unknown: number; total: number } | null;
     lastCompleteProgress?: { correct: number; incorrect: number; unknown: number; total: number; capturedAt: number } | null;
     scheduler: { state: string; reason: string | null; openAttempts: number; uncertainAttempts: string[] } | null;

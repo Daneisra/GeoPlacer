@@ -83,6 +83,7 @@ import {
 import { SimulatedCanvasProvider, type WorldCommit } from '@geoplacer/simulator';
 import { monotonicClock, type MonotonicClock } from './clock.js';
 import { GHOST_PROJECT, exportGhostPng, ghostInfo, hexOf, importGhost, type GhostImportInput, type GhostInfo } from './ghost.js';
+import { EMPTY_DRAWING_PREFERENCES, INITIAL_DRAWING, nextDrawing, validDrawingOptions, type DrawingOptions, type DrawingPreferencesEdit, type DrawingPreferencesView, type DrawingPreset } from './geopixels/drawing-preferences.js';
 import { EngineEventHub, type EngineEventEnvelope } from './events.js';
 import {
   DEMO_PALETTE,
@@ -244,7 +245,7 @@ export interface EngineStatus {
   };
   readonly journal: { readonly openAttempts: number; readonly toReconcileAtStart: number; readonly damaged: boolean; readonly compacting: boolean };
   readonly instance: { readonly lock: string; readonly guard: string; readonly guardDetail: string | null };
-  readonly settings: EngineSettings;
+  readonly settings: Omit<EngineSettings, 'drawingPreferences'>;
   readonly lastActivityAt: number | null;
 }
 
@@ -314,6 +315,7 @@ export class EngineService {
   private get history(): FileHistoryStore { return this.source === 'simulation' ? this.simulationHistory : this.connectorHistory; }
 
   private settingsValue: EngineSettings;
+  private settingsWrite: Promise<void> = Promise.resolve();
   private rules: ResourceRules;
   private world: { canvas: SimulatedCanvasProvider; store: FileWorldStore } | null = null;
   private worldError: { code: string; message: string } | null = null;
@@ -731,7 +733,7 @@ export class EngineService {
   status(): EngineStatus {
     const state = this.state;
     const sched = this.scheduler?.status() ?? null;
-    const selected = this.settingsValue.selection;
+    const { schemaVersion, simulator, agent, run, selection: selected } = this.settingsValue;
     const ended = this.scheduler === null || this.schedulerEnded || !ACTIVE.has(state);
     return {
       mode: this.source,
@@ -757,7 +759,7 @@ export class EngineService {
       },
       journal: { openAttempts: this.attempts.open().length, toReconcileAtStart: this.toReconcileAtStart, damaged: this.journalDamaged, compacting: this.compacting },
       instance: { lock: this.lock.mechanism, guard: this.lock.guard.status, guardDetail: this.lock.guard.detail },
-      settings: this.settingsValue,
+      settings: { schemaVersion, simulator, agent, run, selection: selected },
       lastActivityAt: this.lastActivityAt,
     };
   }
@@ -911,6 +913,7 @@ export class EngineService {
             ...this.connector.status(),
             singlePixel: this.singlePixelWriter.view(),
             batch,
+            drawingPreferences: this.drawingPreferences(batch),
             accountPalette: this.singlePixelWriter.batch.accountPalette(),
             upgrades: this.singlePixelWriter.upgrades.view(batch.id),
             error: this.connector.status().error ?? calculationError,
@@ -1117,7 +1120,7 @@ export class EngineService {
     }
   }
 
-  async selectTemplate(templateId: string): Promise<CommandResult> {
+  async selectTemplate(templateId: string, initialOptions?: DrawingOptions): Promise<CommandResult> {
     this.guard();
     if (this.settingsValue.selection?.templateId === templateId) return { changed: false, status: this.status() };
     return this.editDrawing(async () => {
@@ -1125,7 +1128,9 @@ export class EngineService {
       if (this.source === 'simulation') this.assertInsideCanvas(info.width, info.height, info.placement?.x ?? 0, info.placement?.y ?? 0);
       await this.retireDrawingPreview();
       this.connector.monitoring.stop('Modèle local modifié : nouvelle liaison nécessaire.');
-      await this.saveSettingsValue({ ...this.settingsValue, selection: { templateId } });
+      await this.saveSettingsValue(settings => ({ ...settings, selection: { templateId },
+        ...(initialOptions ? { drawingPreferences: this.rememberDrawing(settings, templateId, { options: initialOptions, strategy: info.strategy as DrawingStrategyId }, false) } : {}),
+      }));
       this.clearDrawingStatus();
       this.hub.statusNow(this.status());
       return { changed: true, status: this.status() };
@@ -1178,15 +1183,115 @@ export class EngineService {
   async setDrawingStrategy(templateId: string, strategy: DrawingStrategyId): Promise<TemplateInfo> {
     check(STRATEGIES.includes(strategy), 'Mode de dessin inconnu.');
     return this.editDrawing(async () => {
-      const template = await this.templateInfoOf(templateId);
-      if (template.strategy === strategy) return template;
-      if (this.settingsValue.selection?.templateId === templateId) await this.retireDrawingPreview();
-      await this.templates.updateSettings(this.ref(templateId), { strategy: { id: strategy, ...(strategy === 'random' ? { seed: 1 } : {}) } });
-      this.templateCache.delete(templateId);
-      const updated = await this.templateInfoOf(templateId);
+      const options = this.optionsForDrawing(templateId);
+      const updated = await this.applyDrawingStrategy(templateId, strategy);
+      await this.saveSettingsValue(settings => ({ ...settings, drawingPreferences: this.rememberDrawing(settings, templateId, {
+        options: settings.drawingPreferences?.projects[templateId] ?? options, strategy,
+      }) }));
       this.hub.connector();
       return updated;
     });
+  }
+
+  private async applyDrawingStrategy(templateId: string, strategy: DrawingStrategyId) {
+    const template = await this.templateInfoOf(templateId);
+    if (template.strategy === strategy) return template;
+    if (this.settingsValue.selection?.templateId === templateId) await this.retireDrawingPreview();
+    await this.templates.updateSettings(this.ref(templateId), { strategy: { id: strategy, ...(strategy === 'random' ? { seed: 1 } : {}) } });
+    this.templateCache.delete(templateId);
+    return this.templateInfoOf(templateId);
+  }
+
+  private optionsForDrawing(templateId: string | null, batch = this.singlePixelWriter.batch.view()): DrawingOptions {
+    const prefs = this.settingsValue.drawingPreferences ?? EMPTY_DRAWING_PREFERENCES;
+    const base = nextDrawing(prefs).options;
+    if (!templateId) return base;
+    if (prefs.projects[templateId]) return prefs.projects[templateId];
+    // Older versions saved only the last prepared or authorized scope. Use its draft values once per matching project.
+    if (batch.templateId !== templateId || batch.execution !== 'autonomous' || !batch.scope) return base;
+    const { scope } = batch;
+    const energy = scope.energy;
+    const thresholds = energy?.mode === 'bursts' ? { start: energy.start, restart: energy.restart, reserve: energy.reserve } : base.thresholds;
+    const format = (threshold: DrawingOptions['thresholds']['start']) => threshold.percent ? (threshold.units ? 'both' : 'percent') : 'units';
+    const upgrades = scope.upgrades;
+    const template = this.selectedTemplate;
+    const retained = template?.id === templateId ? this.templateInfo(template).paintablePixels : null;
+    return {
+      ...base,
+      energyMode: energy?.mode ?? 'continuous', thresholds,
+      formats: { start: format(thresholds.start), restart: format(thresholds.restart), reserve: format(thresholds.reserve) },
+      groupSize: scope.groupSize ?? 0, groups: scope.groups ?? base.groups,
+      pixelBudget: batch.budgets?.pixels === retained ? null : (batch.budgets?.pixels ?? null),
+      upgradeMode: !upgrades ? 'disabled' : upgrades.maxBudget === null ? 'unlimited' : 'limited',
+      upgrades: upgrades ? { ...upgrades, maxBudget: upgrades.maxBudget ?? base.upgrades.maxBudget } : base.upgrades,
+    };
+  }
+
+  drawingPreferences(batch = this.singlePixelWriter.batch.view()): DrawingPreferencesView {
+    const template = this.selectedTemplate;
+    const templateId = template?.id ?? null;
+    const prefs = this.settingsValue.drawingPreferences ?? EMPTY_DRAWING_PREFERENCES;
+    const next = nextDrawing(prefs);
+    return { templateId, current: { options: this.optionsForDrawing(templateId, batch), strategy: template?.strategy.id ?? next.strategy },
+      next, explicitDefault: prefs.defaults !== null, migrateLegacy: !prefs.recent && !prefs.defaults && !prefs.profiles.length,
+      restorePreviousScope: templateId !== null && !prefs.projects[templateId] && batch.templateId === templateId && batch.execution === 'autonomous' && !!batch.scope,
+      profiles: prefs.profiles.map(({ id, name }) => ({ id, name })),
+    };
+  }
+
+  private rememberDrawing(settings: EngineSettings, templateId: string | null, preset: DrawingPreset, rememberRecent = true) {
+    const prefs = settings.drawingPreferences ?? EMPTY_DRAWING_PREFERENCES;
+    return { ...prefs, recent: rememberRecent ? preset : prefs.recent,
+      projects: templateId ? { ...prefs.projects, [templateId]: preset.options } : prefs.projects,
+      // Editing the common form without a project edits the default for new imports.
+      defaults: !templateId && prefs.defaults && rememberRecent ? preset : prefs.defaults,
+    };
+  }
+
+  async editDrawingPreferences(edit: DrawingPreferencesEdit): Promise<DrawingPreferencesView> {
+    this.guard();
+    check(!this.backingUp, 'Réglages indisponibles pendant la sauvegarde.');
+    if (edit.action === 'load' || edit.action === 'reset') {
+      await this.editDrawing(async () => {
+        const context = this.drawingPreferences();
+        check(edit.templateId === context.templateId, 'Le dessin a changé avant le chargement des réglages.');
+        const preset = edit.action === 'load'
+          ? this.settingsValue.drawingPreferences?.profiles.find(p => p.id === edit.id)?.preset : INITIAL_DRAWING;
+        check(preset, 'Profil de dessin introuvable.');
+        if (context.templateId) await this.applyDrawingStrategy(context.templateId, preset.strategy);
+        await this.saveSettingsValue(settings => {
+          const prefs = this.rememberDrawing(settings, context.templateId, preset);
+          return { ...settings, drawingPreferences: edit.action === 'reset' && !context.templateId ? { ...prefs, defaults: null } : prefs };
+        });
+      });
+    } else if (edit.action === 'save') {
+      check(validDrawingOptions(edit.options), 'Réglages de dessin invalides.');
+      const strategy = edit.templateId ? (await this.templateInfoOf(edit.templateId)).strategy as DrawingStrategyId : null;
+      await this.saveSettingsValue(settings => ({ ...settings, drawingPreferences: this.rememberDrawing(settings, edit.templateId, {
+        options: edit.options, strategy: strategy ?? nextDrawing(settings.drawingPreferences ?? EMPTY_DRAWING_PREFERENCES).strategy,
+      }) }));
+    } else {
+      await this.saveSettingsValue(settings => {
+        const prefs = settings.drawingPreferences ?? EMPTY_DRAWING_PREFERENCES;
+        const current = this.drawingPreferences();
+        if (edit.action === 'default') {
+          check(edit.templateId === current.templateId, 'Le dessin a changé avant l’enregistrement du défaut.');
+          return { ...settings, drawingPreferences: { ...prefs, defaults: current.current } };
+        }
+        if (edit.action === 'delete') return { ...settings, drawingPreferences: { ...prefs, profiles: prefs.profiles.filter(p => p.id !== edit.id) } };
+        check(edit.action === 'create' || edit.action === 'rename', 'Action de profil inconnue.');
+        const name = edit.name.trim();
+        check(name.length > 0 && name.length <= 80 && !prefs.profiles.some(p => p.name.toLowerCase() === name.toLowerCase() && (edit.action === 'create' || edit.id !== p.id)),
+          'Choisissez un nom de profil distinct et non vide.');
+        if (edit.action === 'create') check(edit.templateId === current.templateId, 'Le dessin a changé avant la création du profil.');
+        else check(prefs.profiles.some(p => p.id === edit.id), 'Profil de dessin introuvable.');
+        const profiles = edit.action === 'create' ? [...prefs.profiles, { id: randomUUID(), name, preset: current.current }]
+          : prefs.profiles.map(p => p.id === edit.id ? { ...p, name } : p);
+        return { ...settings, drawingPreferences: { ...prefs, profiles } };
+      });
+    }
+    this.hub.connector();
+    return this.drawingPreferences();
   }
 
   async deleteDrawing(templateId: string, confirmName: string) {
@@ -1196,10 +1301,18 @@ export class EngineService {
       if (this.settingsValue.selection?.templateId === templateId) {
         await this.retireDrawingPreview();
         this.connector.monitoring.stop('Dessin retiré de la bibliothèque.');
-        await this.saveSettingsValue({ ...this.settingsValue, selection: null });
+        await this.saveSettingsValue(settings => ({ ...settings, selection: null }));
         this.clearDrawingStatus();
       }
       await this.templates.delete(this.ref(templateId), { confirmName });
+      if (this.settingsValue.drawingPreferences?.projects[templateId]) {
+        await this.saveSettingsValue(settings => {
+          const prefs = settings.drawingPreferences!;
+          const projects = { ...prefs.projects };
+          delete projects[templateId];
+          return { ...settings, drawingPreferences: { ...prefs, projects } };
+        });
+      }
       this.templateCache.delete(templateId);
       this.hub.statusNow(this.status());
       this.hub.connector();
@@ -1285,8 +1398,9 @@ export class EngineService {
     const palette = input.useAccountPalette && account.state === 'fresh' && account.colors.length
       ? account.colors.map(hexOf) : input.palette;
     check(palette.length > 0, 'Palette du compte indisponible : attendre la synchronisation ou renseigner une palette manuelle valide.');
-    const t=await importGhost(this.templates,pngjsCodec,{...input,palette,x:0,y:0},SIMULATION_PROJECT);
-    await this.selectTemplate(t.id);return this.templateInfo(t);
+    const preset = nextDrawing(this.settingsValue.drawingPreferences ?? EMPTY_DRAWING_PREFERENCES);
+    const t=await importGhost(this.templates,pngjsCodec,{...input,palette,x:0,y:0},SIMULATION_PROJECT,preset.strategy);
+    await this.selectTemplate(t.id, preset.options);return this.templateInfo(t);
   }
   async exportDrawing(templateId: string, thumbnail = false) {
     const template = await this.currentTemplate(this.ref(templateId));
@@ -1366,10 +1480,14 @@ export class EngineService {
 
   // ───────────────────────── Settings ─────────────────────────
 
-  private async saveSettingsValue(next: EngineSettings): Promise<void> {
-    const valid = validateSettings(next);
-    await saveSettings(this.root, valid);
-    this.settingsValue = valid;
+  private saveSettingsValue(update: (settings: EngineSettings) => EngineSettings): Promise<void> {
+    const pending = this.settingsWrite.then(async () => {
+      const valid = validateSettings(update(this.settingsValue));
+      await saveSettings(this.root, valid);
+      this.settingsValue = valid;
+    });
+    this.settingsWrite = pending.catch(() => {});
+    return pending;
   }
 
   /**
@@ -1395,11 +1513,11 @@ export class EngineService {
     };
     validateSettings(next);
     if (patch.resetWorld === true) {
-      await this.saveSettingsValue(next);
+      await this.saveSettingsValue(settings => ({ ...settings, simulator: next.simulator, agent: next.agent, run: next.run }));
       await this.resetWorldNow('settings changed');
     } else {
       const latencyChanged = next.simulator.writeLatencyMs !== current.simulator.writeLatencyMs;
-      await this.saveSettingsValue(next);
+      await this.saveSettingsValue(settings => ({ ...settings, simulator: next.simulator, agent: next.agent, run: next.run }));
       if (latencyChanged && this.world !== null) await this.reopenWorld();
     }
     return { changed: true, status: this.status() };
@@ -1424,7 +1542,7 @@ export class EngineService {
     check(this.source === 'simulation', 'this operation belongs to the simulation source');
     this.requireIdle('resetting the simulated world');
     if (confirm !== 'RESET') throw new EngineServiceError('CONFIRMATION_REQUIRED', 400, 'confirm the reset with "RESET"');
-    await this.saveSettingsValue({ ...this.settingsValue, simulator: { ...this.settingsValue.simulator, rulesVersion: this.settingsValue.simulator.rulesVersion + 1 } });
+    await this.saveSettingsValue(settings => ({ ...settings, simulator: { ...settings.simulator, rulesVersion: settings.simulator.rulesVersion + 1 } }));
     await this.resetWorldNow('explicit reset');
     return { changed: true, status: this.status() };
   }
@@ -1789,6 +1907,7 @@ export class EngineService {
     await this.connectorJournal.close();
     await this.connectorHistory.close();
     await this.observationSave;
+    await this.settingsWrite;
     await this.lock.release();
   }
 }

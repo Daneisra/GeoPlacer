@@ -17,7 +17,7 @@
  * types it, kept as is: GeoPixels does not document its axes, so nothing is converted.
  */
 
-import type { PngCodec, Rgb, Template, TemplateManager } from '@geoplacer/core';
+import type { DrawingStrategyId, PngCodec, Rgb, Template, TemplateManager } from '@geoplacer/core';
 import { TRANSPARENT_U32, TemplateError, asProjectId, assertWithinLimits, proportionalSize, quantizedToRgba, readPngHeader, resizeRgba } from '@geoplacer/core';
 
 /** Ghost templates live in their own TemplateManager project. */
@@ -97,7 +97,7 @@ export function ghostFilename(name: string, width: number, height: number, x: nu
 }
 
 /** Creates the ghost template (resized first when asked). */
-export async function importGhost(templates: TemplateManager, codec: PngCodec, input: GhostImportInput, project = GHOST_PROJECT): Promise<Template> {
+export async function importGhost(templates: TemplateManager, codec: PngCodec, input: GhostImportInput, project = GHOST_PROJECT, strategy?: DrawingStrategyId): Promise<Template> {
   const colors = parsePalette(input.palette);
   let png = input.png;
   if (input.width !== undefined || input.height !== undefined) {
@@ -117,6 +117,7 @@ export async function importGhost(templates: TemplateManager, codec: PngCodec, i
     placement: { topLeft: { x: input.x ?? 0, y: input.y ?? 0 } },
     // The image's own orientation (row 0 at the top): what an image upload shows. No conversion.
     coordinateSystem: { yAxis: 'down' },
+    ...(strategy ? { strategy: { id: strategy, ...(strategy === 'random' ? { seed: 1 } : {}) } } : {}),
     ...(input.alphaThreshold === undefined ? {} : { alphaThreshold: input.alphaThreshold }),
   });
 }

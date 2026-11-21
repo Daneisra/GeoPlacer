@@ -9,6 +9,7 @@ import path from 'node:path';
 import type { AgentId, DrawingStrategyId, Palette, ResourceRules, Rgb } from '@geoplacer/core';
 import { validateRules } from '@geoplacer/core';
 import { nodeJournalFs, type JournalFs } from '@geoplacer/adapters-node';
+import { validDrawingPreferences, type DrawingPreferences } from './geopixels/drawing-preferences.js';
 
 export const SETTINGS_FILE = 'engine.json';
 export const SIMULATION_PROJECT = 'simulation';
@@ -58,6 +59,7 @@ export interface EngineSettings {
   readonly agent: AgentSettings;
   readonly run: RunSettings;
   readonly selection: Selection | null;
+  readonly drawingPreferences?: DrawingPreferences;
 }
 
 export const DEFAULT_SETTINGS: EngineSettings = {
@@ -122,7 +124,9 @@ export function validateSettings(value: unknown): EngineSettings {
     if (!isObject(value.selection) || typeof value.selection.templateId !== 'string') throw new SettingsError('invalid selection');
     selection = { templateId: value.selection.templateId };
   }
-  return { schemaVersion: 1, simulator, agent, run, selection };
+  const drawingPreferences = value.drawingPreferences;
+  if (drawingPreferences !== undefined && !validDrawingPreferences(drawingPreferences, STRATEGIES)) throw new SettingsError('invalid drawing preferences');
+  return { schemaVersion: 1, simulator, agent, run, selection, ...(drawingPreferences === undefined ? {} : { drawingPreferences }) };
 }
 
 /** The synthetic resource rules of the simulation (validated by the core). */

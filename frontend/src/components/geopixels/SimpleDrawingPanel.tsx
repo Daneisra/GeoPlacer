@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ImageIcon, Upload } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import type { DrawingPreferencesView, ThresholdFormat } from '@geoplacer/engine-service';
 import type { WorkspacePage } from '../../navigation';
 import { engineHttp, STRATEGY_LABELS, type TemplateInfo } from '../../lib/engine';
 import { MAX_GHOST_COLORS, PERSONAL_GEOPIXELS_PALETTE, parsePaletteText } from '../../lib/ghost-palettes';
 import { type AccountPalette } from '../../lib/account-palette';
 import { AccountPaletteStatus } from './AccountPaletteStatus';
-import type { BatchView, EnergyPolicy, GroupPolicy, Threshold } from './BatchPanel';
+import { DrawingProfiles } from './DrawingProfiles';
+import { useDrawingPreferences } from './useDrawingPreferences';
+import type { BatchView, EnergyPolicy, Threshold } from './BatchPanel';
 import { upgradeKinds as availableUpgrades, upgrades, type UpgradeKind } from './upgrade-catalog';
 import { translateReason } from '../../lib/i18n';
 type DrawingView = {
@@ -17,6 +20,7 @@ type DrawingView = {
     batch: BatchView;
     monitoring: { inFlight: unknown };
     accountPalette?: AccountPalette;
+    drawingPreferences?: DrawingPreferencesView;
     tileEvidence?:{total:number;nativeUpdated:number;nativeChecked:number;missing:number;sourceDateKnown:boolean};
     upgrades?:{error?:string|null;uncertain:number;history:{id:string;kind:string;cost:number;state:string;at:number}[]};
     progress: { correct: number; incorrect: number; unknown: number; total: number } | null;
@@ -54,28 +58,18 @@ function runningDrawingStatus(batch: BatchView) {
 
 const thresholdLabels = { start: 'Démarrage', restart: 'Reprise', reserve: 'Réserve énergétique' };
 type ThresholdKind = keyof typeof thresholdLabels;
-type ThresholdUnit = keyof Threshold | 'both';
 const thresholdKinds = ['start', 'restart', 'reserve'] as const;
-const drawingPaletteKey = 'geoplacer.drawing.palette.v1';
-const drawingPaletteDefaults = { manualOnly: false, manual: PERSONAL_GEOPIXELS_PALETTE.join('\n') };
-
-function readDrawingPalette() {
-    try {
-        const saved = JSON.parse(window.localStorage.getItem(drawingPaletteKey) ?? 'null');
-        if (typeof saved?.manual === 'string' && typeof saved.manualOnly === 'boolean') return { manual: saved.manual, manualOnly: saved.manualOnly };
-    } catch { /* Local storage may be unavailable. */ }
-    return drawingPaletteDefaults;
-}
+const defaultManualPalette = PERSONAL_GEOPIXELS_PALETTE.join('\n');
 
 const describeThreshold = ({ units, percent }: Threshold, fallback: string) => units && percent
     ? `${units} énergies ou ${percent} % (seuil le plus élevé)` : units ? `${units} énergies` : percent ? `${percent} %` : fallback;
 
-function EnergyThresholdField({ kind, threshold, onChange }: {
+function EnergyThresholdField({ kind, threshold, unit, onChange }: {
     kind: ThresholdKind;
     threshold: Threshold;
-    onChange: (value: Threshold) => void;
+    unit: ThresholdFormat;
+    onChange: (value: Threshold, format: ThresholdFormat) => void;
 }) {
-    const [unit, setUnit] = useState<ThresholdUnit>(() => threshold.percent ? (threshold.units ? 'both' : 'percent') : 'units');
     const label = thresholdLabels[kind];
     const unitId = `drawing-energy-${kind}-unit`;
     const hint = kind === 'reserve' ? 'Aucune réserve' : 'Capacité pleine';
@@ -84,9 +78,8 @@ function EnergyThresholdField({ kind, threshold, onChange }: {
             <div className="drawing-option-field">
                 <label htmlFor={unitId}>{label}</label>
                 <select id={unitId} value={unit} aria-describedby="drawing-threshold-help" onChange={(event) => {
-                    const next = event.target.value as ThresholdUnit;
-                    setUnit(next);
-                    onChange({ units: next === 'percent' ? 0 : threshold.units, percent: next === 'units' ? 0 : threshold.percent });
+                    const next = event.target.value as ThresholdFormat;
+                    onChange({ units: next === 'percent' ? 0 : threshold.units, percent: next === 'units' ? 0 : threshold.percent }, next);
                 }}>
                     <option value="units">Valeur absolue</option>
                     <option value="percent">Pourcentage</option>
@@ -97,28 +90,19 @@ function EnergyThresholdField({ kind, threshold, onChange }: {
                 {unit !== 'percent' && <label className="drawing-option-field">
                     <span>Énergies</span>
                     <input aria-label={`${label} (énergies)`} type="number" min={0} max={1e9} placeholder={unit === 'both' ? '0' : hint}
-                        value={threshold.units || ''} onChange={(event) => onChange({ ...threshold, units: Number(event.target.value) })} />
+                        value={threshold.units || ''} onChange={(event) => onChange({ ...threshold, units: Number(event.target.value) }, unit)} />
                 </label>}
                 {unit !== 'units' && <label className="drawing-option-field">
                     <span>% capacité</span>
                     <input aria-label={`${label} (%)`} type="number" min={0} max={100} placeholder={unit === 'both' ? '0' : hint}
-                        value={threshold.percent || ''} onChange={(event) => onChange({ ...threshold, percent: Number(event.target.value) })} />
+                        value={threshold.percent || ''} onChange={(event) => onChange({ ...threshold, percent: Number(event.target.value) }, unit)} />
                 </label>}
             </div>
         </div>
     );
 }
 
-/** Default workflow. Authority is granted only by the explicit launch/resume buttons. */
-export function SimpleDrawingPanel({
-    view,
-    approvalKey,
-    refresh,
-    readerReady=true,
-    page,
-    showWorkflow,
-    pairing,
-}: {
+type PanelProps = {
     view: DrawingView | null;
     approvalKey: string;
     refresh: () => Promise<void>;
@@ -126,41 +110,45 @@ export function SimpleDrawingPanel({
     page: WorkspacePage;
     showWorkflow: boolean;
     pairing: ReactNode;
-}) {
+};
+
+export function SimpleDrawingPanel(props: PanelProps) {
+    const preferences = props.view?.drawingPreferences;
+    return preferences ? <DrawingWorkflow {...props} preferences={preferences} /> : null;
+}
+
+/** Authority is granted by explicit launch and resume buttons. */
+function DrawingWorkflow({ view, approvalKey, refresh, readerReady = true, page, showWorkflow, pairing, preferences }: PanelProps & { preferences: DrawingPreferencesView }) {
     const [file, setFile] = useState<File | null>(null),
         [busy, setBusy] = useState(false),
         [error, setError] = useState('');
-    const [groupSize, setGroupSize] = useState(0),
-        [budget, setBudget] = useState('');
-    const [paletteSettings, setPaletteSettings] = useState(readDrawingPalette);
+    const { options, nextOptions, update, persist, edit, saveError, profileError, saving, managing } = useDrawingPreferences(preferences, refresh);
+    const { groupSize, pixelBudget, energyMode, thresholds, formats, upgradeMode, palette: paletteSettings } = options;
+    const { mode, minimum, allowFinal } = options.groups;
+    const groups = { mode, minimum, allowFinal };
+    const importPalette = nextOptions.palette;
     const accountPalette = view?.accountPalette;
-    const accountPaletteReady = !paletteSettings.manualOnly && accountPalette?.state === 'fresh' && accountPalette.colors.length > 0;
-    const [energyMode, setEnergyMode] = useState<EnergyPolicy['mode']>('bursts');
-    const [thresholds, setThresholds] = useState({ start: { units: 0, percent: 0 }, restart: { units: 0, percent: 0 }, reserve: { units: 0, percent: 0 } });
-    const [groups, setGroups] = useState<GroupPolicy>({ mode: 'adaptive', minimum: 0, allowFinal: false });
-    const energy: EnergyPolicy = energyMode === 'bursts' ? { mode: energyMode, ...thresholds } : { mode: energyMode };
+    const accountPaletteReady = !importPalette.manualOnly && accountPalette?.state === 'fresh' && accountPalette.colors.length > 0;
+    const energy: EnergyPolicy = energyMode === 'bursts' ? { mode: energyMode, start: thresholds.start, restart: thresholds.restart, reserve: thresholds.reserve } : { mode: energyMode };
     const [importNotice, setImportNotice] = useState<{ kind: 'loading' | 'success' | 'error'; text: string } | null>(
         null
     );
-    const [upgradeMode,setUpgradeMode]=useState<'disabled' | 'limited' | 'unlimited'>('disabled'),[coinBudget,setCoinBudget]=useState(0),[coinReserve,setCoinReserve]=useState(0),[targetCapacity,setTargetCapacity]=useState(300),[energyBelow,setEnergyBelow]=useState(5);
-    const [upgradeKinds,setUpgradeKinds]=useState<UpgradeKind[]>(['energy-pack']);
-    const upgradeJson=upgradeMode !== 'disabled' ? JSON.stringify({maxBudget:upgradeMode === 'unlimited' ? null : coinBudget,minimumReserve:coinReserve,targetCapacity,energyBelow,priority:upgradeKinds}):'';
-    const previewBody = JSON.stringify({ groupSize, energy, groups, ...(upgradeJson ? { upgrades: JSON.parse(upgradeJson) } : {}), ...(budget ? { pixelBudget: Number(budget) } : {}) });
+    const { maxBudget: coinBudget, minimumReserve: coinReserve, targetCapacity, energyBelow, priority: upgradeKinds } = options.upgrades;
+    const upgradePolicy = upgradeMode === 'disabled' ? null : { maxBudget: upgradeMode === 'unlimited' ? null : coinBudget, minimumReserve: coinReserve, targetCapacity, energyBelow, priority: upgradeKinds };
+    const selected = view?.selection;
+    const effectiveBudget = pixelBudget === null ? null : Math.min(pixelBudget, selected?.paintablePixels ?? pixelBudget);
+    const previewBody = JSON.stringify({ groupSize, energy, groups, ...(upgradePolicy ? { upgrades: upgradePolicy } : {}), ...(effectiveBudget !== null ? { pixelBudget: effectiveBudget } : {}) });
     function moveUpgrade(index: number, direction: -1 | 1) {
         const next = [...upgradeKinds];
         const destination = index + direction;
         [next[index], next[destination]] = [next[destination], next[index]];
-        setUpgradeKinds(next);
-    }
-    function updatePalette(next: typeof drawingPaletteDefaults) {
-        setPaletteSettings(next);
-        try { window.localStorage.setItem(drawingPaletteKey, JSON.stringify(next)); } catch { /* Keep the settings in memory. */ }
+        update({ upgrades: { ...options.upgrades, priority: next } });
     }
     const importing = importNotice?.kind === 'loading';
     const attempted = useRef('');
     const batch = view?.batch,
-        selected = view?.selection,
         active = !!batch && ['running', 'paused'].includes(batch.state);
+    const optionsLocked = active || busy || managing;
     const imageUrl = selected ? `/api/v1/connector/drawing/${selected.templateId}/image` : null;
     async function action(fn: () => Promise<unknown>) {
         setBusy(true);
@@ -176,7 +164,7 @@ export function SimpleDrawingPanel({
     }
     async function importImage() {
         if (!file || busy) return;
-        const colors = parsePaletteText(paletteSettings.manual);
+        const colors = parsePaletteText(importPalette.manual ?? defaultManualPalette);
         const validManual = !colors.invalid.length && colors.colors.length > 0 && colors.colors.length <= MAX_GHOST_COLORS;
         if (!accountPaletteReady && !validManual) {
             setImportNotice({ kind: 'error', text: 'Palette invalide : codes #RRGGBB requis.' });
@@ -185,6 +173,7 @@ export function SimpleDrawingPanel({
         setBusy(true);
         setImportNotice({ kind: 'loading', text: 'Importation de l’image en cours…' });
         try {
+            await persist();
             const data = await new Promise<string>((resolve, reject) => {
                 const r = new FileReader();
                 r.onload = () => resolve(String(r.result).split(',')[1]!);
@@ -196,7 +185,7 @@ export function SimpleDrawingPanel({
                 name: file.name.replace(/\.png$/i, ''),
                 pngBase64: data,
                 palette: validManual ? colors.colors : [],
-                ...(!paletteSettings.manualOnly ? { useAccountPalette: true } : {}),
+                ...(!importPalette.manualOnly ? { useAccountPalette: true } : {}),
             }); // Local preparation does not require pairing or a private approval key.
             attempted.current = '';
             setImportNotice({
@@ -222,7 +211,7 @@ export function SimpleDrawingPanel({
             ? JSON.stringify([selected.templateId, selected.revision, selected.strategy, view.project, previewBody, approvalKey])
             : '';
     const viewConnected = !!view?.connected;
-    const canPreview = showWorkflow && readerReady && !!approvalKey && !!view?.connected && !active && !busy && !batch?.uncertain;
+    const canPreview = showWorkflow && readerReady && !!approvalKey && !!view?.connected && !active && !busy && !saving && !managing && !saveError && !batch?.uncertain;
     useEffect(() => {
         if (!previewIdentity || !viewConnected) {
             attempted.current = '';
@@ -250,11 +239,14 @@ export function SimpleDrawingPanel({
         return ()=>clearTimeout(timer);
     }, [approvalKey, previewIdentity, canPreview, previewBody, refresh, viewConnected]);
     function prepare() {
-        return action(() => engineHttp.post('/connector/drawing/preview', JSON.parse(previewBody), { headers: { 'X-GeoPlacer-Approval': approvalKey } }));
+        return action(async () => {
+            await persist();
+            await engineHttp.post('/connector/drawing/preview', JSON.parse(previewBody), { headers: { 'X-GeoPlacer-Approval': approvalKey } });
+        });
     }
     const consent = { batchId: batch?.id, digest: batch?.digest, approved: true };
     const preparedGroup=batch?.scope?.groupSize ?? 5;
-    const previewReady=preparedGroup===groupSize && (!batch?.scope?.strategy || batch.scope.strategy === selected?.strategy) && JSON.stringify(batch?.scope?.upgrades??null)===JSON.stringify(upgradeJson?JSON.parse(upgradeJson):null) && (!budget || batch?.budgets?.pixels===Number(budget)) && JSON.stringify(batch?.scope?.energy) === JSON.stringify(energy) && JSON.stringify(batch?.scope?.groups) === JSON.stringify(groups);
+    const previewReady=preparedGroup===groupSize && (!batch?.scope?.strategy || batch.scope.strategy === selected?.strategy) && JSON.stringify(batch?.scope?.upgrades??null)===JSON.stringify(upgradePolicy) && batch?.budgets?.pixels===(effectiveBudget ?? selected?.paintablePixels) && JSON.stringify(batch?.scope?.energy) === JSON.stringify(energy) && JSON.stringify(batch?.scope?.groups) === JSON.stringify(groups);
     const authorizedEnergy = batch?.scope?.energy;
     const dashboard = page === 'dashboard';
     const currentProgress = view?.progress;
@@ -273,7 +265,7 @@ export function SimpleDrawingPanel({
             <section className="studio-card space-y-3" aria-busy={importing} hidden={!(dashboard && showWorkflow) && page !== 'drawings'}>
                 <h2 className="studio-step">{dashboard && <span>1</span>} Importer votre image</h2>
                 <p className="text-muted-foreground">Choisissez un PNG, puis téléchargez le fantôme préparé pour GeoPixels.</p>
-                <AccountPaletteStatus sample={accountPalette} manual={paletteSettings.manualOnly} />
+                <AccountPaletteStatus sample={accountPalette} manual={importPalette.manualOnly} />
                 <div className="studio-import">
                 <input
                     aria-label="Image à dessiner"
@@ -341,12 +333,16 @@ export function SimpleDrawingPanel({
                 {authorizedEnergy && <p>{active ? 'Travail autorisé' : batch?.state === 'prepared' ? 'Prévisualisation' : 'Dernier travail'} · {authorizedEnergy.mode === 'bursts'
                     ? `Salves · Démarrage ${describeThreshold(authorizedEnergy.start, '100 %')} · Reprise ${describeThreshold(authorizedEnergy.restart, '100 %')} · Réserve ${describeThreshold(authorizedEnergy.reserve, 'aucune')}`
                     : 'Continu, selon l’énergie disponible'}</p>}
-                {batch?.scope?.upgrades && <p>Améliorations {active ? 'autorisées' : 'prévues'} · Budget {batch.scope.upgrades.maxBudget === null ? 'illimité' : `${batch.scope.upgrades.maxBudget} monnaies du jeu`} · Réserve {batch.scope.upgrades.minimumReserve || 'aucune'}.</p>}
+                {batch?.scope?.upgrades && <p>Améliorations {active ? 'autorisées' : 'prévues'} · Budget {batch.scope.upgrades.maxBudget === null ? 'illimité' : `${batch.scope.upgrades.maxBudget} monnaies du jeu`} · Réserve {batch.scope.upgrades.minimumReserve || 'aucune'}.
+                    {!active && batch.state === 'prepared' && ' Le lancement autorise aussi ces achats en monnaie du jeu.'}</p>}
                 <div className="flex flex-wrap gap-3">
                     <button
                         className="studio-primary"
                         disabled={
                             busy ||
+                            saving ||
+                            managing ||
+                            !!saveError ||
                             !previewReady ||
                             !readerReady ||
                             !approvalKey ||
@@ -500,52 +496,56 @@ export function SimpleDrawingPanel({
                                 <div><dt>Énergie</dt><dd>{energy.mode === 'continuous'
                                     ? 'En continu, dès que l’énergie est disponible.'
                                     : <>Démarrage à {describeThreshold(energy.start, 'pleine capacité (100 %)')}. Reprise à {describeThreshold(energy.restart, 'pleine capacité (100 %)')}. Réserve {describeThreshold(energy.reserve, 'nulle')}.</>}</dd></div>
-                                <div><dt>Groupes de pixels</dt><dd>{groups.mode === 'adaptive' ? 'Adaptatifs' : 'Manuels'}, {groupSize ? <>jusqu’à {groupSize} pixels</> : 'jusqu’au plafond local'}. {groups.minimum ? <>Minimum {groups.minimum}{groups.allowFinal ? ', sauf le dernier groupe' : ''}. </> : 'Aucun minimum. '}{budget ? <>Budget de {budget} pixels.</> : 'Image entière.'}</dd></div>
+                                <div><dt>Groupes de pixels</dt><dd>{groups.mode === 'adaptive' ? 'Adaptatifs' : 'Manuels'}, {groupSize ? <>jusqu’à {groupSize} pixels</> : 'jusqu’au plafond local'}. {groups.minimum ? <>Minimum {groups.minimum}{groups.allowFinal ? ', sauf le dernier groupe' : ''}. </> : 'Aucun minimum. '}{pixelBudget !== null ? <>Budget de {pixelBudget} pixels.</> : 'Image entière.'} {STRATEGY_LABELS[preferences.current.strategy]}.</dd></div>
                             </>}
                             <div><dt>Améliorations</dt><dd>{upgradeMode === 'disabled' ? 'Achats automatiques désactivés.' : <>
                                 {upgradeMode === 'unlimited' ? 'Budget illimité en monnaie du jeu.' : <>Budget de {coinBudget} en monnaie du jeu.</>} {coinReserve ? <>Réserve de {coinReserve}.</> : 'Aucune réserve.'} {upgradeKinds.length ? upgradeKinds.map(kind => upgrades[kind].name).join(' → ') : 'Aucune amélioration sélectionnée.'}
                             </>}</dd></div>
                         </dl>
                     </div>
-                    <fieldset className="drawing-option-section" hidden={page === 'resources'} disabled={active || busy}>
+                    {saveError ? <div role="alert" className="flex flex-wrap items-center gap-2">Enregistrement des réglages impossible. {saveError}
+                        <button type="button" disabled={saving || managing} onClick={() => void persist().catch(() => undefined)}>Réessayer</button></div> :
+                        <p role="status" className="drawing-option-note">{saving ? 'Enregistrement des réglages…' : 'Réglages enregistrés.'}</p>}
+                    {page !== 'resources' && <DrawingProfiles preferences={preferences} edit={edit} disabled={optionsLocked} error={profileError} />}
+                    <fieldset className="drawing-option-section" hidden={page === 'resources'} disabled={optionsLocked}>
                         <legend>Énergie et salves</legend>
                         <div className="drawing-options-grid">
                             <div className="drawing-option-field">
                                 <label htmlFor="drawing-energy-mode">Mode énergétique</label>
-                                <select id="drawing-energy-mode" value={energyMode} onChange={event => setEnergyMode(event.target.value as EnergyPolicy['mode'])}>
+                                <select id="drawing-energy-mode" value={energyMode} onChange={event => update({ energyMode: event.target.value as EnergyPolicy['mode'] })}>
                                     <option value="bursts">Salves</option><option value="continuous">Continu</option>
                                 </select>
                             </div>
                         </div>
                         <div className="space-y-3" hidden={energyMode !== 'bursts'}>
                             <div className="drawing-options-grid">{thresholdKinds.map(kind => (
-                                <EnergyThresholdField key={kind} kind={kind} threshold={thresholds[kind]}
-                                    onChange={value => setThresholds(previous => ({ ...previous, [kind]: value }))} />
+                                <EnergyThresholdField key={kind} kind={kind} threshold={thresholds[kind]} unit={formats[kind]}
+                                    onChange={(value, format) => update({ thresholds: { ...thresholds, [kind]: value }, formats: { ...formats, [kind]: format } })} />
                             ))}</div>
                             <p className="drawing-option-note" id="drawing-threshold-help">Pour un seuil laissé vide ou entièrement à 0, le démarrage et la reprise attendent la pleine capacité (100 %) et la réserve est nulle. Si les deux formats sont renseignés, le seuil le plus élevé s’applique.</p>
                         </div>
                         {energyMode === 'continuous' && <p className="drawing-option-note">Le dessin utilise l’énergie disponible dès qu’il peut envoyer un groupe.</p>}
                     </fieldset>
-                    <fieldset className="drawing-option-section" hidden={page === 'resources'} disabled={active || busy}>
+                    <fieldset className="drawing-option-section" hidden={page === 'resources'} disabled={optionsLocked}>
                         <legend>Groupes de pixels</legend>
                         <div className="drawing-options-grid">
                             <div className="drawing-option-field">
                                 <label htmlFor="drawing-group-mode">Mode des groupes</label>
-                                <select id="drawing-group-mode" value={groups.mode} onChange={event => setGroups(previous => ({ ...previous, mode: event.target.value as GroupPolicy['mode'] }))}>
+                                <select id="drawing-group-mode" value={groups.mode} onChange={event => update({ groups: { ...groups, mode: event.target.value as typeof mode } })}>
                                     <option value="adaptive">Adaptatif</option><option value="manual">Manuel</option>
                                 </select>
                             </div>
                             <label className="drawing-option-field">
                                 <span>Pixels par requête</span>
                                 <input aria-label="Pixels par requête" aria-describedby="drawing-group-max-help" type="number"
-                                    min={0} max={batch?.limits?.maxGroupPixels} value={groupSize} onChange={event => setGroupSize(Number(event.target.value))} />
+                                    min={0} max={batch?.limits?.maxGroupPixels} value={groupSize} onChange={event => update({ groupSize: Number(event.target.value) })} />
                                 <small id="drawing-group-max-help">Maximum par envoi. 0 ou vide = plafond local{batch?.limits ? <> ({batch.limits.maxGroupPixels} pixels)</> : ''}.</small>
                             </label>
                             <label className="drawing-option-field">
                                 <span>Budget du dessin</span>
                                 <input aria-label="Budget du dessin" aria-describedby="drawing-pixel-budget-help" type="number" min={1}
-                                    placeholder="Image entière" value={budget} onChange={event => setBudget(event.target.value)} />
-                                <small id="drawing-pixel-budget-help">En pixels. Champ vide = image entière.</small>
+                                    placeholder="Image entière" value={pixelBudget ?? ''} onChange={event => update({ pixelBudget: event.target.value === '' ? null : Number(event.target.value) })} />
+                                <small id="drawing-pixel-budget-help">En pixels. Champ vide = image entière.{effectiveBudget !== pixelBudget && <> Ce dessin est limité à {effectiveBudget} cibles.</>}</small>
                             </label>
                         </div>
                         <p className="drawing-option-note">{groups.mode === 'adaptive'
@@ -557,34 +557,34 @@ export function SimpleDrawingPanel({
                                 <div className="drawing-option-field">
                                     <label htmlFor="drawing-group-min">Minimum souhaité</label>
                                     <input id="drawing-group-min" type="number" min={0} max={batch?.limits?.maxGroupPixels} value={groups.minimum}
-                                        aria-describedby="drawing-group-min-help" onChange={event => setGroups(previous => ({ ...previous, minimum: Number(event.target.value) }))} />
+                                        aria-describedby="drawing-group-min-help" onChange={event => update({ groups: { ...groups, minimum: Number(event.target.value) } })} />
                                     <small id="drawing-group-min-help">0 ou vide = aucun minimum.</small>
                                 </div>
                                 <label className="drawing-option-check"><input type="checkbox" checked={groups.allowFinal}
-                                    onChange={event => setGroups(previous => ({ ...previous, allowFinal: event.target.checked }))} /> Autoriser un dernier groupe sous le minimum</label>
+                                    onChange={event => update({ groups: { ...groups, allowFinal: event.target.checked } })} /> Autoriser un dernier groupe sous le minimum</label>
                             </div>
                         </details>
                     </fieldset>
-                    <fieldset className="drawing-option-section" disabled={active || busy}>
+                    <fieldset className="drawing-option-section" disabled={optionsLocked}>
                         <legend>Améliorations automatiques</legend>
                         <div className="drawing-options-grid">
                             <div className="drawing-option-field">
                                 <label htmlFor="drawing-upgrade-budget">Budget des améliorations</label>
                                 <select id="drawing-upgrade-budget" value={upgradeMode} aria-describedby="drawing-upgrade-help"
-                                    onChange={event => setUpgradeMode(event.target.value as typeof upgradeMode)}>
+                                    onChange={event => update({ upgradeMode: event.target.value as typeof upgradeMode })}>
                                     <option value="disabled">Désactivé</option><option value="limited">Budget limité</option><option value="unlimited">Illimité</option>
                                 </select>
                             </div>
                             {upgradeMode === 'limited' && <div className="drawing-option-field">
                                 <label htmlFor="drawing-coin-budget">Budget maximal de monnaie</label>
                                 <input id="drawing-coin-budget" type="number" min={0} value={coinBudget} aria-describedby="drawing-coin-budget-help"
-                                    onChange={event => setCoinBudget(Number(event.target.value))} />
+                                    onChange={event => update({ upgrades: { ...options.upgrades, maxBudget: Number(event.target.value) } })} />
                                 <small id="drawing-coin-budget-help">0 ou vide = aucune dépense.</small>
                             </div>}
                             {upgradeMode !== 'disabled' && <div className="drawing-option-field">
                                 <label htmlFor="drawing-coin-reserve">Réserve de monnaie</label>
                                 <input id="drawing-coin-reserve" type="number" min={0} value={coinReserve} aria-describedby="drawing-coin-reserve-help"
-                                    onChange={event => setCoinReserve(Number(event.target.value))} />
+                                    onChange={event => update({ upgrades: { ...options.upgrades, minimumReserve: Number(event.target.value) } })} />
                                 <small id="drawing-coin-reserve-help">0 ou vide = aucune réserve.</small>
                             </div>}
                         </div>
@@ -596,7 +596,7 @@ export function SimpleDrawingPanel({
                                 <div>
                                     <h4>Améliorations autorisées</h4>
                                     {availableUpgrades.map(kind => <label className="drawing-option-check" key={kind}><input type="checkbox"
-                                        checked={upgradeKinds.includes(kind)} onChange={event => setUpgradeKinds(current => event.target.checked ? [...current, kind] : current.filter(item => item !== kind))}
+                                        checked={upgradeKinds.includes(kind)} onChange={event => update({ upgrades: { ...options.upgrades, priority: event.target.checked ? [...upgradeKinds, kind] : upgradeKinds.filter(item => item !== kind) } })}
                                     /> {upgrades[kind].name}</label>)}
                                 </div>
                                 {!!upgradeKinds.length && <div>
@@ -616,13 +616,13 @@ export function SimpleDrawingPanel({
                                     <div className="drawing-option-field">
                                         <label htmlFor="drawing-target-capacity">Capacité ciblée</label>
                                         <input id="drawing-target-capacity" type="number" min={0} value={targetCapacity} aria-describedby="drawing-capacity-help"
-                                            onChange={event => setTargetCapacity(Number(event.target.value))} />
+                                            onChange={event => update({ upgrades: { ...options.upgrades, targetCapacity: Number(event.target.value) } })} />
                                         <small id="drawing-capacity-help">0 ou vide = jusqu’à la limite proposée par GeoPixels.</small>
                                     </div>
                                     <div className="drawing-option-field">
                                         <label htmlFor="drawing-buy-energy-below">Recharger si énergie inférieure à</label>
                                         <input id="drawing-buy-energy-below" type="number" min={0} value={energyBelow} aria-describedby="drawing-buy-energy-help"
-                                            onChange={event => setEnergyBelow(Number(event.target.value))} />
+                                            onChange={event => update({ upgrades: { ...options.upgrades, energyBelow: Number(event.target.value) } })} />
                                         <small id="drawing-buy-energy-help">0 ou vide = aucune recharge automatique.</small>
                                     </div>
                                 </div>
@@ -635,14 +635,14 @@ export function SimpleDrawingPanel({
                         <div className="space-y-3">
                         <AccountPaletteStatus sample={accountPalette} manual={paletteSettings.manualOnly} details />
                         <label className="drawing-option-check">
-                            <input type="checkbox" checked={paletteSettings.manualOnly} disabled={active || busy}
-                                onChange={event => updatePalette({ ...paletteSettings, manualOnly: event.target.checked })} />
+                            <input type="checkbox" checked={paletteSettings.manualOnly} disabled={optionsLocked}
+                                onChange={event => update({ palette: { ...paletteSettings, manualOnly: event.target.checked } })} />
                             Toujours utiliser la palette locale pour préparer les images
                         </label>
                         <label className="drawing-option-field">
                             <span>Palette locale (#RRGGBB)</span>
-                            <textarea aria-label="Palette du dessin" value={paletteSettings.manual} disabled={active || busy}
-                                onChange={event => updatePalette({ ...paletteSettings, manual: event.target.value })} />
+                            <textarea aria-label="Palette du dessin" value={paletteSettings.manual ?? defaultManualPalette} maxLength={4096} disabled={optionsLocked}
+                                onChange={event => update({ palette: { ...paletteSettings, manual: event.target.value } })} />
                         </label>
                         <p className="drawing-option-note">La palette locale sert de secours. Pour choisir des couleurs à débloquer, utilisez-la pour préparer le modèle. La synchronisation s’applique aux nouveaux imports.</p>
                         </div>
