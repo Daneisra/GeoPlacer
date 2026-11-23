@@ -2,18 +2,17 @@
 
 GeoPlacer est un fork de
 [`Arknight38/wplacer-dev`](https://github.com/Arknight38/wplacer-dev)
-(AGPL-3.0-only) qui vise à reprendre les fonctionnalités avancées de Wplacer
-pour GeoPixels, avec un moteur développé et testé **uniquement sur simulateur
-local** (voir l'ADR 0001).
+(AGPL-3.0-only), avec un moteur de simulation locale et des outils de
+préparation d’images pour GeoPixels.
 
-## En cours : Phase 1C.1, préparation d'images pour GeoPixels
+## Développement suspendu
 
-Branche `feat/geopixels-ghost-export` (locale) : préparer dans GeoPlacer une
-image pour l'**outil natif d'image fantôme** de GeoPixels (vos couleurs,
-dimensions, aperçu, PNG standard), puis l'importer **à la main** sur le site.
-GeoPlacer ne se connecte jamais à GeoPixels. Voir [geopixels.md](geopixels.md).
+`main` fournit la démonstration stable, avec [préparation et export PNG](geopixels.md)
+pour import manuel. La [branche finale](https://github.com/Daneisra/GeoPlacer/tree/final/geoplacer)
+conserve le dernier tableau de bord et le [lecteur expérimental](phase2c-lecteur-http.md).
+Les sections suivantes décrivent les étapes historiques du projet.
 
-## État actuel : Phase 1C.0, version candidate de démonstration
+## Phase 1C.0, version candidate de démonstration
 
 Réalisé en Phase 1C.0 (voir [version-candidate.md](version-candidate.md)) :
 - **serveur réactif sur les grands modèles** : ordonnanceur coopératif et

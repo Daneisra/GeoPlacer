@@ -1,6 +1,8 @@
 # Dessin autonome supervisé — lecteur 1.1.0
 
-Branche locale `feat/autonomous-drawing`, issue de `e38998f`. Aucun nouvel envoi réel effectué pendant ce développement.
+Document historique de la branche issue de `e38998f`. Le développement est suspendu.
+Voir le [guide du lecteur](phase2c-lecteur-http.md) pour l’état final du couplage en
+lecture seule et les limites de validation.
 
 ## Utilisation
 
@@ -22,7 +24,7 @@ Pause, reprise, arrêt et révocation restent disponibles. **Préparer la suite*
 
 - **Travail et transport distincts.** L’accord porte sur un modèle/révision, une image, un contexte, une position, une couche et un budget non extensible. Il dure jusqu’à terminaison, arrêt, révocation ou interruption invalidante. Il n’est jamais restauré actif au redémarrage.
 - **Couplage de session.** Le serveur conserve l’approbation en mémoire jusqu’à son arrêt, à la révocation, à la déconnexion volontaire ou à la perte du contexte du lecteur. Le code initial et la demande d’approbation expirent. Une interruption temporaire du transport peut reprendre avec la capacité du même lecteur.
-- **Interruptions.** Une erreur temporaire de statut peut être retentée. Une prise de commande ou une écriture incertaine bloque la poursuite. Deux accusés d’observation manquants ferment le canal pour séquence incertaine. Un rechargement du lecteur ou un redémarrage de GeoPlacer exige un nouveau couplage. Les confirmations restent conservées pour la même identité.
+- **Interruptions.** Une erreur temporaire de statut peut être retentée. Une prise de commande ou une écriture incertaine bloque la poursuite. Le lecteur 1.1.4 peut retenter une observation identique en lecture seule. Une séquence qui reste incertaine ferme le canal. Un rechargement du lecteur ou un redémarrage de GeoPlacer exige un nouveau couplage. Les confirmations restent conservées pour la même identité.
 - **Un seul moteur.** Le TaskScheduler existant travaille par vues de 256 × 256 du même modèle. Le lecteur utilise uniquement les tuiles déjà chargées ; aucune récupération automatique. Les pixels absents/expirés restent inconnus, avec expiration à 30 s. Une capture récente d’un cache non daté ne prouve pas sa fraîcheur serveur ; plusieurs régions ne constituent pas un instantané atomique.
 - **Capture conservée.** Le tableau de bord peut afficher les compteurs datés de la dernière capture complète après la diminution de la couverture exploitable. Les compteurs historiques ne participent pas à la planification.
 - **Énergie observée.** Le lecteur utilise les réponses du worker natif et, pendant un travail autorisé, une lecture de `/GetUserData` au plus toutes les dix secondes. Quand une réponse récente fournit le solde, la date de référence, l’intervalle de recharge et la capacité, le lecteur applique le calcul de recharge de GeoPixels et borne le résultat au compteur natif. Les envois restent déduits si la même date de référence revient. Le compteur de la page seul ne crée aucun crédit. Les identifiants restent dans le navigateur.

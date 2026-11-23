@@ -7,12 +7,12 @@ import { GeoPixelsProvider } from '../src/geopixels/provider.js';
 
 const KEY = 'a'.repeat(64),
   ORIGIN = 'https://geopixels.net';
-function setup() {
+function setup(writer?: SinglePixelWriter) {
   let now = 100_000;
   const pairing = new ConnectorPairing(() => now),
     provider = new GeoPixelsProvider(() => now);
   const events:ChannelDiagnostic[]=[];
-  const http = new ConnectorHttpChannel(pairing, provider, KEY, () => now, undefined, event=>events.push(event));
+  const http = new ConnectorHttpChannel(pairing, provider, KEY, () => now, writer, event=>events.push(event));
   const claim = () => http.claim(ORIGIN, http.issue(KEY, ORIGIN).token);
   const ready = () => {
     const s = claim();
@@ -84,6 +84,28 @@ describe('Privileged HTTP reader capability and sequence protocol', () => {
     s.http.batch(c.capability, batch);
     expect(s.http.batch(c.capability, batch)).toMatchObject({ sequence: 1, duplicate: true });
     expect(() => s.http.batch(c.capability, [{ ...batch[0], pixels: [0, 0, 0, 0, 0, 0] }])).toThrow();
+  });
+  it('reports rate limiting separately and keeps the same capability after the window', () => {
+    const s = setup();
+    const { capability } = s.ready();
+    for (let i = 0; i < 25; i++) s.http.verify(capability, true);
+    expect(() => s.http.verify(capability, true)).toThrow(expect.objectContaining({ code: 'CONNECTOR_RATE_LIMIT' }));
+    s.advance(1_000);
+    expect(() => s.http.verify(capability, true)).not.toThrow();
+  });
+  it('permits extra observation recovery only for the same approved channel while the writer is idle', () => {
+    let locked = true;
+    const writer = { batch: { subscribe: () => () => {} }, view: () => ({ locked }) } as unknown as SinglePixelWriter;
+    const s = setup(writer);
+    const { capability } = s.ready();
+    const { http } = s;
+    const observation = [s.observation()];
+    expect(() => http.batch(capability, observation, true)).toThrow(/idle writer/);
+    locked = false;
+    expect(http.batch(capability, observation, true)).toMatchObject({ sequence: 1, duplicate: false });
+    expect(http.batch(capability, observation, true)).toMatchObject({ sequence: 1, duplicate: true });
+    http.revoke();
+    expect(() => http.batch(capability, observation, true)).toThrow(/capability/);
   });
   it('refuses gaps, replay and concurrent conflicting batches', () => {
     const s = setup(),

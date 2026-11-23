@@ -176,6 +176,9 @@ const GeoPlacerPageReader = (() => {
         rect,
         pixels,
         resources,
+      }, async () => {
+        const current = await contract();
+        return unchanged() && current.id === c.id && current.layer === 'base';
       });
       row += height;
     }

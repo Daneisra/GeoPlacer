@@ -1,5 +1,12 @@
 # Modifications (GNU AGPL v3, section 5a)
 
+## 23 novembre 2026 — Clôture
+
+- Lecteur HTTP 1.1.4 : reprise bornée d’une observation en lecture seule après
+  perte d’accusé ou limitation du débit local.
+- Retrait de l’extension Wplacer héritée `LOAD_UNPACKED` de la branche finale.
+- Documentation actualisée pour la démonstration stable et la branche finale.
+
 ## 17 novembre 2026 — Phase 2D, surveillance du cache en lecture seule
 
 - Commandes de surveillance confirmées, captures sans chevauchement, couverture, changements et historique local borné.

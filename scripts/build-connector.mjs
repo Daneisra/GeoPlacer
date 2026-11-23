@@ -7,7 +7,7 @@ const writer = (await readFile(new URL('../browser/geopixels-writer.js', import.
 const energy = (await readFile(new URL('../browser/geopixels-energy.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 const tiles = (await readFile(new URL('../browser/geopixels-tiles.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 const shop = (await readFile(new URL('../browser/geopixels-shop.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
-const version = '1.1.3';
+const version = '1.1.4';
 const header = `// ==UserScript==
 // @name         GeoPlacer experimental observer
 // @namespace    geoplacer.local

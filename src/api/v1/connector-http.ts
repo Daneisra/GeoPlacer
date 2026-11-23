@@ -1,4 +1,4 @@
-import { validWriterResources } from '@geoplacer/engine-service';
+import { ConnectorError, validWriterResources } from '@geoplacer/engine-service';
 import express, { Router, type ErrorRequestHandler } from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
@@ -59,7 +59,12 @@ export function createPrivilegedReaderRouter(channel: ConnectorHttpChannel): Rou
             channel.verify(value.slice(7),true);
             res.locals.capability = value.slice(7);
             next();
-        } catch {
+        } catch (error) {
+            if (error instanceof ConnectorError && error.code === 'CONNECTOR_RATE_LIMIT') {
+                res.setHeader('Retry-After', '1');
+                res.status(429).json({ error: 'reader request frequency exceeded' });
+                return;
+            }
             res.status(403).json({ error: 'reader capability refused' });
         }
     });
@@ -67,8 +72,8 @@ export function createPrivilegedReaderRouter(channel: ConnectorHttpChannel): Rou
         try {const b=z.strictObject({protocol:z.literal(1),nonce:z.string().uuid()}).parse(req.body);res.json(channel.renew(res.locals.capability as string,b.nonce));}
         catch {fail(res);}
     });
-    const pace = (start: number) =>
-        new Promise((resolve) => setTimeout(resolve, Math.max(0, 50 - (Date.now() - start))));
+    const pace = (start: number, minimumMs = 50) =>
+        new Promise((resolve) => setTimeout(resolve, Math.max(0, minimumMs - (Date.now() - start))));
     router.post('/pixel-claim', small, async (req, res) => {
         try {
             z.strictObject({ protocol: z.literal(1) }).parse(req.body);
@@ -200,10 +205,11 @@ export function createPrivilegedReaderRouter(channel: ConnectorHttpChannel): Rou
         try {
             const start = Date.now();
             const b = z
-                .strictObject({ protocol: z.literal(1), observations: z.array(z.unknown()).min(1).max(2) })
+                .strictObject({ protocol: z.literal(1), observations: z.array(z.unknown()).min(1).max(2), retryObservation: z.literal(true).optional() })
                 .parse(req.body);
-            const answer = channel.batch(res.locals.capability as string, b.observations);
-            await pace(start);
+            const answer = channel.batch(res.locals.capability as string, b.observations, b.retryObservation);
+            // Leave room under the existing per-channel limit for concurrent status polling.
+            await pace(start, 75);
             channel.verify(res.locals.capability as string);
             if (!res.destroyed) res.json(answer);
         } catch {

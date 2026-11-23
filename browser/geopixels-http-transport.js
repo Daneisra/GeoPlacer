@@ -18,7 +18,8 @@ const GeoPlacerHttpTransport = (address, request) => {
   let capability = null,
     active = false,
     sequence = 0,
-    busy = false, features = null;
+    busy = false, features = null,
+    observationRecovery = false;
   let latencyMs = null;
   async function post(operation, body, authenticated = true) {
     if (
@@ -53,7 +54,8 @@ const GeoPlacerHttpTransport = (address, request) => {
         completed = true;
         clearTimeout(timer);
         if (error) {
-          error.transient = /locale absente|privilégié indisponible|Transport GM_xmlhttpRequest/.test(error.message);
+          error.transient = error.rateLimited === true ||
+            /locale absente|privilégié indisponible|Transport GM_xmlhttpRequest/.test(error.message);
           reject(error);
         }
         else {
@@ -79,9 +81,17 @@ const GeoPlacerHttpTransport = (address, request) => {
           },
           onload: (response) => {
             try {
+              if (response.finalUrl && response.finalUrl !== base + operation)
+                throw new Error('Redirection locale inattendue.');
+              if (response.status === 429 && operation === 'observations') {
+                const error = new Error('Débit local temporairement limité.');
+                error.rateLimited = true;
+                throw error;
+              }
+              if (response.status === 403)
+                throw new Error('Couplage refusé ou révoqué : un nouveau couplage est nécessaire.');
               if (
                 response.status !== 200 ||
-                (response.finalUrl && response.finalUrl !== base + operation) ||
                 response.responseText.length > (operation==='batch-claim'?128*1024:8192)
               )
                 throw new Error('Requête refusée : vérifier approbation, révocation et expiration.');
@@ -99,6 +109,27 @@ const GeoPlacerHttpTransport = (address, request) => {
         finish(new Error('Transport GM_xmlhttpRequest refusé'));
       }
     });
+  }
+  async function sendObservation(payload, stillCurrent, onRecovery) {
+    let error;
+    for (const pause of [0, 0, 1000, 2000, 4000]) {
+      if (error && !error.transient) throw error;
+      if (pause === 0 && error?.rateLimited) continue;
+      if (pause > 0) {
+        if (!observationRecovery) throw error;
+        onRecovery?.();
+        await new Promise((resolve) => setTimeout(resolve, pause));
+        const sameContext = active && await stillCurrent();
+        if (!sameContext || !active) throw new Error('Canal fermé ou contexte du fantôme modifié pendant la récupération.');
+      }
+      try {
+        // Repeat exactly the same sequence and pixels. The server checks both before acknowledging a duplicate.
+        return await post('observations', pause === 0 ? payload : { ...payload, retryObservation: true });
+      } catch (failure) {
+        error = failure;
+      }
+    }
+    throw error;
   }
   return {
     async pair(code, origin, pending) {
@@ -118,6 +149,7 @@ const GeoPlacerHttpTransport = (address, request) => {
           if (state.pacing !== 'server-50ms' || state.regionalProtocol !== 1 || state.batchProtocol !== 6)
             throw new Error('Serveur incompatible : mettre à jour GeoPlacer et refaire le couplage.');
           features = state.limits;
+          observationRecovery = state.observationRecovery === true;
           active = true;
           return;
         }
@@ -125,25 +157,17 @@ const GeoPlacerHttpTransport = (address, request) => {
       }
       throw new Error('Confirmation du dashboard expirée');
     },
-    async send(observation) {
+    async send(observation, stillCurrent = () => true, onRecovery) {
       if (!active || busy) throw new Error('Canal indisponible ou envoi concurrent');
       busy = true;
       const next = sequence + 1;
       const payload = { protocol: 1, observations: [{ ...observation, sequence: next }] };
       try {
-        let answer;
-        try {
-          answer = await post('observations', payload);
-        } catch (error) {
-          if (!String(error.message).includes('absente') && !String(error.message).includes('indisponible'))
-            throw error;
-          // Exact same observation only: server deduplicates its sequence AND content digest.
-          answer = await post('observations', payload);
-        }
+        const answer = await sendObservation(payload, stillCurrent, onRecovery);
         if (answer.accepted !== true || answer.sequence !== next) throw new Error('Observation non confirmée');
         sequence = next;
       } catch (error) {
-        active = false; // Two missing observation ACKs leave the sequence uncertain: fail closed.
+        active = false; // A sequence with no verifiable acknowledgement cannot be reused.
         throw error;
       } finally {
         busy = false;

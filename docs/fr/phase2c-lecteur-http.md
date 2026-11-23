@@ -1,8 +1,14 @@
 # Lecteur GeoPixels HTTP — observations et petits lots contrôlés
 
-Version actuelle : **1.1.0**, avec un parcours simple par défaut et dessin du modèle entier explicitement autorisé. Voir [le guide du mode autonome](MODE-AUTONOME.md) pour l’import, la correspondance automatique du fantôme, le lancement et la séparation entre autorisation de travail et renouvellement du transport.
+**Développement suspendu.** La branche finale contient le lecteur expérimental **1.1.4**.
+En observation seule, cette version espace les requêtes et retente une bande identique
+en cas d’accusé perdu ou de limitation temporaire du débit local. La reprise maintient
+les contrôles de séquence, de contenu et de contexte. Révocation, rechargement de
+l’onglet ou redémarrage du serveur exigent un nouveau couplage.
 
-Les parcours historiques décrits ci-dessous restent disponibles sous « Réglages avancés ». Le dessin continu 2J conserve ses anciennes limites 30–600 s / 1 000 pixels ; ces limites ne décrivent pas le nouveau mode autonome. Les validations réelles 2H–2J restent acquises, sans valider par avance le lecteur 1.1.0.
+Les parcours ci-dessous documentent des essais historiques. Les conditions
+d’utilisation de GeoPixels interdisent le placement automatisé. La recette 1.1.4
+porte sur une page factice locale. [Conditions de GeoPixels](https://www.geopixels.net/TOS.html)
 
 ## Installation et lancement
 

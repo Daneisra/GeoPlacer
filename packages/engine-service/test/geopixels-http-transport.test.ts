@@ -12,7 +12,7 @@ type Options = {
   onload: (v: unknown) => void;
   onerror: () => void;
 };
-async function setup(failures = 0, rotationFailures = 0) {
+async function setup(failures = 0, rotationFailures = 0, recovery?: { failureStatus?: number }) {
   const sent: Options[] = [];
   const context = vm.createContext({ crypto:webcrypto, URL, TextEncoder, setTimeout, clearTimeout, performance });
   const source = await readFile(new URL('../../../browser/geopixels-http-transport.js', import.meta.url), 'utf8');
@@ -21,7 +21,9 @@ async function setup(failures = 0, rotationFailures = 0) {
     sent.push(o);
     const path = new URL(o.url).pathname.split('/').at(-1);
     if (path === 'observations' && failures-- > 0) {
-      o.onerror();
+      const status = recovery?.failureStatus;
+      if (status) o.onload({ status, responseText: '{}' });
+      else o.onerror();
       return { abort: () => {} };
     }
     if (path === 'renew' && rotationFailures-- > 0) {o.onerror();return {abort:()=>{}};}
@@ -29,7 +31,7 @@ async function setup(failures = 0, rotationFailures = 0) {
       path === 'renew' ? {nonce:JSON.parse(o.data).nonce,capability:'e'.repeat(64)} : path === 'claim'
         ? { capability: 'a'.repeat(64), requestId: 'b'.repeat(64), fingerprint: 'c'.repeat(12) }
         : path === 'status'
-          ? { approved: true, lastSequence: 0, pacing: 'server-50ms', regionalProtocol:1, batchProtocol:6 }
+          ? { approved: true, lastSequence: 0, pacing: 'server-50ms', regionalProtocol:1, batchProtocol:6, observationRecovery: !!recovery }
           : path === 'observations'
             ? { accepted: true, sequence: JSON.parse(o.data).observations[0].sequence }
             : { disconnected: true };
@@ -39,7 +41,7 @@ async function setup(failures = 0, rotationFailures = 0) {
   const make = (address = 'http://127.0.0.1:3921', gm: unknown = request) =>
     context.factory(address, gm) as {
       pair: (code: string, origin: string, pending: (fp: string) => void) => Promise<void>;
-      send: (o: unknown) => Promise<void>;
+      send: (o: unknown, stillCurrent?: () => boolean | Promise<boolean>, onRecovery?: () => void) => Promise<void>;
       renew: () => Promise<void>;
       poll: () => Promise<unknown>;
       claimUpgrade:()=>Promise<unknown>;
@@ -102,6 +104,49 @@ describe('Actual GM privileged transport, mocked extension API only', () => {
       t = s.make();
     await t.pair('d'.repeat(64), 'https://geopixels.net', () => {});
     await expect(t.send({ type: 'observation' })).rejects.toThrow();
+    expect(t.connected()).toBe(false);
+  });
+  it.each([{ failures: 2, failureStatus: undefined }, { failures: 1, failureStatus: 429 }])(
+    'preserves the pairing after $failures dropped or throttled observation replies',
+    async ({ failures, failureStatus }) => {
+      vi.useFakeTimers();
+      try {
+        const s = await setup(failures, 0, failureStatus === undefined ? {} : { failureStatus });
+        const t = s.make();
+        await t.pair('d'.repeat(64), 'https://geopixels.net', () => {});
+        const onRecovery = vi.fn();
+        const sending = t.send({ type: 'observation', pixels: [7] }, () => true, onRecovery);
+        await vi.advanceTimersByTimeAsync(1000);
+        await sending;
+        const attempts = s.sent.filter(o => o.url.endsWith('/observations')).map(o => JSON.parse(o.data));
+        expect(attempts).toHaveLength(failures + 1);
+        expect(attempts.at(-1)).toEqual({ ...attempts[0], retryObservation: true });
+        expect(onRecovery).toHaveBeenCalledOnce();
+        expect(t.connected()).toBe(true);
+        await t.send({ type: 'observation' });
+        expect(JSON.parse(s.sent.at(-1)!.data).observations[0].sequence).toBe(2);
+      } finally { vi.useRealTimers(); }
+    }
+  );
+  it('exits recovery without sending another observation when the model context has changed', async () => {
+    vi.useFakeTimers();
+    try {
+      const s = await setup(2, 0, {});
+      const t = s.make();
+      await t.pair('d'.repeat(64), 'https://geopixels.net', () => {});
+      const outcome = expect(t.send({ type: 'observation' }, () => false)).rejects.toThrow(/contexte du fantôme/);
+      await vi.advanceTimersByTimeAsync(1000);
+      await outcome;
+      expect(s.sent.filter(o => o.url.endsWith('/observations'))).toHaveLength(2);
+      expect(t.connected()).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+  it('requires a new pairing on a capability refusal without retrying', async () => {
+    const s = await setup(1, 0, { failureStatus: 403 });
+    const t = s.make();
+    await t.pair('d'.repeat(64), 'https://geopixels.net', () => {});
+    await expect(t.send({ type: 'observation' })).rejects.toThrow(/nouveau couplage/);
+    expect(s.sent.filter(o => o.url.endsWith('/observations'))).toHaveLength(1);
     expect(t.connected()).toBe(false);
   });
   it('rejects concurrent sends and releases the capability on disconnect', async () => {

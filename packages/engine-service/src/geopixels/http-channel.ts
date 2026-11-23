@@ -3,7 +3,7 @@ import { MAX_MODEL_PIXELS, MODEL_MEMORY_BYTES } from './capacity.js';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { ConnectorPairing } from './pairing.js';
 import type { GeoPixelsProvider } from './provider.js';
-import { check, parseObservation, type BrowserObservation } from './protocol.js';
+import { check, ConnectorError, parseObservation, type BrowserObservation } from './protocol.js';
 import type { SinglePixelWriter } from './single-pixel-writer.js';
 
 const HTTP_APPROVAL_MS = 60_000;
@@ -158,7 +158,12 @@ export class ConnectorHttpChannel {
     const s = this.session;
     check(s !== null && equal(capability, s.capability), 'HTTP capability expired or refused');
     // Count ingress messages once; revalidating the SAME held response is not another message.
-    if(countMessage){s.requests=s.requests.filter(t=>t>this.now()-1000);check(s.requests.length<25,'HTTP message frequency exceeded');s.requests.push(this.now());}
+    if (countMessage) {
+      const now = this.now();
+      s.requests = s.requests.filter(t => t > now - 1000);
+      if (s.requests.length >= 25) throw new ConnectorError('CONNECTOR_RATE_LIMIT', 'HTTP message frequency exceeded');
+      s.requests.push(now);
+    }
     return s;
   }
     status(
@@ -187,6 +192,7 @@ export class ConnectorHttpChannel {
             if (ack) this.provider.monitoring.acknowledge(ack.revision, ack.state);
         }
         return {
+            ...(readerVersion === 10 ? { observationRecovery: true } : {}),
             ...(readerVersion===10?{upgrades:{commandReady:this.writer?.upgrades.commandReady()??false},workAuthorized:!!this.writer?.batch.upgradeAuthority() || !!this.writer?.batch.transportRenewable()}:{}),
             approved: s.approved,
             ...((readerVersion===9 || readerVersion===10) ? {limits:{maxModelPixels:MAX_MODEL_PIXELS,modelMemoryBytes:MODEL_MEMORY_BYTES,groupMax:readerVersion===10?CONNECTOR_MAX_GROUP_PIXELS:5,commandBytes:CONNECTOR_COMMAND_BYTES,autonomous:true},renewRequired: false} : {}),
@@ -237,9 +243,14 @@ export class ConnectorHttpChannel {
         check(!signal.aborted, 'reader poll aborted');
         return this.status(capability, readerVersion);
     }
-    batch(capability: string, values: readonly unknown[]) {
+    batch(capability: string, values: readonly unknown[], retryObservation = false) {
         const s = this.authenticate(capability);
         check(s.approved && s.epoch === this.provider.channelEpoch, 'HTTP request not approved or replaced');
+        // Additional observation retries are unavailable while any writer is armed or reserved.
+        if (retryObservation) {
+            const writer = this.writer?.view();
+            check(!writer?.locked && !writer?.armed, 'observation recovery requires an idle writer');
+        }
         check(values.length >= 1 && values.length <= 2, 'invalid observation batch');
         // Validate the entire batch before accepting anything. No partial acknowledgement.
         const observations: BrowserObservation[] = values.map((v) => parseObservation(v, this.now()));

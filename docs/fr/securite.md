@@ -113,14 +113,11 @@ elles.
 - **Aucune authentification sur l'API locale.** La protection repose sur
   l'écoute locale et sur les contrôles Host/Origin. En mode réseau
   (`HOST=0.0.0.0`), toute machine du réseau local peut piloter le serveur.
-- **`chrome-extension://*` est autorisé par défaut** pour l'extension
-  héritée de Wplacer : toute extension du navigateur peut appeler l'API.
-  L'extension sera retirée du périmètre GeoPlacer.
-- **Code de contournement anti-bot hérité** (imitation de navigateur par
-  `impit`, injections Turnstile et pawtect, proxys, extension
-  `LOAD_UNPACKED`) : toujours présent dans le dépôt, hors périmètre
-  GeoPlacer, mais **neutralisé** depuis la Phase 1B.10 (voir ci-dessus).
-  Sa suppression fera l'objet de commits séparés et justifiés.
+- **`chrome-extension://*` figure dans la configuration d’origine**
+  de l’API héritée. L’API v1 applique ses propres contrôles.
+- **Code hérité de Wplacer** : l’extension `LOAD_UNPACKED` a été retirée
+  de la branche finale. Le serveur conserve les garde-fous qui neutralisent
+  les fonctions réseau héritées depuis la Phase 1B.10.
 - **Comptes hérités déjà enregistrés** : `data/users.json` peut encore
   contenir des cookies d'une installation antérieure. Ils ne sont plus
   utilisés ; les supprimer avec l'API héritée (`DELETE /user/:id`) ou en

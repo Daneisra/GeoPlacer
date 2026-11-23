@@ -252,7 +252,9 @@
     sync.disabled = true;
     try {
       const result = await GeoPlacerPageReader.observe(
-        (o) => channel.send(o),
+        (observation, stillCurrent) => channel.send(observation, stillCurrent, () => {
+          if (current === generation) status.textContent = 'Accusé d’observation manquant : récupération du canal en cours.';
+        }),
         () => current === generation && channel.connected(),
         region,
         () => fromWatch && monitoring?.revision !== startedRevision,
