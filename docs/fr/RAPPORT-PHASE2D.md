@@ -4,7 +4,7 @@
 
 ## 1. Publication contrôlée de 2C
 
-La seule branche poussée est [feat/phase2c-connector-transport](https://github.com/Daneisra/GeoPlacer/tree/feat/phase2c-connector-transport), sur **origin = Daneisra/GeoPlacer**. SHA distant confirmé par `git ls-remote` : **ea897de4aac0a174ef038733ace29f6c20dcdad0**. Push à blanc réussi, puis `git push -u origin feat/phase2c-connector-transport`. Aucun push upstream, force push, tag, release, PR ou modification de main.
+La seule branche poussée est [feat/phase2c-connector-transport](https://github.com/Daneisra/GeoPlacer/tree/ea897de4aac0a174ef038733ace29f6c20dcdad0), sur **origin = Daneisra/GeoPlacer**. SHA distant confirmé par `git ls-remote` : **ea897de4aac0a174ef038733ace29f6c20dcdad0**. Push à blanc réussi, puis `git push -u origin feat/phase2c-connector-transport`. Aucun push upstream, force push, tag, release, PR ou modification de main.
 
 Avant publication : état Git et remotes vérifiés, fetch des deux remotes existants sans suppression, examen des sept commits 2C, licence AGPL-3.0-only et attributions conservées. Le push rend aussi accessibles leurs ancêtres encore absents d'origin : **31 commits, 162 blobs** examinés, versions intermédiaires et merge inclus, aucun motif de secret à forte confiance, configuration privée, donnée applicative ou journal de travail détecté. La clé privée de recette a été recherchée sans en afficher le contenu. Ce contrôle ne prétend pas détecter tous les secrets possibles.
 

@@ -12,7 +12,7 @@ Aucun push 2E, tag, release, retrait historique ou réécriture. GhostPixelBot-F
 
 ### Phase 2D
 
-Branche publiée : [feat/phase2d-live-observation](https://github.com/Daneisra/GeoPlacer/tree/feat/phase2d-live-observation). SHA local et distant : **`a52ebd2ce9b739fbd1c7e739e0c3be046bfc9af1`**.
+Branche publiée : [feat/phase2d-live-observation](https://github.com/Daneisra/GeoPlacer/tree/a52ebd2ce9b739fbd1c7e739e0c3be046bfc9af1). SHA local et distant : **`a52ebd2ce9b739fbd1c7e739e0c3be046bfc9af1`**.
 
 Les huit commits au-dessus de 2C ont été contrôlés : `7ac914f`, `6f778bc`, `98d1e83`, `506d4a8`, `95cba4b`, `66c1b6b`, `2758d27`, `a52ebd2`. Arbre initial propre, remotes conformes, fetch sans prune, 46 blobs supplémentaires examinés, aucun secret à forte confiance ni clé privée de recette détecté. AGPL-3.0-only et attributions conservées. Le contrôle préalable a réussi ses **892 tests**, un facultatif ignoré, puis le build. Bundle externe vérifié et restauré, push à blanc puis push normal vers origin seulement ; égalité du SHA confirmée.
 
